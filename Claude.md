@@ -45,9 +45,9 @@ The core game runs on a finite state machine (FSM) with these states:
 
 **Required SD Card File Structure and Audio Content:**
 
-### **Root Directory (`/`) - Main Game Sounds**
+### **mp3 Directory (`/mp3/`) - Main Game Sounds**
 ```
-/
+mp3/
 ├── 0001.mp3    # Invite: "Come play with the butterfly!"
 ├── 0002.mp3    # Invite: "Test your memory skills!"
 ├── 0003.mp3    # Invite: "Ready for a challenge?"
@@ -103,7 +103,7 @@ The core game runs on a finite state machine (FSM) with these states:
 
 ### **Optional Enhancements:**
 ```
-/
+mp3/
 ├── 0013.mp3    # Welcome: "Welcome to Butterfly Simon!"
 ├── 0014.mp3    # Confuser Toggle: "Confuser mode enabled"
 ├── 0015.mp3    # Confuser Toggle: "Confuser mode disabled"

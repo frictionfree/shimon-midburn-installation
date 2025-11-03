@@ -61,13 +61,13 @@ GAME_OVER → IDLE
 | LED – Red | 19 | PWM channel 0 |
 | LED – Blue | 18 | PWM channel 1 |
 | LED – Green | 5 | PWM channel 2 |
-| LED – Yellow | 17 | PWM channel 3 |
+| LED – Yellow | 4 | PWM channel 3 |
 | Button – Red | 13 | Input_PULLUP |
 | Button – Blue | 12 | Input_PULLUP |
 | Button – Green | 14 | Input_PULLUP |
 | Button – Yellow | 27 | Input_PULLUP |
-| DFPlayer TX/RX | 25 / 26 | UART2 |
-| Service LED | 2 | On-board indicator |
+| DFPlayer TX/RX | 16 / 17 | UART1 |
+| Service LED | 22 | On-board indicator |
 
 ---
 
