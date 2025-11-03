@@ -1,0 +1,892 @@
+#include <Arduino.h>
+#include "shimon.h"
+
+#ifndef USE_WOKWI
+#include <HardwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+#endif
+
+enum Color { RED=0, BLUE=1, GREEN=2, YELLOW=3 };
+
+// --- Game Data Structure ---
+struct GameState {
+  uint8_t seq[MAX_SEQUENCE_LENGTH]; // Color sequence storage
+  uint8_t level;             // Current level (sequence length)
+  uint8_t score;             // Player score
+  uint8_t strikes;           // Number of mistakes
+  unsigned long cueOnMs;     // Current LED on-time
+  unsigned long cueGapMs;    // Current gap between cues
+  unsigned long inputTimeout; // Current input timeout
+};
+
+// --- Runtime Configurable Features ---
+bool ENABLE_AUDIO_CONFUSER = true; // Can be toggled in idle mode
+
+// --- Pin Arrays (derived from configuration) ---
+uint8_t ledPins[COLOR_COUNT] = {LED_RED, LED_BLUE, LED_GREEN, LED_YELLOW};
+uint8_t btnPins[COLOR_COUNT] = {BTN_RED, BTN_BLUE, BTN_GREEN, BTN_YELLOW};
+
+// ---- Enhanced Audio System ----
+#ifdef USE_WOKWI
+// Simulation version - prints to Serial
+struct Audio {
+  void begin() {
+    Serial.println("[AUDIO] DFPlayer initialized (simulation)");
+  }
+  
+  void playInvite() { 
+    uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
+    Serial.printf("[AUDIO] Playing invite %d\n", inviteNum);
+  }
+  
+  void playInstructions() { 
+    Serial.println("[AUDIO] Playing instructions (0006.mp3)"); 
+  }
+  
+  void playMyTurn() { 
+    Serial.println("[AUDIO] My Turn!"); 
+  }
+  
+  void playYourTurn() { 
+    Serial.println("[AUDIO] Your Turn!"); 
+  }
+  
+  void playColorName(Color c) { 
+    Serial.printf("[AUDIO] Color name: %s (/01/00%d.mp3)\n", 
+                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow", c+1);
+  }
+  
+  void playCorrect() { 
+    Serial.println("[AUDIO] Correct! (0010.mp3)"); 
+  }
+  
+  void playWrong() { 
+    Serial.println("[AUDIO] Wrong (0008.mp3)"); 
+  }
+  
+  void playTimeout() { 
+    Serial.println("[AUDIO] Timeout -> Game Over (0007.mp3)"); 
+  }
+  
+  void playGameOver() { 
+    Serial.println("[AUDIO] Game Over (0009.mp3)"); 
+  }
+  
+  void playScore(uint8_t score) { 
+    Serial.printf("[AUDIO] Score: %d (/02/%03d.mp3)\n", score, score);
+  }
+} audio;
+
+#else
+// Real hardware version - uses DFPlayer Mini
+HardwareSerial dfPlayerSerial(1); // Use UART1
+DFRobotDFPlayerMini dfPlayer;
+
+struct Audio {
+  bool initialized = false;
+  
+  void begin() {
+    dfPlayerSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
+    Serial.println("Initializing DFPlayer Mini...");
+    
+    if (!dfPlayer.begin(dfPlayerSerial)) {
+      Serial.println("DFPlayer Mini initialization failed!");
+      Serial.println("Check connections and SD card");
+      return;
+    }
+    
+    Serial.println("DFPlayer Mini initialized successfully");
+    
+    // Configure DFPlayer
+    dfPlayer.volume(DFPLAYER_VOLUME);  // Set volume from config
+    dfPlayer.EQ(DFPLAYER_EQ);         // Set EQ from config
+    delay(100); // DFPlayer init delay
+    
+    initialized = true;
+  }
+  
+  bool isReady() {
+    return initialized && dfPlayer.available();
+  }
+  
+  void playInvite() {
+    if (!initialized) return;
+    uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
+    dfPlayer.play(inviteNum);
+    Serial.printf("Playing invite %d\n", inviteNum);
+  }
+  
+  void playInstructions() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_INSTRUCTIONS);
+    Serial.println("Playing instructions");
+  }
+  
+  void playMyTurn() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_MY_TURN);
+    Serial.println("Playing My Turn");
+  }
+  
+  void playYourTurn() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_YOUR_TURN);
+    Serial.println("Playing Your Turn");
+  }
+  
+  void playColorName(Color c) {
+    if (!initialized) return;
+    // Play from folder 01, files 001-004.mp3
+    dfPlayer.playFolder(1, c + 1);
+    Serial.printf("Playing color %s from folder 01\n", 
+                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow");
+  }
+  
+  void playCorrect() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_CORRECT);
+    Serial.println("Playing correct sound");
+  }
+  
+  void playWrong() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_WRONG);
+    Serial.println("Playing wrong sound");
+  }
+  
+  void playTimeout() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_TIMEOUT);
+    Serial.println("Playing timeout sound");
+  }
+  
+  void playGameOver() {
+    if (!initialized) return;
+    dfPlayer.play(AUDIO_GAME_OVER);
+    Serial.println("Playing game over sound");
+  }
+  
+  void playScore(uint8_t score) {
+    if (!initialized) return;
+    if (score <= 100) {
+      // Play from folder 02, files 000-100.mp3
+      dfPlayer.playFolder(2, score);
+      Serial.printf("Playing score %d from folder 02\n", score);
+    }
+  }
+  
+  // Check DFPlayer status and handle errors
+  void handleStatus() {
+    if (!initialized) return;
+    
+    if (dfPlayer.available()) {
+      uint8_t type = dfPlayer.readType();
+      int value = dfPlayer.read();
+      
+      switch (type) {
+        case DFPlayerPlayFinished:
+          Serial.printf("Audio finished: track %d\n", value);
+          break;
+        case DFPlayerError:
+          Serial.printf("DFPlayer error: %d\n", value);
+          break;
+        case DFPlayerCardInserted:
+          Serial.println("SD card inserted");
+          break;
+        case DFPlayerCardRemoved:
+          Serial.println("SD card removed");
+          break;
+      }
+    }
+  }
+} audio;
+#endif
+
+// ---- Game State Machine ----
+enum GameFSM { 
+  IDLE,                 // Waiting for player, periodic invites
+  INSTRUCTIONS,         // Playing instructions
+  AWAIT_START,          // Waiting for start button
+  SEQ_DISPLAY_INIT,     // Initialize sequence display
+  SEQ_DISPLAY_MYTURN,   // Playing "My Turn" audio
+  SEQ_DISPLAY,          // Showing LED sequence with audio
+  SEQ_DISPLAY_YOURTURN, // Playing "Your Turn" audio  
+  SEQ_INPUT,            // Waiting for player input
+  CORRECT_FEEDBACK,     // Playing correct sound
+  WRONG_FEEDBACK,       // Playing wrong sound
+  TIMEOUT_FEEDBACK,     // Playing timeout sound
+  GAME_OVER,            // Game over state
+  SCORE_DISPLAY         // Optional score announcement
+};
+
+// ---- Ambient Visual Effects ----
+enum AmbientEffect {
+  BREATHING,            // Gentle breathing effect
+  SLOW_CHASE,          // Slow color chase
+  TWINKLE,             // Random twinkling
+  PULSE_WAVE           // Wave pulse effect
+};
+
+GameFSM gameState = IDLE;
+GameState game;
+uint8_t currentStep = 0;           // Current step in sequence display/input
+unsigned long stateTimer = 0;      // Timer for current state
+unsigned long lastInvite = 0;      // Last invite time
+unsigned long nextInviteDelay = 0; // Next invite delay
+bool ledOn = false;                // Current LED state during display
+Color lastButtonPressed = RED;     // Track button presses
+
+// Button debouncing
+bool buttonStates[4] = {false, false, false, false};
+bool lastButtonStates[4] = {true, true, true, true};
+unsigned long buttonDebounceTime[4] = {0, 0, 0, 0};
+
+// Ambient effects state
+AmbientEffect currentAmbientEffect = BREATHING;
+unsigned long ambientTimer = 0;
+unsigned long effectChangeTimer = 0;
+uint8_t ambientStep = 0;
+
+// ---- Utility Functions ----
+static inline void setLed(Color c, bool on) { 
+  // Inverted logic for current-sinking LEDs: LOW = ON, HIGH = OFF
+  digitalWrite(ledPins[c], on ? LOW : HIGH);
+  // Debug output for LED state changes
+  Serial.printf("LED %s (pin %d) -> %s\n", 
+                c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
+                ledPins[c], on ? "ON" : "OFF");
+}
+
+static inline bool pressed(Color c) { 
+  return digitalRead(btnPins[c]) == LOW; 
+}
+
+void initializeGame() {
+  game.level = 1;
+  game.score = 0;
+  game.strikes = 0;
+  game.cueOnMs = CUE_ON_MS_DEFAULT;
+  game.cueGapMs = CUE_GAP_MS_DEFAULT;
+  game.inputTimeout = INPUT_TIMEOUT_MS_DEFAULT;
+  
+  // Initialize first sequence element
+  game.seq[0] = random(0, COLOR_COUNT);
+  
+  Serial.printf("Game initialized: Level %d, First color: %d\n", game.level, game.seq[0]);
+}
+
+Color generateNextColor() {
+  // Avoid too many consecutive same colors
+  if (game.level > MAX_SAME_COLOR) {
+    uint8_t sameCount = 1;
+    Color lastColor = (Color)game.seq[game.level - 1];
+    
+    // Count consecutive occurrences from the end
+    for (int i = game.level - 2; i >= 0 && sameCount < MAX_SAME_COLOR; i--) {
+      if (game.seq[i] == lastColor) {
+        sameCount++;
+      } else {
+        break;
+      }
+    }
+    
+    // If we have too many of the same, avoid it
+    if (sameCount >= MAX_SAME_COLOR) {
+      Color newColor;
+      do {
+        newColor = (Color)random(0, COLOR_COUNT);
+      } while (newColor == lastColor);
+      return newColor;
+    }
+  }
+  
+  return (Color)random(0, COLOR_COUNT);
+}
+
+Color generateConfuserColor(Color ledColor) {
+  if (!ENABLE_AUDIO_CONFUSER || !CONFUSER_MUST_DIFFER) {
+    return ledColor; // No confuser or same color allowed
+  }
+  
+  // Generate different color for confuser
+  Color voiceColor;
+  do {
+    voiceColor = (Color)random(0, COLOR_COUNT);
+  } while (voiceColor == ledColor);
+  
+  return voiceColor;
+}
+
+void extendSequence() {
+  if (game.level < MAX_SEQUENCE_LENGTH) {
+    game.seq[game.level] = generateNextColor();
+    game.level++;
+    
+    // Increase difficulty
+    game.cueOnMs = max(CUE_ON_MS_MIN, (unsigned long)(game.cueOnMs * SPEED_STEP));
+    game.cueGapMs = max(CUE_GAP_MS_MIN, (unsigned long)(game.cueGapMs * SPEED_STEP));
+    
+    Serial.printf("Sequence extended to level %d, speeds: cue=%lu gap=%lu\n", 
+                  game.level, game.cueOnMs, game.cueGapMs);
+  }
+}
+
+// ---- Button Input Handling ----
+void updateButtonStates() {
+  unsigned long now = millis();
+  
+  for (int i = 0; i < COLOR_COUNT; i++) {
+    bool rawState = pressed((Color)i);
+    
+    // Debouncing: only update if stable for debounce time
+    if (rawState != lastButtonStates[i]) {
+      buttonDebounceTime[i] = now;
+    } else if (now - buttonDebounceTime[i] > BUTTON_DEBOUNCE_MS) {
+      buttonStates[i] = rawState;
+    }
+    
+    lastButtonStates[i] = rawState;
+  }
+}
+
+bool getButtonPress(Color c) {
+  // Returns true only on the first frame of a button press (edge detection)
+  static bool lastProcessedStates[4] = {false, false, false, false};
+  bool pressed = buttonStates[c] && !lastProcessedStates[c];
+  lastProcessedStates[c] = buttonStates[c];
+  return pressed;
+}
+
+bool anyButtonPressed() {
+  for (int i = 0; i < COLOR_COUNT; i++) {
+    if (getButtonPress((Color)i)) {
+      lastButtonPressed = (Color)i;
+      return true;
+    }
+  }
+  return false;
+}
+
+void scheduleNextInvite() {
+  // For testing: first invite sooner, then normal intervals
+  static bool firstInvite = true;
+  if (firstInvite) {
+    nextInviteDelay = FIRST_INVITE_DELAY_SEC * 1000; // First invite delay from config
+    firstInvite = false;
+    Serial.printf("First invite scheduled in %d seconds\n", FIRST_INVITE_DELAY_SEC);
+  } else {
+    nextInviteDelay = random(INVITE_INTERVAL_MIN_SEC * 1000, (INVITE_INTERVAL_MAX_SEC + 1) * 1000);
+    Serial.printf("Next invite scheduled in %lu seconds\n", nextInviteDelay / 1000);
+  }
+  lastInvite = millis();
+}
+
+// ---- Visual LED Effects ----
+void bootSequence() {
+  Serial.println("Playing boot LED sequence...");
+  
+  // Rainbow wave effect
+  for (int wave = 0; wave < 3; wave++) {
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      setLed((Color)i, true);
+      delay(BOOT_WAVE_DELAY_MS);
+      setLed((Color)i, false);
+    }
+  }
+  
+  // All flash together
+  for (int flash = 0; flash < 4; flash++) {
+    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
+    delay(BOOT_FLASH_DELAY_MS);
+    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+    delay(BOOT_FLASH_DELAY_MS);
+  }
+  
+  Serial.println("Boot sequence complete!");
+}
+
+void inviteSequence() {
+  Serial.println("Playing invite LED sequence...");
+  
+  // Quick attention-grabbing sequence
+  // Double flash all colors
+  for (int flash = 0; flash < 2; flash++) {
+    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
+    delay(INVITE_FLASH_DELAY_MS);
+    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+    delay(INVITE_FLASH_DELAY_MS);
+  }
+  
+  // Spinning pattern
+  for (int spin = 0; spin < 8; spin++) {
+    setLed((Color)(spin % COLOR_COUNT), true);
+    delay(INVITE_SPIN_DELAY_MS);
+    setLed((Color)(spin % COLOR_COUNT), false);
+  }
+  
+  // Final all flash
+  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
+  delay(300); // Final invite flash
+  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+}
+
+void instructionsSequence() {
+  Serial.println("Playing instructions LED sequence...");
+  
+  // Alternating pairs
+  for (int i = 0; i < 6; i++) {
+    if (i % 2 == 0) {
+      setLed(RED, true);
+      setLed(GREEN, true);
+      setLed(BLUE, false);
+      setLed(YELLOW, false);
+    } else {
+      setLed(RED, false);
+      setLed(GREEN, false);
+      setLed(BLUE, true);
+      setLed(YELLOW, true);
+    }
+    delay(INSTRUCTIONS_PATTERN_DELAY_MS);
+  }
+  
+  // Turn off all
+  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+}
+
+void readyToStartEffect(unsigned long now) {
+  // Gentle pulsing of all LEDs to indicate "ready to start"
+  static unsigned long readyTimer = 0;
+  static uint8_t readyStep = 0;
+  
+  if (now - readyTimer > READY_PULSE_INTERVAL_MS) { // Update from config
+    // Gentle pulse - not as slow as breathing, faster than idle
+    float pulse = (sin(readyStep * 0.3) + 1.0) * 0.5; // 0 to 1
+    bool ledState = pulse > 0.4; // Higher threshold for cleaner on/off
+    
+    // All LEDs pulse together in a warm, inviting way
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      setLed((Color)i, ledState);
+    }
+    
+    readyStep++;
+    if (readyStep >= 42) readyStep = 0; // Shorter cycle than breathing
+    readyTimer = now;
+  }
+}
+
+void gameStartSequence() {
+  Serial.println("Game starting visual confirmation!");
+  
+  // Quick burst effect to show game is starting
+  for (int burst = 0; burst < 3; burst++) {
+    // All on
+    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
+    delay(START_BURST_DELAY_MS);
+    // All off
+    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+    delay(START_BURST_DELAY_MS);
+  }
+  
+  // Final bright flash
+  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
+  delay(200); // Final game start flash
+  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+}
+
+// ---- Ambient Effects for Idle State ----
+void updateAmbientEffects(unsigned long now) {
+  // Change effect every configured duration
+  if (now - effectChangeTimer > (AMBIENT_EFFECT_DURATION_SEC * 1000)) {
+    currentAmbientEffect = (AmbientEffect)((currentAmbientEffect + 1) % AMBIENT_EFFECT_COUNT);
+    effectChangeTimer = now;
+    ambientStep = 0;
+    ambientTimer = now;
+    Serial.printf("Switching to ambient effect: %d\n", currentAmbientEffect);
+  }
+  
+  switch (currentAmbientEffect) {
+    case BREATHING: {
+      // Gentle breathing effect - all LEDs slowly pulse together
+      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[BREATHING]) {
+        float breath = (sin(ambientStep * 0.2) + 1.0) * 0.5; // 0 to 1
+        bool ledState = breath > 0.3; // Threshold for on/off
+        
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, ledState);
+        }
+        
+        ambientStep++;
+        if (ambientStep >= 63) ambientStep = 0; // Full cycle
+        ambientTimer = now;
+      }
+      break;
+    }
+    
+    case SLOW_CHASE: {
+      // Slow color chase around the ring
+      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[SLOW_CHASE]) {
+        // Turn off all
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        
+        // Light up current LED
+        setLed((Color)(ambientStep % COLOR_COUNT), true);
+        
+        ambientStep++;
+        ambientTimer = now;
+      }
+      break;
+    }
+    
+    case TWINKLE: {
+      // Random twinkling effect
+      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[TWINKLE]) {
+        // Turn off all first
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        
+        // Light up 1-2 random LEDs
+        int numLeds = random(1, 3);
+        for (int i = 0; i < numLeds; i++) {
+          Color randomColor = (Color)random(0, COLOR_COUNT);
+          setLed(randomColor, true);
+        }
+        
+        ambientTimer = now;
+      }
+      break;
+    }
+    
+    case PULSE_WAVE: {
+      // Wave pulse effect
+      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[PULSE_WAVE]) {
+        // Turn off all
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        
+        // Create wave pattern
+        int wave1 = ambientStep % 8;
+        int wave2 = (ambientStep + 4) % 8;
+        
+        if (wave1 < COLOR_COUNT) setLed((Color)wave1, true);
+        if (wave2 < COLOR_COUNT) setLed((Color)wave2, true);
+        
+        ambientStep++;
+        ambientTimer = now;
+      }
+      break;
+    }
+  }
+}
+
+
+void setup() {
+  // Initialize serial with explicit configuration for Wokwi
+  Serial.begin(115200);
+  while(!Serial && millis() < 3000) { delay(10); } // Wait for serial or timeout
+  
+  Serial.println();  // Send a newline to clear buffer
+  Serial.println("=== SHIMON DEBUG: Serial Started ===");
+  Serial.flush();
+  
+  // Verify serial is working with a visible countdown
+  for(int i = 5; i > 0; i--) {
+    Serial.printf("Boot countdown: %d\n", i);
+    Serial.flush();
+    delay(1000);
+  }
+  Serial.println("Serial test complete!");
+  pinMode(LED_SERVICE, OUTPUT);
+  Serial.println("Setting up pins...");
+  for (auto p: ledPins) pinMode(p, OUTPUT);
+  for (auto p: btnPins) pinMode(p, INPUT_PULLUP);
+  
+  // LED test - flash each LED to verify they work
+  Serial.println("Testing LEDs...");
+  for (int i = 0; i < COLOR_COUNT; i++) {
+    setLed((Color)i, true);
+    delay(500);
+    setLed((Color)i, false);
+    delay(200);
+  }
+  Serial.println("LED test complete!");
+  Serial.println("Initializing audio...");
+  audio.begin();
+  Serial.println("Setting random seed...");
+  randomSeed(esp_random());
+  
+  Serial.println("Shimon Game Ready - Butterfly Simon Says!");
+  
+  // Play boot sequence
+  Serial.println("Starting boot sequence...");
+  bootSequence();
+  
+  // Initialize game state
+  scheduleNextInvite();
+  
+  // Initialize ambient effects
+  unsigned long now = millis();
+  ambientTimer = now;
+  effectChangeTimer = now;
+  
+  Serial.println("Press any button to start, or wait for invite...");
+}
+
+void loop() {
+  static unsigned long lastLoopDebug = 0;
+  
+  digitalWrite(LED_SERVICE, (millis() >> 9) & 1); // Heartbeat LED
+  updateButtonStates(); // Handle button debouncing
+  
+#ifndef USE_WOKWI
+  audio.handleStatus(); // Handle DFPlayer status/errors for real hardware
+#endif
+  
+  unsigned long now = millis();
+  
+  // Debug: Print loop counter every 10 seconds
+  if (now - lastLoopDebug > 10000) {
+    Serial.printf("=== LOOP DEBUG: Running at %lu ms, State: %d ===\n", now, gameState);
+    lastLoopDebug = now;
+  }
+  
+  switch (gameState) {
+    case IDLE: {
+      // Run ambient effects continuously
+      updateAmbientEffects(now);
+      
+      // Debug invite timing
+      static unsigned long lastDebug = 0;
+      if (now - lastDebug > DEBUG_INTERVAL_MS) {
+        unsigned long remaining = nextInviteDelay - (now - lastInvite);
+        Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n", 
+                      remaining / 1000, currentAmbientEffect);
+        lastDebug = now;
+      }
+      
+      // Check for invite timing
+      if (now - lastInvite >= nextInviteDelay) {
+        audio.playInvite();
+        inviteSequence(); // Visual invite!
+        scheduleNextInvite();
+        
+        // Reset ambient effects after invite
+        ambientTimer = now;
+      }
+      
+      // Check for any button press to start
+      if (anyButtonPressed()) {
+        // Special handling: if YELLOW button pressed in idle, toggle confuser mode
+        if (lastButtonPressed == YELLOW) {
+          ENABLE_AUDIO_CONFUSER = !ENABLE_AUDIO_CONFUSER;
+          Serial.printf("Audio Confuser %s\n", ENABLE_AUDIO_CONFUSER ? "ENABLED" : "DISABLED");
+          // Flash yellow LED to confirm
+          for (int i = 0; i < 6; i++) {
+            setLed(YELLOW, i % 2);
+            delay(BUTTON_GUARD_MS * 3); // 3x guard time for visual feedback
+          }
+          break;
+        }
+        
+        // Clear ambient effects
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        
+        audio.playInstructions();
+        instructionsSequence(); // Visual instructions!
+        stateTimer = now;
+        gameState = INSTRUCTIONS;
+        Serial.println("Instructions playing...");
+      }
+      break;
+    }
+    
+    case INSTRUCTIONS: {
+      if (now - stateTimer > INSTRUCTIONS_DURATION_MS) { // Instructions duration
+        gameState = AWAIT_START;
+        Serial.println("Press any button to start game...");
+      }
+      break;
+    }
+    
+    case AWAIT_START: {
+      // Show "ready to start" pulsing effect
+      readyToStartEffect(now);
+      
+      if (anyButtonPressed()) {
+        // Clear ready effect and show game start confirmation
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        gameStartSequence();
+        
+        initializeGame();
+        gameState = SEQ_DISPLAY_INIT;
+        Serial.println("Game starting!");
+      }
+      break;
+    }
+    
+    case SEQ_DISPLAY_INIT: {
+      currentStep = 0;
+      ledOn = false;
+      // Turn off all LEDs
+      for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+      
+      audio.playMyTurn();
+      stateTimer = now;
+      gameState = SEQ_DISPLAY_MYTURN;
+      Serial.printf("Displaying sequence level %d\n", game.level);
+      break;
+    }
+    
+    case SEQ_DISPLAY_MYTURN: {
+      if (now - stateTimer > MY_TURN_DURATION_MS) { // "My Turn" duration
+        stateTimer = now;
+        gameState = SEQ_DISPLAY;
+      }
+      break;
+    }
+    
+    case SEQ_DISPLAY: {
+      if (!ledOn) {
+        // Turn on LED for current step
+        Color ledColor = (Color)game.seq[currentStep];
+        setLed(ledColor, true);
+        
+        // Play color with potential confuser
+        Color voiceColor = generateConfuserColor(ledColor);
+        audio.playColorName(voiceColor);
+        
+        Serial.printf("Step %d: LED=%d, Voice=%d%s\n", 
+                      currentStep, ledColor, voiceColor,
+                      (ledColor != voiceColor) ? " (CONFUSER!)" : "");
+        
+        stateTimer = now;
+        ledOn = true;
+      } else if (now - stateTimer > game.cueOnMs) {
+        // Turn off LED
+        setLed((Color)game.seq[currentStep], false);
+        
+        if (now - stateTimer > game.cueOnMs + game.cueGapMs) {
+          currentStep++;
+          if (currentStep >= game.level) {
+            // Sequence complete
+            audio.playYourTurn();
+            stateTimer = now;
+            currentStep = 0;
+            gameState = SEQ_DISPLAY_YOURTURN;
+          } else {
+            ledOn = false; // Next step
+          }
+        }
+      }
+      break;
+    }
+    
+    case SEQ_DISPLAY_YOURTURN: {
+      if (now - stateTimer > YOUR_TURN_DURATION_MS) { // "Your Turn" duration
+        stateTimer = now;
+        gameState = SEQ_INPUT;
+        Serial.printf("Waiting for player input (timeout: %lu ms)\n", game.inputTimeout);
+      }
+      break;
+    }
+    
+    case SEQ_INPUT: {
+      // Check for timeout
+      if (now - stateTimer > game.inputTimeout) {
+        audio.playTimeout();
+        stateTimer = now;
+        gameState = TIMEOUT_FEEDBACK;
+        Serial.println("Input timeout!");
+        break;
+      }
+      
+      // Check for button press
+      if (anyButtonPressed()) {
+        Color expectedColor = (Color)game.seq[currentStep];
+        
+        if (lastButtonPressed == expectedColor) {
+          // Correct!
+          setLed(lastButtonPressed, true); // Brief LED feedback
+          currentStep++;
+          
+          if (currentStep >= game.level) {
+            // Level complete!
+            audio.playCorrect();
+            game.score += game.level; // Score based on level
+            stateTimer = now;
+            gameState = CORRECT_FEEDBACK;
+            Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
+          } else {
+            // Continue with next input
+            stateTimer = now; // Reset timeout
+            delay(BUTTON_GUARD_MS); // Brief pause between inputs
+            setLed(lastButtonPressed, false);
+          }
+        } else {
+          // Wrong!
+          audio.playWrong();
+          stateTimer = now;
+          gameState = WRONG_FEEDBACK;
+          Serial.printf("Wrong! Expected %d, got %d\n", expectedColor, lastButtonPressed);
+        }
+      }
+      break;
+    }
+    
+    case CORRECT_FEEDBACK: {
+      if (now - stateTimer > FEEDBACK_DURATION_MS) {
+        // Turn off feedback LED
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        
+        // Extend sequence and continue
+        extendSequence();
+        gameState = SEQ_DISPLAY_INIT;
+      }
+      break;
+    }
+    
+    case WRONG_FEEDBACK: {
+      if (now - stateTimer > FEEDBACK_DURATION_MS) {
+        audio.playGameOver();
+        stateTimer = now;
+        gameState = GAME_OVER;
+      }
+      break;
+    }
+    
+    case TIMEOUT_FEEDBACK: {
+      if (now - stateTimer > FEEDBACK_DURATION_MS) {
+        audio.playGameOver();
+        stateTimer = now;
+        gameState = GAME_OVER;
+      }
+      break;
+    }
+    
+    case GAME_OVER: {
+      if (now - stateTimer > GAME_OVER_DURATION_MS) {
+        if (game.score > 0) {
+          audio.playScore(game.score);
+          stateTimer = now;
+          gameState = SCORE_DISPLAY;
+        } else {
+          // No score to announce, back to idle
+          scheduleNextInvite();
+          ambientTimer = now;
+          effectChangeTimer = now;
+          gameState = IDLE;
+          Serial.println("Back to idle mode");
+        }
+      }
+      break;
+    }
+    
+    case SCORE_DISPLAY: {
+      if (now - stateTimer > SCORE_DISPLAY_DURATION_MS) {
+        scheduleNextInvite();
+        ambientTimer = now;
+        effectChangeTimer = now;
+        gameState = IDLE;
+        Serial.printf("Game over! Final score: %d - Back to idle\n", game.score);
+      }
+      break;
+    }
+  }
+}

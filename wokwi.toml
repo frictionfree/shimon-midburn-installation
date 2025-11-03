@@ -1,0 +1,8 @@
+[wokwi]
+version = 1
+firmware = ".pio/build/sim/firmware.bin"
+elf = ".pio/build/sim/firmware.elf"
+
+# Serial monitor configuration for Wokwi web simulator
+[wokwi.serial]
+monitor = true
