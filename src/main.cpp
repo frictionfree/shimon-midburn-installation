@@ -249,12 +249,12 @@ uint8_t ambientStep = 0;
 
 // ---- Utility Functions ----
 static inline void setLed(Color c, bool on) { 
-  // Inverted logic for current-sinking LEDs: LOW = ON, HIGH = OFF
-  digitalWrite(ledPins[c], on ? LOW : HIGH);
+  // Normal logic for current-sourcing LEDs: HIGH = ON, LOW = OFF
+  digitalWrite(ledPins[c], on ? HIGH : LOW);
   // Debug output for LED state changes
-  Serial.printf("LED %s (pin %d) -> %s\n", 
-                c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
-                ledPins[c], on ? "ON" : "OFF");
+  //Serial.printf("LED %s (pin %d) -> %s\n", 
+  //              c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
+  //              ledPins[c], on ? "ON" : "OFF");
 }
 
 static inline bool pressed(Color c) { 
@@ -491,6 +491,7 @@ void gameStartSequence() {
   for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
   delay(200); // Final game start flash
   for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+  Serial.println("Game start sequence complete - all LEDs should be OFF");
 }
 
 // ---- Ambient Effects for Idle State ----
