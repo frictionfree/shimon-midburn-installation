@@ -49,8 +49,9 @@ GAME_OVER → IDLE
 - Confuser mode (`ENABLE_AUDIO_CONFUSER`) mismatches spoken vs. shown colors.
 - Adjustable timing: `CUE_ON_MS`, `CUE_GAP_MS`, `INPUT_TIMEOUT_MS`.
 - PWM-driven LED channels (4 × 4 kHz).
-- UART2 connection to DFPlayer (`TX = 25`, `RX = 26`).
-- Debounced button inputs with internal pull-ups (`GPIO 12 – 14 – 27 – 13`).
+- UART1 connection to DFPlayer (`TX = 17`, `RX = 16`).
+- Debounced button inputs with internal pull-ups (`GPIO 13 – 21 – 14 – 33`).
+- Illuminated arcade buttons with LED feedback on separate pins.
 
 ---
 
@@ -59,13 +60,17 @@ GAME_OVER → IDLE
 | Function | GPIO | Notes |
 |-----------|------|-------|
 | LED – Red | 19 | PWM channel 0 |
-| LED – Blue | 18 | PWM channel 1 |
-| LED – Green | 5 | PWM channel 2 |
-| LED – Yellow | 4 | PWM channel 3 |
-| Button – Red | 13 | Input_PULLUP |
-| Button – Blue | 12 | Input_PULLUP |
-| Button – Green | 14 | Input_PULLUP |
-| Button – Yellow | 27 | Input_PULLUP |
+| LED – Blue | 25 | PWM channel 1 |
+| LED – Green | 18 | PWM channel 2 |
+| LED – Yellow | 26 | PWM channel 3 |
+| Button – Red (Input) | 13 | Input_PULLUP |
+| Button – Blue (Input) | 21 | Input_PULLUP |
+| Button – Green (Input) | 14 | Input_PULLUP |
+| Button – Yellow (Input) | 33 | Input_PULLUP |
+| Button – Red (LED) | 23 | Button feedback LED |
+| Button – Blue (LED) | 22 | Button feedback LED |
+| Button – Green (LED) | 32 | Button feedback LED |
+| Button – Yellow (LED) | 27 | Button feedback LED |
 | DFPlayer TX/RX | 16 / 17 | UART1 |
 | Service LED | 22 | On-board indicator |
 

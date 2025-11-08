@@ -301,7 +301,7 @@ Service: D2 (heartbeat LED)
 - `CUE_ON_MS_DEFAULT`: 450ms (min: 250ms) - LED on-time
 - `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues  
 - `INPUT_TIMEOUT_MS_DEFAULT`: 3000ms (min: 1800ms) - Player response limit
-- `SPEED_STEP`: 0.95 - Acceleration factor per level
+- `SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels for gradual difficulty progression
 - `INVITE_INTERVAL`: 20-45 seconds (first invite: 5 seconds)
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
 - `ENABLE_AUDIO_CONFUSER`: Toggle with YELLOW button in idle
