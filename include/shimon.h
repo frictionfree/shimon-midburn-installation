@@ -10,17 +10,23 @@
 
 // --- Hardware Pin Configuration ---
 // Modify these pins to match your wiring setup
-constexpr uint8_t BTN_RED    = 13;  // Red button pin (GPIO13)
-constexpr uint8_t BTN_BLUE   = 12;  // Blue button pin (GPIO12)  
-constexpr uint8_t BTN_GREEN  = 14;  // Green button pin (GPIO14)
-constexpr uint8_t BTN_YELLOW = 27;  // Yellow button pin (GPIO27)
+constexpr uint8_t BTN_RED    = 13;  // Red button input pin (GPIO13)
+constexpr uint8_t BTN_BLUE   = 21;  // Blue button input pin (GPIO21)  
+constexpr uint8_t BTN_GREEN  = 14;  // Green button input pin (GPIO14)
+constexpr uint8_t BTN_YELLOW = 33;  // Yellow button input pin (GPIO33)
+
+// Button LED pins for illuminated arcade buttons
+constexpr uint8_t BTN_LED_RED    = 23;  // Red button LED pin (GPIO23)
+constexpr uint8_t BTN_LED_BLUE   = 22;  // Blue button LED pin (GPIO22)
+constexpr uint8_t BTN_LED_GREEN  = 32;  // Green button LED pin (GPIO32)
+constexpr uint8_t BTN_LED_YELLOW = 27;  // Yellow button LED pin (GPIO27)
 
 constexpr uint8_t LED_RED    = 19;  // Red LED pin (GPIO19)
-constexpr uint8_t LED_BLUE   = 18;  // Blue LED pin (GPIO18)
-constexpr uint8_t LED_GREEN  = 5;   // Green LED pin (GPIO5)
-constexpr uint8_t LED_YELLOW = 4;   // Yellow LED pin (GPIO4)
+constexpr uint8_t LED_BLUE   = 25;  // Blue LED pin (GPIO25)
+constexpr uint8_t LED_GREEN  = 18;  // Green LED pin (GPIO18)
+constexpr uint8_t LED_YELLOW = 26;  // Yellow LED pin (GPIO26)
 
-constexpr uint8_t LED_SERVICE = 22; // Service/heartbeat LED pin
+constexpr uint8_t LED_SERVICE = 2;  // Service/heartbeat LED pin (onboard LED)
 
 #ifndef USE_WOKWI
 // DFPlayer Mini pins (for real hardware only)

@@ -25,6 +25,7 @@ bool ENABLE_AUDIO_CONFUSER = true; // Can be toggled in idle mode
 // --- Pin Arrays (derived from configuration) ---
 uint8_t ledPins[COLOR_COUNT] = {LED_RED, LED_BLUE, LED_GREEN, LED_YELLOW};
 uint8_t btnPins[COLOR_COUNT] = {BTN_RED, BTN_BLUE, BTN_GREEN, BTN_YELLOW};
+uint8_t btnLedPins[COLOR_COUNT] = {BTN_LED_RED, BTN_LED_BLUE, BTN_LED_GREEN, BTN_LED_YELLOW};
 
 // ---- Enhanced Audio System ----
 #ifdef USE_WOKWI
@@ -255,6 +256,14 @@ static inline void setLed(Color c, bool on) {
   //Serial.printf("LED %s (pin %d) -> %s\n", 
   //              c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
   //              ledPins[c], on ? "ON" : "OFF");
+}
+
+static inline void setBtnLed(Color c, bool on) {
+  // Control illuminated button LEDs: HIGH = ON, LOW = OFF
+  digitalWrite(btnLedPins[c], on ? HIGH : LOW);
+  Serial.printf("Button LED %s (pin %d) -> %s\n", 
+                c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
+                btnLedPins[c], on ? "ON" : "OFF");
 }
 
 static inline bool pressed(Color c) { 
@@ -598,16 +607,27 @@ void setup() {
   Serial.println("Setting up pins...");
   for (auto p: ledPins) pinMode(p, OUTPUT);
   for (auto p: btnPins) pinMode(p, INPUT_PULLUP);
+  for (auto p: btnLedPins) pinMode(p, OUTPUT);
   
   // LED test - flash each LED to verify they work
-  Serial.println("Testing LEDs...");
+  Serial.println("Testing wing LEDs...");
   for (int i = 0; i < COLOR_COUNT; i++) {
     setLed((Color)i, true);
     delay(500);
     setLed((Color)i, false);
     delay(200);
   }
-  Serial.println("LED test complete!");
+  Serial.println("Wing LED test complete!");
+  
+  // Button LED test
+  Serial.println("Testing button LEDs...");
+  for (int i = 0; i < COLOR_COUNT; i++) {
+    setBtnLed((Color)i, true);
+    delay(500);
+    setBtnLed((Color)i, false);
+    delay(200);
+  }
+  Serial.println("Button LED test complete!");
   Serial.println("Initializing audio...");
   audio.begin();
   Serial.println("Setting random seed...");
@@ -804,7 +824,8 @@ void loop() {
         
         if (lastButtonPressed == expectedColor) {
           // Correct!
-          setLed(lastButtonPressed, true); // Brief LED feedback
+          setLed(lastButtonPressed, true); // Brief wing LED feedback
+          setBtnLed(lastButtonPressed, true); // Brief button LED feedback
           currentStep++;
           
           if (currentStep >= game.level) {
@@ -819,9 +840,11 @@ void loop() {
             stateTimer = now; // Reset timeout
             delay(BUTTON_GUARD_MS); // Brief pause between inputs
             setLed(lastButtonPressed, false);
+            setBtnLed(lastButtonPressed, false);
           }
         } else {
           // Wrong!
+          setBtnLed(lastButtonPressed, true); // Brief button LED feedback for wrong press
           audio.playWrong();
           stateTimer = now;
           gameState = WRONG_FEEDBACK;
@@ -833,8 +856,11 @@ void loop() {
     
     case CORRECT_FEEDBACK: {
       if (now - stateTimer > FEEDBACK_DURATION_MS) {
-        // Turn off feedback LED
-        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        // Turn off feedback LEDs
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, false);
+          setBtnLed((Color)i, false);
+        }
         
         // Extend sequence and continue
         extendSequence();
@@ -845,6 +871,10 @@ void loop() {
     
     case WRONG_FEEDBACK: {
       if (now - stateTimer > FEEDBACK_DURATION_MS) {
+        // Clear wrong button LED feedback
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setBtnLed((Color)i, false);
+        }
         audio.playGameOver();
         stateTimer = now;
         gameState = GAME_OVER;
