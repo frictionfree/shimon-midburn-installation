@@ -48,7 +48,7 @@ constexpr unsigned long INPUT_TIMEOUT_MS_DEFAULT = 3000;  // Time limit for play
 constexpr unsigned long INPUT_TIMEOUT_MS_MIN = 1800;      // Minimum timeout at high levels
 
 // Difficulty Progression
-constexpr float SPEED_STEP = 0.95f;              // Speed multiplier per level (0.8-0.98 recommended)
+constexpr float SPEED_STEP = 0.97f;              // Speed multiplier per level (0.8-0.98 recommended) - slower progression
 constexpr uint8_t MAX_SEQUENCE_LENGTH = 64;      // Maximum sequence length
 constexpr uint8_t MAX_SAME_COLOR = 2;            // Max consecutive identical colors in sequence
 

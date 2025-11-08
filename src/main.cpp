@@ -331,12 +331,16 @@ void extendSequence() {
     game.seq[game.level] = generateNextColor();
     game.level++;
     
-    // Increase difficulty
-    game.cueOnMs = max(CUE_ON_MS_MIN, (unsigned long)(game.cueOnMs * SPEED_STEP));
-    game.cueGapMs = max(CUE_GAP_MS_MIN, (unsigned long)(game.cueGapMs * SPEED_STEP));
-    
-    Serial.printf("Sequence extended to level %d, speeds: cue=%lu gap=%lu\n", 
-                  game.level, game.cueOnMs, game.cueGapMs);
+    // Increase difficulty only every 3 levels for more gradual progression
+    if (game.level % 3 == 0) {
+      game.cueOnMs = max(CUE_ON_MS_MIN, (unsigned long)(game.cueOnMs * SPEED_STEP));
+      game.cueGapMs = max(CUE_GAP_MS_MIN, (unsigned long)(game.cueGapMs * SPEED_STEP));
+      Serial.printf("Sequence extended to level %d, speeds INCREASED: cue=%lu gap=%lu\n", 
+                    game.level, game.cueOnMs, game.cueGapMs);
+    } else {
+      Serial.printf("Sequence extended to level %d, speeds unchanged: cue=%lu gap=%lu\n", 
+                    game.level, game.cueOnMs, game.cueGapMs);
+    }
   }
 }
 
@@ -358,18 +362,33 @@ void updateButtonStates() {
   }
 }
 
-bool getButtonPress(Color c) {
+bool getButtonPress(Color c, bool reset = false) {
   // Returns true only on the first frame of a button press (edge detection)
   static bool lastProcessedStates[4] = {false, false, false, false};
+  
+  if (reset) {
+    // Reset all edge detection states
+    for (int i = 0; i < 4; i++) {
+      lastProcessedStates[i] = false;
+    }
+    return false;
+  }
+  
   bool pressed = buttonStates[c] && !lastProcessedStates[c];
   lastProcessedStates[c] = buttonStates[c];
   return pressed;
+}
+
+void resetButtonEdgeDetection() {
+  getButtonPress(RED, true); // Reset the edge detection state
 }
 
 bool anyButtonPressed() {
   for (int i = 0; i < COLOR_COUNT; i++) {
     if (getButtonPress((Color)i)) {
       lastButtonPressed = (Color)i;
+      Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n", 
+                    i==RED?"RED":i==BLUE?"BLUE":i==GREEN?"GREEN":"YELLOW", btnPins[i]);
       return true;
     }
   }
@@ -606,7 +625,10 @@ void setup() {
   pinMode(LED_SERVICE, OUTPUT);
   Serial.println("Setting up pins...");
   for (auto p: ledPins) pinMode(p, OUTPUT);
-  for (auto p: btnPins) pinMode(p, INPUT_PULLUP);
+  for (auto p: btnPins) {
+    pinMode(p, INPUT_PULLUP);
+    Serial.printf("Button pin %d set to INPUT_PULLUP\n", p);
+  }
   for (auto p: btnLedPins) pinMode(p, OUTPUT);
   
   // LED test - flash each LED to verify they work
@@ -801,16 +823,34 @@ void loop() {
     
     case SEQ_DISPLAY_YOURTURN: {
       if (now - stateTimer > YOUR_TURN_DURATION_MS) { // "Your Turn" duration
+        resetButtonEdgeDetection(); // Reset ONLY at start of input phase
         stateTimer = now;
         gameState = SEQ_INPUT;
-        Serial.printf("Waiting for player input (timeout: %lu ms)\n", game.inputTimeout);
+        Serial.printf("INPUT DEBUG: Starting input phase at %lu ms (timeout: %lu ms)\n", now, game.inputTimeout);
       }
       break;
     }
     
     case SEQ_INPUT: {
+      // Prevent double-detection with minimum time between button presses
+      static unsigned long lastButtonDetectionTime = 0;
+      const unsigned long MIN_BUTTON_INTERVAL_MS = 200; // Minimum time between button detections
+      
+      // Debug: Check raw button states every 500ms
+      static unsigned long lastButtonDebug = 0;
+      if (now - lastButtonDebug > 500) {
+        Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (pins %d,%d,%d,%d)\n",
+                      digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]), 
+                      digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
+                      btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
+        lastButtonDebug = now;
+      }
+      
       // Check for timeout
-      if (now - stateTimer > game.inputTimeout) {
+      unsigned long elapsed = now - stateTimer;
+      if (elapsed > game.inputTimeout) {
+        Serial.printf("TIMEOUT DEBUG: now=%lu, stateTimer=%lu, elapsed=%lu, timeout=%lu\n", 
+                      now, stateTimer, elapsed, game.inputTimeout);
         audio.playTimeout();
         stateTimer = now;
         gameState = TIMEOUT_FEEDBACK;
@@ -818,11 +858,15 @@ void loop() {
         break;
       }
       
-      // Check for button press
+      // Check for button press (with minimum interval to prevent double-detection)
       if (anyButtonPressed()) {
-        Color expectedColor = (Color)game.seq[currentStep];
-        
-        if (lastButtonPressed == expectedColor) {
+        if (now - lastButtonDetectionTime > MIN_BUTTON_INTERVAL_MS) {
+          lastButtonDetectionTime = now;
+          Color expectedColor = (Color)game.seq[currentStep];
+          Serial.printf("BUTTON DEBUG: Pressed %d, Expected %d (step %d)\n", 
+                        lastButtonPressed, expectedColor, currentStep);
+          
+          if (lastButtonPressed == expectedColor) {
           // Correct!
           setLed(lastButtonPressed, true); // Brief wing LED feedback
           setBtnLed(lastButtonPressed, true); // Brief button LED feedback
@@ -836,19 +880,25 @@ void loop() {
             gameState = CORRECT_FEEDBACK;
             Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
           } else {
-            // Continue with next input
-            stateTimer = now; // Reset timeout
-            delay(BUTTON_GUARD_MS); // Brief pause between inputs
+            // Continue with next input - provide consistent button feedback duration
+            delay(200); // Brief consistent feedback duration for button press
             setLed(lastButtonPressed, false);
             setBtnLed(lastButtonPressed, false);
+            // Reset timeout AFTER clearing LEDs
+            stateTimer = now;
+            Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", now, currentStep);
           }
         } else {
-          // Wrong!
-          setBtnLed(lastButtonPressed, true); // Brief button LED feedback for wrong press
-          audio.playWrong();
-          stateTimer = now;
-          gameState = WRONG_FEEDBACK;
-          Serial.printf("Wrong! Expected %d, got %d\n", expectedColor, lastButtonPressed);
+            // Wrong!
+            setBtnLed(lastButtonPressed, true); // Brief button LED feedback for wrong press
+            audio.playWrong();
+            stateTimer = now;
+            gameState = WRONG_FEEDBACK;
+            Serial.printf("Wrong! Expected %d, got %d\n", expectedColor, lastButtonPressed);
+          }
+        } else {
+          Serial.printf("TIMING DEBUG: Button press ignored (too soon: %lums since last)\n", 
+                        now - lastButtonDetectionTime);
         }
       }
       break;
