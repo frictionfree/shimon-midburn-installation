@@ -287,7 +287,8 @@ void initializeGame() {
 
 Color generateNextColor() {
   // Avoid too many consecutive same colors
-  if (game.level > MAX_SAME_COLOR) {
+  // Add bounds check to prevent array access issues
+  if (game.level > MAX_SAME_COLOR && game.level > 0 && game.level <= MAX_SEQUENCE_LENGTH) {
     uint8_t sameCount = 1;
     Color lastColor = (Color)game.seq[game.level - 1];
     
@@ -792,32 +793,31 @@ void loop() {
         // Turn on LED for current step
         Color ledColor = (Color)game.seq[currentStep];
         setLed(ledColor, true);
-        
+
         // Play color with potential confuser
         Color voiceColor = generateConfuserColor(ledColor);
         audio.playColorName(voiceColor);
-        
-        Serial.printf("Step %d: LED=%d, Voice=%d%s\n", 
+
+        Serial.printf("Step %d: LED=%d, Voice=%d%s\n",
                       currentStep, ledColor, voiceColor,
                       (ledColor != voiceColor) ? " (CONFUSER!)" : "");
-        
+
         stateTimer = now;
         ledOn = true;
-      } else if (now - stateTimer > game.cueOnMs) {
-        // Turn off LED
+      } else if (ledOn && now - stateTimer > game.cueOnMs) {
+        // Turn off LED after cue time
         setLed((Color)game.seq[currentStep], false);
-        
-        if (now - stateTimer > game.cueOnMs + game.cueGapMs) {
-          currentStep++;
-          if (currentStep >= game.level) {
-            // Sequence complete
-            audio.playYourTurn();
-            stateTimer = now;
-            currentStep = 0;
-            gameState = SEQ_DISPLAY_YOURTURN;
-          } else {
-            ledOn = false; // Next step
-          }
+        ledOn = false;
+        stateTimer = now; // Reset timer for gap period
+      } else if (!ledOn && now - stateTimer > game.cueGapMs) {
+        // Gap complete, move to next step
+        currentStep++;
+        if (currentStep >= game.level) {
+          // Sequence complete
+          audio.playYourTurn();
+          stateTimer = now;
+          currentStep = 0;
+          gameState = SEQ_DISPLAY_YOURTURN;
         }
       }
       break;
@@ -836,8 +836,7 @@ void loop() {
     case SEQ_INPUT: {
       // Prevent double-detection with minimum time between button presses
       static unsigned long lastButtonDetectionTime = 0;
-      const unsigned long MIN_BUTTON_INTERVAL_MS = 200; // Minimum time between button detections
-      
+
       // Debug: Check raw button states every 500ms
       static unsigned long lastButtonDebug = 0;
       if (now - lastButtonDebug > 500) {
@@ -886,9 +885,9 @@ void loop() {
               delay(200); // Brief consistent feedback duration for button press
               setLed(lastButtonPressed, false);
               setBtnLed(lastButtonPressed, false);
-              // Reset timeout AFTER clearing LEDs
-              stateTimer = now;
-              Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", now, currentStep);
+              // Reset timeout with fresh timestamp (after delay)
+              stateTimer = millis();
+              Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", stateTimer, currentStep);
             }
           } else {
             // Wrong!
@@ -923,8 +922,9 @@ void loop() {
     
     case WRONG_FEEDBACK: {
       if (now - stateTimer > FEEDBACK_DURATION_MS) {
-        // Clear wrong button LED feedback
+        // Clear all LED feedback (both wing and button LEDs)
         for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, false);
           setBtnLed((Color)i, false);
         }
         audio.playGameOver();
@@ -936,6 +936,11 @@ void loop() {
     
     case TIMEOUT_FEEDBACK: {
       if (now - stateTimer > FEEDBACK_DURATION_MS) {
+        // Clear all LEDs before game over
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, false);
+          setBtnLed((Color)i, false);
+        }
         audio.playGameOver();
         stateTimer = now;
         gameState = GAME_OVER;

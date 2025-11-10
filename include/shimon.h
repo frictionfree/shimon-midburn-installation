@@ -90,8 +90,9 @@ constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must d
 // Note: ENABLE_AUDIO_CONFUSER is runtime configurable via YELLOW button in idle mode
 
 // Button Input Settings
-constexpr unsigned long BUTTON_DEBOUNCE_MS = 15; // Button debounce time
-constexpr unsigned long BUTTON_GUARD_MS = 50;    // Post-press guard time
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 15;        // Button debounce time
+constexpr unsigned long BUTTON_GUARD_MS = 50;           // Post-press guard time
+constexpr unsigned long MIN_BUTTON_INTERVAL_MS = 200;   // Minimum time between button detections during input
 
 // Visual Effects Settings
 constexpr unsigned long AMBIENT_EFFECT_DURATION_SEC = 30;  // Time per ambient effect

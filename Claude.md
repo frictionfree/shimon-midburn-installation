@@ -12,10 +12,12 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Platform**: ESP32 (espressif32)
 - **Framework**: Arduino
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
-- **Pin Configuration** (src/main.cpp:6-8):
-  - Buttons: RED=13, BLUE=12, GREEN=14, YELLOW=27 (INPUT_PULLUP)
-  - LEDs: RED=19, BLUE=18, GREEN=5, YELLOW=4 (updated from 17 due to Wokwi issues)
+- **Pin Configuration** (defined in include/shimon.h):
+  - Buttons: RED=13, BLUE=21, GREEN=14, YELLOW=27 (INPUT_PULLUP)
+  - Button LEDs: RED=23, BLUE=22, GREEN=32, YELLOW=33
+  - Wing LED Strips: RED=19, BLUE=25, GREEN=18, YELLOW=26 (MOSFET gates)
   - Service LED: Pin 2 (heartbeat indicator)
+  - DFPlayer: RX=16, TX=17
 
 ### Circuit Design
 - **LED Circuit**: `ESP32 GPIO → 330Ω resistor → LED anode → LED cathode → GND`
@@ -24,13 +26,19 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 
 ### Game Logic
 The core game runs on a finite state machine (FSM) with these states:
-- `IDLE`: Waiting for any button press to start
-- `INSTRUCTIONS`: Playing audio instructions (1.2s timeout in sim)  
+- `IDLE`: Waiting for any button press to start, running ambient effects
+- `INSTRUCTIONS`: Playing audio instructions
 - `AWAIT_START`: Waiting for button press to begin game
-- `SEQ_DISPLAY_INIT`: Initialize new sequence
+- `SEQ_DISPLAY_INIT`: Initialize sequence display
+- `SEQ_DISPLAY_MYTURN`: Playing "My Turn" audio announcement
 - `SEQ_DISPLAY`: Show the sequence with LEDs and audio
+- `SEQ_DISPLAY_YOURTURN`: Playing "Your Turn" audio announcement
 - `SEQ_INPUT`: Wait for player input with timeout
+- `CORRECT_FEEDBACK`: Playing correct sound, preparing next level
+- `WRONG_FEEDBACK`: Playing wrong sound before game over
+- `TIMEOUT_FEEDBACK`: Playing timeout sound before game over
 - `GAME_OVER`: End game state
+- `SCORE_DISPLAY`: Optional score announcement before returning to idle
 
 ### Audio System
 **Dual Implementation:**
@@ -166,11 +174,13 @@ The project includes complete Wokwi simulation setup:
   - If specific LED doesn't work → Try different GPIO pin
   - Always refresh Wokwi page completely after changing diagram.json
   
-**Working Pin Assignments** (tested in Wokwi):
+**Current Hardware Pin Assignments** (defined in include/shimon.h):
 ```
-Buttons: D13(RED), D12(BLUE), D14(GREEN), D27(YELLOW) 
-LEDs:    D19(RED), D18(BLUE), D5(GREEN),  D4(YELLOW)
-Service: D2 (heartbeat LED)
+Button Inputs:  RED=13, BLUE=21, GREEN=14, YELLOW=27
+Button LEDs:    RED=23, BLUE=22, GREEN=32, YELLOW=33
+Wing LED Strips: RED=19, BLUE=25, GREEN=18, YELLOW=26
+Service LED:    2 (onboard heartbeat LED)
+DFPlayer Audio: RX=16, TX=17
 ```
 
 ## Game States and Audio-Visual Sequences
