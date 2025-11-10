@@ -8,23 +8,25 @@
 // Modify these values to customize the game experience without touching the main code.
 // =============================================================================
 
-// --- Hardware Pin Configuration ---
-// Modify these pins to match your wiring setup
-constexpr uint8_t BTN_RED    = 13;  // Red button input pin (GPIO13)
-constexpr uint8_t BTN_BLUE   = 21;  // Blue button input pin (GPIO21)  
-constexpr uint8_t BTN_GREEN  = 14;  // Green button input pin (GPIO14)
-constexpr uint8_t BTN_YELLOW = 33;  // Yellow button input pin (GPIO33)
+// Matches verified wiring as of Nov 2025 (Channel 1=Blue, 2=Red, 3=Green, 4=Yellow)
 
-// Button LED pins for illuminated arcade buttons
-constexpr uint8_t BTN_LED_RED    = 23;  // Red button LED pin (GPIO23)
-constexpr uint8_t BTN_LED_BLUE   = 22;  // Blue button LED pin (GPIO22)
-constexpr uint8_t BTN_LED_GREEN  = 32;  // Green button LED pin (GPIO32)
-constexpr uint8_t BTN_LED_YELLOW = 27;  // Yellow button LED pin (GPIO27)
+// Button input pins (to GND, use INPUT_PULLUP)
+constexpr uint8_t BTN_BLUE   = 21;  // Blue button input (GPIO21)
+constexpr uint8_t BTN_RED    = 13;  // Red button input (GPIO13)
+constexpr uint8_t BTN_GREEN  = 14;  // Green button input (GPIO14)
+constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 
-constexpr uint8_t LED_RED    = 19;  // Red LED pin (GPIO19)
-constexpr uint8_t LED_BLUE   = 25;  // Blue LED pin (GPIO25)
-constexpr uint8_t LED_GREEN  = 18;  // Green LED pin (GPIO18)
-constexpr uint8_t LED_YELLOW = 26;  // Yellow LED pin (GPIO26)
+// Button LED pins (to LED+ through 220–470 Ω, LED− to GND)
+constexpr uint8_t BTN_LED_BLUE   = 22;  // Blue button LED (GPIO22)
+constexpr uint8_t BTN_LED_RED    = 23;  // Red button LED (GPIO23)
+constexpr uint8_t BTN_LED_GREEN  = 32;  // Green button LED (GPIO32)
+constexpr uint8_t BTN_LED_YELLOW = 33;  // Yellow button LED (GPIO33)
+
+// LED strip MOSFET gate pins (PWM outputs)
+constexpr uint8_t LED_BLUE   = 25;  // Blue LED strip MOSFET gate (GPIO25)
+constexpr uint8_t LED_RED    = 19;  // Red LED strip MOSFET gate (GPIO19)
+constexpr uint8_t LED_GREEN  = 18;  // Green LED strip MOSFET gate (GPIO18)
+constexpr uint8_t LED_YELLOW = 26;  // Yellow LED strip MOSFET gate (GPIO26)
 
 constexpr uint8_t LED_SERVICE = 2;  // Service/heartbeat LED pin (onboard LED)
 
@@ -66,12 +68,19 @@ constexpr uint8_t DFPLAYER_EQ = 0;               // EQ setting (0=Normal, 1=Pop,
 // Audio File Mapping (do not change unless you modify the SD card structure)
 constexpr uint8_t AUDIO_INVITE_COUNT = 5;        // Number of invite audio files (0001-0005.mp3)
 constexpr uint8_t AUDIO_INSTRUCTIONS = 6;        // Instructions file (0006.mp3)
-constexpr uint8_t AUDIO_TIMEOUT = 7;             // Timeout message (0007.mp3)
-constexpr uint8_t AUDIO_WRONG = 8;               // Wrong sound (0008.mp3)
-constexpr uint8_t AUDIO_GAME_OVER = 9;           // Game over (0009.mp3)
-constexpr uint8_t AUDIO_CORRECT = 10;            // Correct sound (0010.mp3)
-constexpr uint8_t AUDIO_MY_TURN = 11;            // "My Turn" (0011.mp3)
-constexpr uint8_t AUDIO_YOUR_TURN = 12;          // "Your Turn" (0012.mp3)
+constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3)
+constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3)
+constexpr uint8_t AUDIO_WRONG = 9;               // Wrong button press (0009.mp3)
+constexpr uint8_t AUDIO_GAME_OVER = 10;          // Game over (0010.mp3)
+constexpr uint8_t AUDIO_CORRECT = 11;            // Positive feedback / Level complete (0011.mp3)
+constexpr uint8_t AUDIO_TIMEOUT = 12;            // Timeout notification (0012.mp3)
+
+// Color Audio Files (folder /01/)
+constexpr uint8_t AUDIO_COLOR_FOLDER = 1;        // Folder number for color audio files
+constexpr uint8_t AUDIO_COLOR_RED = 1;           // /01/001.mp3 - "Red"
+constexpr uint8_t AUDIO_COLOR_BLUE = 2;          // /01/002.mp3 - "Blue"
+constexpr uint8_t AUDIO_COLOR_GREEN = 3;         // /01/003.mp3 - "Green"
+constexpr uint8_t AUDIO_COLOR_YELLOW = 4;        // /01/004.mp3 - "Yellow"
 
 // --- Game Features Configuration ---
 // Toggle these features on/off as desired

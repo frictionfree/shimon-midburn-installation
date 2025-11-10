@@ -57,20 +57,20 @@ struct Audio {
                   c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow", c+1);
   }
   
-  void playCorrect() { 
-    Serial.println("[AUDIO] Correct! (0010.mp3)"); 
+  void playCorrect() {
+    Serial.println("[AUDIO] Correct! (0011.mp3)");
   }
-  
-  void playWrong() { 
-    Serial.println("[AUDIO] Wrong (0008.mp3)"); 
+
+  void playWrong() {
+    Serial.println("[AUDIO] Wrong (0009.mp3)");
   }
-  
-  void playTimeout() { 
-    Serial.println("[AUDIO] Timeout -> Game Over (0007.mp3)"); 
+
+  void playTimeout() {
+    Serial.println("[AUDIO] Timeout -> Game Over (0012.mp3)");
   }
-  
-  void playGameOver() { 
-    Serial.println("[AUDIO] Game Over (0009.mp3)"); 
+
+  void playGameOver() {
+    Serial.println("[AUDIO] Game Over (0010.mp3)");
   }
   
   void playScore(uint8_t score) { 
@@ -138,9 +138,10 @@ struct Audio {
   void playColorName(Color c) {
     if (!initialized) return;
     // Play from folder 01, files 001-004.mp3
-    dfPlayer.playFolder(1, c + 1);
-    Serial.printf("Playing color %s from folder 01\n", 
-                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow");
+    dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
+    Serial.printf("Playing color %s from folder %02d\n",
+                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
+                  AUDIO_COLOR_FOLDER);
   }
   
   void playCorrect() {
@@ -655,6 +656,7 @@ void setup() {
   Serial.println("Setting random seed...");
   randomSeed(esp_random());
   
+  
   Serial.println("Shimon Game Ready - Butterfly Simon Says!");
   
   // Play boot sequence
@@ -858,7 +860,7 @@ void loop() {
         break;
       }
       
-      // Check for button press (with minimum interval to prevent double-detection)
+            // Check for button press (with minimum interval to prevent double-detection)
       if (anyButtonPressed()) {
         if (now - lastButtonDetectionTime > MIN_BUTTON_INTERVAL_MS) {
           lastButtonDetectionTime = now;
@@ -867,28 +869,28 @@ void loop() {
                         lastButtonPressed, expectedColor, currentStep);
           
           if (lastButtonPressed == expectedColor) {
-          // Correct!
-          setLed(lastButtonPressed, true); // Brief wing LED feedback
-          setBtnLed(lastButtonPressed, true); // Brief button LED feedback
-          currentStep++;
-          
-          if (currentStep >= game.level) {
-            // Level complete!
-            audio.playCorrect();
-            game.score += game.level; // Score based on level
-            stateTimer = now;
-            gameState = CORRECT_FEEDBACK;
-            Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
+            // Correct!
+            setLed(lastButtonPressed, true); // Brief wing LED feedback
+            setBtnLed(lastButtonPressed, true); // Brief button LED feedback
+            currentStep++;
+            
+            if (currentStep >= game.level) {
+              // Level complete!
+              audio.playCorrect();
+              game.score += game.level; // Score based on level
+              stateTimer = now;
+              gameState = CORRECT_FEEDBACK;
+              Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
+            } else {
+              // Continue with next input - provide consistent button feedback duration
+              delay(200); // Brief consistent feedback duration for button press
+              setLed(lastButtonPressed, false);
+              setBtnLed(lastButtonPressed, false);
+              // Reset timeout AFTER clearing LEDs
+              stateTimer = now;
+              Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", now, currentStep);
+            }
           } else {
-            // Continue with next input - provide consistent button feedback duration
-            delay(200); // Brief consistent feedback duration for button press
-            setLed(lastButtonPressed, false);
-            setBtnLed(lastButtonPressed, false);
-            // Reset timeout AFTER clearing LEDs
-            stateTimer = now;
-            Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", now, currentStep);
-          }
-        } else {
             // Wrong!
             setBtnLed(lastButtonPressed, true); // Brief button LED feedback for wrong press
             audio.playWrong();
