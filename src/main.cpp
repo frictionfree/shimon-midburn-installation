@@ -804,20 +804,22 @@ void loop() {
 
         stateTimer = now;
         ledOn = true;
-      } else if (ledOn && now - stateTimer > game.cueOnMs) {
-        // Turn off LED after cue time
+      } else if (now - stateTimer > game.cueOnMs) {
+        // Turn off LED after cue time (keep ledOn=true to prevent retriggering)
         setLed((Color)game.seq[currentStep], false);
-        ledOn = false;
-        stateTimer = now; // Reset timer for gap period
-      } else if (!ledOn && now - stateTimer > game.cueGapMs) {
-        // Gap complete, move to next step
-        currentStep++;
-        if (currentStep >= game.level) {
-          // Sequence complete
-          audio.playYourTurn();
-          stateTimer = now;
-          currentStep = 0;
-          gameState = SEQ_DISPLAY_YOURTURN;
+
+        // Check if gap period is also complete
+        if (now - stateTimer > game.cueOnMs + game.cueGapMs) {
+          currentStep++;
+          if (currentStep >= game.level) {
+            // Sequence complete
+            audio.playYourTurn();
+            stateTimer = now;
+            currentStep = 0;
+            gameState = SEQ_DISPLAY_YOURTURN;
+          } else {
+            ledOn = false; // Ready for next step
+          }
         }
       }
       break;
