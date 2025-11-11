@@ -9,36 +9,42 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 ## Architecture
 
 ### Hardware Setup
-- **Platform**: ESP32 (espressif32)
+- **Platform**: ESP32 DevKitC-V4 (espressif32)
 - **Framework**: Arduino
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
-- **Pin Configuration** (defined in include/shimon.h):
-  - Buttons: RED=13, BLUE=21, GREEN=14, YELLOW=27 (INPUT_PULLUP)
-  - Button LEDs: RED=23, BLUE=22, GREEN=32, YELLOW=33
-  - Wing LED Strips: RED=19, BLUE=25, GREEN=18, YELLOW=26 (MOSFET gates)
-  - Service LED: Pin 2 (heartbeat indicator)
-  - DFPlayer: RX=16, TX=17
+- **Pin Configuration** (include/shimon.h):
+  - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5 (all on right header)
+  - **Button Inputs**: BLUE=21, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND)
+  - **Button LEDs**: BLUE=25, RED=26, GREEN=32, YELLOW=33 (left-side pins, 220-470Ω resistors)
+  - **DFPlayer Mini**: RX2=16, TX2=17 (Serial2)
+  - **Service LED**: Pin 2 (heartbeat indicator)
 
 ### Circuit Design
-- **LED Circuit**: `ESP32 GPIO → 330Ω resistor → LED anode → LED cathode → GND`
-- **Button Circuit**: `Button pin → ESP32 GPIO` with `INPUT_PULLUP` (other button pin to GND)
-- **Current-limiting resistors**: 330Ω resistors are essential for LED protection
+- **LED Strip Circuit (MOSFET-driven)**:
+  - `ESP32 GPIO → 330Ω resistor → MOSFET gate`
+  - `10kΩ resistor: MOSFET gate → GND` (pull-down)
+  - `MOSFET drain → LED strip "–" (cathode)`
+  - `LED strip "+" (anode) → +5V PSU rail`
+- **Button Input Circuit**:
+  - `Button switch → ESP32 GPIO (INPUT_PULLUP)`
+  - `Button other pin → GND`
+- **Button LED Circuit**:
+  - `ESP32 GPIO → 220-470Ω resistor → LED+ (anode)`
+  - `LED– (cathode) → GND`
+- **Power & Protection**:
+  - Common ground shared between ESP32, PSU, and DFPlayer
+  - TVS diode (SA5.0A) across +5V/GND after main fuse
+  - Per-channel PTC fuses on LED+ lines (add after testing)
 
 ### Game Logic
 The core game runs on a finite state machine (FSM) with these states:
-- `IDLE`: Waiting for any button press to start, running ambient effects
-- `INSTRUCTIONS`: Playing audio instructions
+- `IDLE`: Waiting for any button press to start
+- `INSTRUCTIONS`: Playing audio instructions (1.2s timeout in sim)  
 - `AWAIT_START`: Waiting for button press to begin game
-- `SEQ_DISPLAY_INIT`: Initialize sequence display
-- `SEQ_DISPLAY_MYTURN`: Playing "My Turn" audio announcement
+- `SEQ_DISPLAY_INIT`: Initialize new sequence
 - `SEQ_DISPLAY`: Show the sequence with LEDs and audio
-- `SEQ_DISPLAY_YOURTURN`: Playing "Your Turn" audio announcement
 - `SEQ_INPUT`: Wait for player input with timeout
-- `CORRECT_FEEDBACK`: Playing correct sound, preparing next level
-- `WRONG_FEEDBACK`: Playing wrong sound before game over
-- `TIMEOUT_FEEDBACK`: Playing timeout sound before game over
 - `GAME_OVER`: End game state
-- `SCORE_DISPLAY`: Optional score announcement before returning to idle
 
 ### Audio System
 **Dual Implementation:**
@@ -56,27 +62,26 @@ The core game runs on a finite state machine (FSM) with these states:
 ### **mp3 Directory (`/mp3/`) - Main Game Sounds**
 ```
 mp3/
-├── 0001.mp3    # Invite: "Come play with the butterfly!"
-├── 0002.mp3    # Invite: "Test your memory skills!"
-├── 0003.mp3    # Invite: "Ready for a challenge?"
-├── 0004.mp3    # Invite: "The butterfly wants to play!"
-├── 0005.mp3    # Invite: "Can you follow the pattern?"
-├── 0006.mp3    # Instructions: "Watch the colors, then repeat the sequence"
-├── 0007.mp3    # Timeout: "Time's up! Game over."
-├── 0008.mp3    # Wrong: "Oops! That's not right."
-├── 0009.mp3    # Game Over: "Game over! Thanks for playing!"
-├── 0010.mp3    # Correct: "Great job! Next level!"
-├── 0011.mp3    # My Turn: "My turn - watch carefully!"
-└── 0012.mp3    # Your Turn: "Your turn - repeat the sequence!"
-```
+| /mp3/0001.mp3 | Invitation 1 to Play (Idle) |
+| /mp3/0002.mp3 | Invitation 2 to Play |
+| /mp3/0003.mp3 | Invitation 3 to Play |
+| /mp3/0004.mp3 | Invitation 4 to Play |
+| /mp3/0005.mp3 | Invitation 5 to Play |
+| /mp3/0006.mp3 | Game Instructions |
+| /mp3/0007.mp3 | Announcement: “My Turn” |
+| /mp3/0008.mp3 | Announcement: “Your Turn” |
+| /mp3/0009.mp3 | Wrong Button Press |
+| /mp3/0010.mp3 | Game Over |
+| /mp3/0011.mp3 | Positive Feedback / Level Complete |
+| /mp3/0012.mp3 | Timeout Notification |
 
 ### **Folder 01 (`/01/`) - Color Names**
 ```
 01/
-├── 001.mp3     # "Red"
-├── 002.mp3     # "Blue"
-├── 003.mp3     # "Green"
-└── 004.mp3     # "Yellow"
+| /01/001.mp3  | Color: Red |
+| /01/002.mp3  | Color: Blue |
+| /01/003.mp3  | Color: Green |
+| /01/004.mp3  | Color: Yellow |```
 ```
 **Note**: These are used for the confuser mode where spoken color may differ from LED color.
 
@@ -164,24 +169,23 @@ The project includes complete Wokwi simulation setup:
 - **Pin Naming**: ESP32 pins must be referenced as `esp:D19`, `esp:D18`, etc. (not `esp:19`)
 - **GND References**: Use specific GND pins like `esp:GND.1`, `esp:GND.2` (not `esp:GND`)
 - **Resistors Required**: LEDs need 330Ω current-limiting resistors to function properly
-- **Pin Compatibility**: Some ESP32 pins may not work in Wokwi simulation:
-  - Pin 17: Had connection issues in Wokwi, moved Yellow LED to pin 4
-  - Pin 16: Also had issues, pin 4 works reliably
-  - Pins 19, 18, 5: Work correctly for RGB LEDs
+- **Pin Compatibility**: Some ESP32 pins may not work in Wokwi simulation
 - **Troubleshooting Checklist**:
   - If no connection wires visible → Check pin naming (use `esp:Dxx` format)
   - If LEDs don't light → Verify resistors are added to circuit
   - If specific LED doesn't work → Try different GPIO pin
   - Always refresh Wokwi page completely after changing diagram.json
-  
-**Current Hardware Pin Assignments** (defined in include/shimon.h):
+
+**Hardware Pin Assignments** (from include/shimon.h):
 ```
-Button Inputs:  RED=13, BLUE=21, GREEN=14, YELLOW=27
-Button LEDs:    RED=23, BLUE=22, GREEN=32, YELLOW=33
-Wing LED Strips: RED=19, BLUE=25, GREEN=18, YELLOW=26
-Service LED:    2 (onboard heartbeat LED)
-DFPlayer Audio: RX=16, TX=17
+LED Strips (MOSFET gates): BLUE=D23, RED=D19, GREEN=D18, YELLOW=D5
+Button Inputs:             BLUE=D21, RED=D13, GREEN=D14, YELLOW=D27
+Button LEDs:               BLUE=D25, RED=D26, GREEN=D32, YELLOW=D33
+DFPlayer Mini:             RX2=D16, TX2=D17 (Serial2)
+Service LED:               D2 (heartbeat)
 ```
+
+**Note**: Wokwi simulation may use simplified pin assignments. Always refer to `include/shimon.h` for the authoritative hardware configuration.
 
 ## Game States and Audio-Visual Sequences
 
@@ -307,14 +311,14 @@ DFPlayer Audio: RX=16, TX=17
 
 ## Key Configuration
 
-### Game Tuning Parameters (src/main.cpp:21-32)
+### Game Tuning Parameters (include/shimon.h)
 - `CUE_ON_MS_DEFAULT`: 450ms (min: 250ms) - LED on-time
-- `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues  
+- `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues
 - `INPUT_TIMEOUT_MS_DEFAULT`: 3000ms (min: 1800ms) - Player response limit
 - `SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels for gradual difficulty progression
-- `INVITE_INTERVAL`: 20-45 seconds (first invite: 5 seconds)
+- `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds (first invite: 5 seconds)
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
-- `ENABLE_AUDIO_CONFUSER`: Toggle with YELLOW button in idle
+- `ENABLE_AUDIO_CONFUSER`: Toggle with YELLOW button in idle (runtime configurable)
 
 ### Build Environments
 

@@ -10,23 +10,37 @@
 
 // Matches verified wiring as of Nov 2025 (Channel 1=Blue, 2=Red, 3=Green, 4=Yellow)
 
-// Button input pins (to GND, use INPUT_PULLUP)
-constexpr uint8_t BTN_BLUE   = 21;  // Blue button input (GPIO21)
-constexpr uint8_t BTN_RED    = 13;  // Red button input (GPIO13)
+// --- Hardware Pin Configuration ---
+// LED strip MOSFET gates (all on right header now)
+constexpr uint8_t LED_BLUE   = 23;  // Blue  strip gate (GPIO23)
+constexpr uint8_t LED_RED    = 19;  // Red   strip gate (GPIO19)
+constexpr uint8_t LED_GREEN  = 18;  // Green strip gate (GPIO18)
+constexpr uint8_t LED_YELLOW = 5;   // Yellow strip gate (GPIO5)
+
+// Button inputs (to GND, use INPUT_PULLUP)
+constexpr uint8_t BTN_BLUE   = 21;  // Blue  button input (GPIO21)
+constexpr uint8_t BTN_RED    = 13;  // Red   button input (GPIO13)
 constexpr uint8_t BTN_GREEN  = 14;  // Green button input (GPIO14)
 constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 
-// Button LED pins (to LED+ through 220–470 Ω, LED− to GND)
-constexpr uint8_t BTN_LED_BLUE   = 22;  // Blue button LED (GPIO22)
-constexpr uint8_t BTN_LED_RED    = 23;  // Red button LED (GPIO23)
+// Button LEDs (left-side pins where possible, with 220–470Ω to LED+)
+constexpr uint8_t BTN_LED_BLUE   = 25;  // Blue  button LED (GPIO25)
+constexpr uint8_t BTN_LED_RED    = 26;  // Red   button LED (GPIO26)
 constexpr uint8_t BTN_LED_GREEN  = 32;  // Green button LED (GPIO32)
 constexpr uint8_t BTN_LED_YELLOW = 33;  // Yellow button LED (GPIO33)
 
-// LED strip MOSFET gate pins (PWM outputs)
-constexpr uint8_t LED_BLUE   = 25;  // Blue LED strip MOSFET gate (GPIO25)
-constexpr uint8_t LED_RED    = 19;  // Red LED strip MOSFET gate (GPIO19)
-constexpr uint8_t LED_GREEN  = 18;  // Green LED strip MOSFET gate (GPIO18)
-constexpr uint8_t LED_YELLOW = 26;  // Yellow LED strip MOSFET gate (GPIO26)
+// DFPlayer (Serial2)
+constexpr uint8_t DFP_RX2 = 16;   // ESP32 RX2  (optional)
+constexpr uint8_t DFP_TX2 = 17;   // ESP32 TX2 → DF RX (via 1k resistor)
+
+// --- Notes ---
+// - Button switches: connect to GND (use INPUT_PULLUP).
+// - Button LEDs: connect GPIO → 220–470Ω → LED+; LED– → GND.
+// - MOSFET gates: GPIO → 330Ω → Gate; 10k Gate→GND.
+//   Drain → LED strip “–”; strip “+” → +5V rail.
+// - Common ground shared between ESP32, PSU, and DFPlayer.
+// - Keep TVS diode (SA5.0A) across +5V/GND after main fuse.
+// - Add per-channel PTC fuses on LED + lines after tests.
 
 constexpr uint8_t LED_SERVICE = 2;  // Service/heartbeat LED pin (onboard LED)
 
@@ -69,7 +83,7 @@ constexpr uint8_t DFPLAYER_EQ = 0;               // EQ setting (0=Normal, 1=Pop,
 constexpr uint8_t AUDIO_INVITE_COUNT = 5;        // Number of invite audio files (0001-0005.mp3)
 constexpr uint8_t AUDIO_INSTRUCTIONS = 6;        // Instructions file (0006.mp3)
 constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3)
-constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3)
+constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3)fist thing that 
 constexpr uint8_t AUDIO_WRONG = 9;               // Wrong button press (0009.mp3)
 constexpr uint8_t AUDIO_GAME_OVER = 10;          // Game over (0010.mp3)
 constexpr uint8_t AUDIO_CORRECT = 11;            // Positive feedback / Level complete (0011.mp3)

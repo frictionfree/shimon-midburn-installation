@@ -35,46 +35,47 @@ struct Audio {
     Serial.println("[AUDIO] DFPlayer initialized (simulation)");
   }
   
-  void playInvite() { 
+  void playInvite() {
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
-    Serial.printf("[AUDIO] Playing invite %d\n", inviteNum);
+    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3\n", inviteNum, inviteNum);
   }
   
-  void playInstructions() { 
-    Serial.println("[AUDIO] Playing instructions (0006.mp3)"); 
+  void playInstructions() {
+    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
   }
   
-  void playMyTurn() { 
-    Serial.println("[AUDIO] My Turn!"); 
+  void playMyTurn() {
+    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3\n", AUDIO_MY_TURN);
   }
   
-  void playYourTurn() { 
-    Serial.println("[AUDIO] Your Turn!"); 
+  void playYourTurn() {
+    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3\n", AUDIO_YOUR_TURN);
   }
   
-  void playColorName(Color c) { 
-    Serial.printf("[AUDIO] Color name: %s (/01/00%d.mp3)\n", 
-                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow", c+1);
+  void playColorName(Color c) {
+    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3\n",
+                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
+                  AUDIO_COLOR_FOLDER, c+1);
   }
   
   void playCorrect() {
-    Serial.println("[AUDIO] Correct! (0011.mp3)");
+    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3\n", AUDIO_CORRECT);
   }
 
   void playWrong() {
-    Serial.println("[AUDIO] Wrong (0009.mp3)");
+    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3\n", AUDIO_WRONG);
   }
 
   void playTimeout() {
-    Serial.println("[AUDIO] Timeout -> Game Over (0012.mp3)");
+    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3\n", AUDIO_TIMEOUT);
   }
 
   void playGameOver() {
-    Serial.println("[AUDIO] Game Over (0010.mp3)");
+    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3\n", AUDIO_GAME_OVER);
   }
   
-  void playScore(uint8_t score) { 
-    Serial.printf("[AUDIO] Score: %d (/02/%03d.mp3)\n", score, score);
+  void playScore(uint8_t score) {
+    Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3\n", score, score);
   }
 } audio;
 
@@ -114,58 +115,58 @@ struct Audio {
     if (!initialized) return;
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
     dfPlayer.play(inviteNum);
-    Serial.printf("Playing invite %d\n", inviteNum);
+    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", inviteNum, inviteNum, inviteNum);
   }
   
   void playInstructions() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_INSTRUCTIONS);
-    Serial.println("Playing instructions");
+    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
   }
   
   void playMyTurn() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_MY_TURN);
-    Serial.println("Playing My Turn");
+    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_MY_TURN, AUDIO_MY_TURN);
   }
   
   void playYourTurn() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_YOUR_TURN);
-    Serial.println("Playing Your Turn");
+    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_YOUR_TURN, AUDIO_YOUR_TURN);
   }
   
   void playColorName(Color c) {
     if (!initialized) return;
     // Play from folder 01, files 001-004.mp3
     dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
-    Serial.printf("Playing color %s from folder %02d\n",
+    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3 (DFPlayer.playFolder(%d, %d))\n",
                   c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
-                  AUDIO_COLOR_FOLDER);
+                  AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
   }
   
   void playCorrect() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_CORRECT);
-    Serial.println("Playing correct sound");
+    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_CORRECT, AUDIO_CORRECT);
   }
   
   void playWrong() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_WRONG);
-    Serial.println("Playing wrong sound");
+    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
   }
   
   void playTimeout() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_TIMEOUT);
-    Serial.println("Playing timeout sound");
+    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
   }
   
   void playGameOver() {
     if (!initialized) return;
     dfPlayer.play(AUDIO_GAME_OVER);
-    Serial.println("Playing game over sound");
+    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
   }
   
   void playScore(uint8_t score) {
@@ -173,7 +174,7 @@ struct Audio {
     if (score <= 100) {
       // Play from folder 02, files 000-100.mp3
       dfPlayer.playFolder(2, score);
-      Serial.printf("Playing score %d from folder 02\n", score);
+      Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3 (DFPlayer.playFolder(2, %d))\n", score, score, score);
     }
   }
   
@@ -698,12 +699,17 @@ void loop() {
       // Run ambient effects continuously
       updateAmbientEffects(now);
       
-      // Debug invite timing
+      // Debug invite timing AND button states
       static unsigned long lastDebug = 0;
       if (now - lastDebug > DEBUG_INTERVAL_MS) {
         unsigned long remaining = nextInviteDelay - (now - lastInvite);
-        Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n", 
+        Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n",
                       remaining / 1000, currentAmbientEffect);
+        // RAW BUTTON DEBUG: Show if buttons are being read at all
+        Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (LOW=pressed, pins %d,%d,%d,%d)\n",
+                      digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
+                      digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
+                      btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
         lastDebug = now;
       }
       

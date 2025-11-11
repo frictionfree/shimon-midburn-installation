@@ -59,38 +59,50 @@ GAME_OVER → IDLE
 
 | Function | GPIO | Notes |
 |-----------|------|-------|
-| LED – Red | 19 | PWM channel 0 |
-| LED – Blue | 25 | PWM channel 1 |
-| LED – Green | 18 | PWM channel 2 |
-| LED – Yellow | 26 | PWM channel 3 |
-| Button – Red (Input) | 13 | Input_PULLUP |
-| Button – Blue (Input) | 21 | Input_PULLUP |
-| Button – Green (Input) | 14 | Input_PULLUP |
-| Button – Yellow (Input) | 33 | Input_PULLUP |
-| Button – Red (LED) | 23 | Button feedback LED |
-| Button – Blue (LED) | 22 | Button feedback LED |
-| Button – Green (LED) | 32 | Button feedback LED |
-| Button – Yellow (LED) | 27 | Button feedback LED |
-| DFPlayer TX/RX | 16 / 17 | UART1 |
-| Service LED | 22 | On-board indicator |
+| **LED – Blue**   | 23 | PWM (right header) |
+| **LED – Red**    | 19 | PWM (right header) |
+| **LED – Green**  | 18 | PWM (right header) |
+| **LED – Yellow** | 5  | PWM (right header) |
+| **Button – Blue (Input)**  | 21 | INPUT_PULLUP |
+| **Button – Red (Input)**   | 13 | INPUT_PULLUP |
+| **Button – Green (Input)** | 14 | INPUT_PULLUP |
+| **Button – Yellow (Input)**| 27 | INPUT_PULLUP |
+| **Button – Blue (LED)**  | 25 | Feedback LED (+ via 220–470 Ω) |
+| **Button – Red (LED)**   | 26 | Feedback LED (+ via 220–470 Ω) |
+| **Button – Green (LED)** | 32 | Feedback LED (+ via 220–470 Ω) |
+| **Button – Yellow (LED)**| 33 | Feedback LED (+ via 220–470 Ω) |
+| **DFPlayer RX/TX** | 16 / 17 | UART2 (TX2 → DF RX via 1 kΩ resistor) |
 
+### Power & Protection Notes
+- PSU powers LED strips through main fuse → +WAGO → LED + lines.  
+- ESP32 logic powered via USB (5 V pin → logic rail).  
+- Both breadboards share common ground (GND WAGO).  
+- TVS diode (SA5.0A) across PSU +/– after fuse.  
+- Add **PTC fuses** per LED + channel after successful basic tests.
 ---
 
 ## 🔊 Audio Assets
 
 Place the following MP3 files on the DFPlayer’s SD card:
 
-| Folder | Files | Purpose |
-|---------|--------|----------|
-| `/mp3/` | `0001–0005.mp3` | Invite phrases |
-| `/mp3/0006.mp3` | Instructions |
-| `/mp3/0007.mp3` | Timeout → Game Over |
-| `/mp3/0008.mp3` | Wrong |
-| `/mp3/0009.mp3` | Game Over |
-| `/mp3/0010.mp3` | Correct |
-| `/01/001–004.mp3` | Spoken color names |
-| `/02/000–100.mp3` | Optional numeric scoring |
-
+| Path | Purpose |
+|------|----------|
+| /mp3/0001.mp3 | Invitation 1 to Play (Idle) |
+| /mp3/0002.mp3 | Invitation 2 to Play |
+| /mp3/0003.mp3 | Invitation 3 to Play |
+| /mp3/0004.mp3 | Invitation 4 to Play |
+| /mp3/0005.mp3 | Invitation 5 to Play |
+| /mp3/0006.mp3 | Game Instructions |
+| /mp3/0007.mp3 | Announcement: “My Turn” |
+| /mp3/0008.mp3 | Announcement: “Your Turn” |
+| /mp3/0009.mp3 | Wrong Button Press |
+| /mp3/0010.mp3 | Game Over |
+| /mp3/0011.mp3 | Positive Feedback / Level Complete |
+| /mp3/0012.mp3 | Timeout Notification |
+| /01/001.mp3  | Color: Red |
+| /01/002.mp3  | Color: Blue |
+| /01/003.mp3  | Color: Green |
+| /01/004.mp3  | Color: Yellow |
 ---
 
 ## 🛠️ Development & Simulation
