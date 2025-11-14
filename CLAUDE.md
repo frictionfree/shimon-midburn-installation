@@ -38,18 +38,33 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 
 ### Game Logic
 The core game runs on a finite state machine (FSM) with these states:
-- `IDLE`: Waiting for any button press to start
-- `INSTRUCTIONS`: Playing audio instructions (1.2s timeout in sim)  
+- `IDLE`: Waiting for any button press to start, with ambient visual effects
+- `INSTRUCTIONS`: Playing audio instructions
 - `AWAIT_START`: Waiting for button press to begin game
 - `SEQ_DISPLAY_INIT`: Initialize new sequence
+- `SEQ_DISPLAY_MYTURN`: Playing "My Turn" audio
 - `SEQ_DISPLAY`: Show the sequence with LEDs and audio
+- `SEQ_DISPLAY_YOURTURN`: Playing "Your Turn" audio
 - `SEQ_INPUT`: Wait for player input with timeout
+- `CORRECT_FEEDBACK`: Playing correct feedback sound
+- `WRONG_FEEDBACK`: Playing wrong input sound
+- `TIMEOUT_FEEDBACK`: Playing timeout notification
 - `GAME_OVER`: End game state
+- `SCORE_DISPLAY`: Optional score announcement
+- `POST_GAME_INVITE`: Invite player to play again after game over
 
 ### Audio System
 **Dual Implementation:**
 - **Simulation (`USE_WOKWI`)**: Audio calls print to Serial for debugging
 - **Real Hardware**: Full DFPlayer Mini integration with MP3 playback
+
+**Audio Finish Detection System:**
+The game uses DFPlayer's `DFPlayerPlayFinished` event to detect when audio completes:
+- `audioFinished` global flag set when DFPlayer reports playback complete (src/main.cpp:32, 192)
+- `isAudioComplete()` helper function checks flag OR uses timeout as fallback (src/main.cpp:260-279)
+- All audio-playing states wait for actual completion instead of fixed timeouts
+- Timeout definitions in shimon.h remain as fallbacks for safety
+- Prevents audio cutoff issues and enables responsive timing
 
 **Hardware Requirements:**
 - DFPlayer Mini module
@@ -269,12 +284,16 @@ Service LED:               D2 (heartbeat)
 **Visual**: All LEDs OFF
 
 ### **Player Input Phase**
-**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms)  
-**Audio**: None during input  
-**Visual**: 
-- Brief LED flash on correct button press
+**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms)
+**Audio**: None during input
+**Visual**:
+- Wing LED flashes briefly on button press
+- **Button LED stays ON while button is physically held** (src/main.cpp:915, 927-937)
+- Button LED turns OFF when button is released
 - All LEDs OFF otherwise
 - Serial: `"Waiting for player input (timeout: Xms)"`
+
+**Button LED Behavior**: The illuminated button LEDs now stay lit while buttons are pressed, providing tactile feedback to players. This was implemented to fix the issue where button LEDs were only flashing briefly.
 
 ### **Feedback Sequences**
 
@@ -297,17 +316,29 @@ Service LED:               D2 (heartbeat)
 **Result**: Game ends
 
 ### **Game Over Sequence**
-**Duration**: 2 seconds (+ optional score)  
-**Audio**: `[AUDIO] Game Over (0009.mp3)`  
-**Visual**: All LEDs OFF  
-**If Score > 0**: Proceeds to Score Display  
-**If Score = 0**: Returns directly to Idle Mode
+**Duration**: Wait for audio completion (with 3500ms timeout fallback)
+**Audio**: `[AUDIO] Game Over (0010.mp3)`
+**Visual**: All LEDs OFF
+**If Score > 0**: Proceeds to Score Display
+**If Score = 0**: Proceeds to Post-Game Invite
 
 ### **Score Display** (Optional)
-**Duration**: 2 seconds  
-**Audio**: `[AUDIO] Score: X (/02/XXX.mp3)`  
-**Visual**: All LEDs OFF  
+**Duration**: Wait for audio completion (with 3000ms timeout fallback)
+**Audio**: `[AUDIO] Score: X (/02/XXX.mp3)`
+**Visual**: All LEDs OFF
+**Result**: Proceeds to Post-Game Invite
+
+### **Post-Game Invite**
+**Duration**: ~3-4 seconds
+**Audio**: `[AUDIO] Playing invite X` (random 1-5) - Same as idle invites
+**Visual**:
+- Double flash: All LEDs flash twice (200ms on/off)
+- Spinning chase: 8 spins through colors (150ms each)
+- Final flash: All LEDs bright for 300ms
+- Serial: `"Post-game invite: encouraging player to play again"`
 **Result**: Returns to Idle Mode with ambient effects
+
+**Note**: The post-game invite was added to provide closure and encourage players to play again, rather than silently returning to idle mode.
 
 ## Key Configuration
 
@@ -363,10 +394,47 @@ Service LED:               D2 (heartbeat)
 - **Progression**: Complete several levels, notice increasing speed
 - **Error Handling**: Test wrong buttons, timeouts, and game over sequences
 
+## Recent Changes & Implementation Notes
+
+### Latest Updates (November 2025)
+**Branch**: `feat/logic-change`
+
+1. **Audio Finish Detection System** (Commits: 11095ad, latest)
+   - Implemented DFPlayer `DFPlayerPlayFinished` event detection
+   - Added `audioFinished` flag and `isAudioComplete()` helper function
+   - Fixed audio cutoff issues by waiting for actual playback completion
+   - Timeout fallbacks remain for safety
+
+2. **Post-Game Invite Feature**
+   - Added `POST_GAME_INVITE` state to FSM
+   - Plays invite message after score display to encourage replay
+   - Provides better player engagement and clearer game flow
+
+3. **Button LED Behavior Fix**
+   - Button LEDs now stay ON while buttons are physically held
+   - Provides tactile feedback during gameplay
+   - Fixed issue where button LEDs only flashed briefly
+
+4. **Audio Timing Improvements**
+   - Increased feedback duration from 2000ms to 2800ms
+   - Increased game over duration from 2500ms to 3500ms
+   - Added delays between audio transitions (250ms, 200ms)
+   - Tuned for DFPlayer Mini hardware behavior
+
+### Known Issues (Resolved)
+- ✅ Audio messages getting cut off (fixed with finish detection)
+- ✅ No post-game prompt (fixed with POST_GAME_INVITE state)
+- ✅ Button LEDs flashing instead of staying on (fixed with hold detection)
+
+### PlatformIO Access
+PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`
+Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
+
 ## File Structure
 
-- `src/main.cpp`: Main game logic, FSM, and all visual effects (690+ lines)
-- `platformio.ini`: Build environments (sim + native testing)
+- `src/main.cpp`: Main game logic, FSM, and all visual effects (1050+ lines)
+- `include/shimon.h`: Configuration header with all tunable parameters
+- `platformio.ini`: Build environments (sim, hardware, native testing)
 - `wokwi.toml` + `diagram.json`: Wokwi simulation configuration with proper pin connections
 - `CLAUDE.md`: This comprehensive documentation file
-- Standard PlatformIO directories (`lib/`, `include/`, `test/`) currently unused
+- Standard PlatformIO directories (`lib/`, `test/`) currently unused
