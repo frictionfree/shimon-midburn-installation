@@ -137,11 +137,11 @@ constexpr uint8_t MIN_DIFFERENT_COLORS = 3;     // Minimum different colors in s
 
 // State Machine Timeouts
 constexpr unsigned long INSTRUCTIONS_DURATION_MS = 2000;    // Instructions audio duration
-constexpr unsigned long MY_TURN_DURATION_MS = 1000;         // "My Turn" audio duration  
-constexpr unsigned long YOUR_TURN_DURATION_MS = 1000;       // "Your Turn" audio duration
-constexpr unsigned long FEEDBACK_DURATION_MS = 1000;        // Correct/Wrong feedback duration
-constexpr unsigned long GAME_OVER_DURATION_MS = 2000;       // Game over message duration
-constexpr unsigned long SCORE_DISPLAY_DURATION_MS = 2000;   // Score announcement duration
+constexpr unsigned long MY_TURN_DURATION_MS = 1800;         // "My Turn" audio duration (tuned for DFPlayer)
+constexpr unsigned long YOUR_TURN_DURATION_MS = 1800;       // "Your Turn" audio duration (tuned for DFPlayer)
+constexpr unsigned long FEEDBACK_DURATION_MS = 2000;        // Correct/Wrong feedback duration (longer to prevent cutting)
+constexpr unsigned long GAME_OVER_DURATION_MS = 2500;       // Game over message duration
+constexpr unsigned long SCORE_DISPLAY_DURATION_MS = 3000;   // Score announcement duration
 
 // Visual Effect Durations (for blocking sequences like boot, invite, instructions)
 constexpr unsigned long BOOT_WAVE_DELAY_MS = 150;           // Boot rainbow wave speed

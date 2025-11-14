@@ -778,7 +778,9 @@ void loop() {
       ledOn = false;
       // Turn off all LEDs
       for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-      
+
+      // Small delay to let DFPlayer finish previous audio
+      delay(250);
       audio.playMyTurn();
       stateTimer = now;
       gameState = SEQ_DISPLAY_MYTURN;
@@ -788,6 +790,8 @@ void loop() {
     
     case SEQ_DISPLAY_MYTURN: {
       if (now - stateTimer > MY_TURN_DURATION_MS) { // "My Turn" duration
+        // Small delay to let DFPlayer switch from /mp3/ to /01/ folder playback
+        delay(200);
         stateTimer = now;
         gameState = SEQ_DISPLAY;
       }
