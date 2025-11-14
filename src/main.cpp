@@ -31,6 +31,7 @@ uint8_t btnLedPins[COLOR_COUNT] = {BTN_LED_RED, BTN_LED_BLUE, BTN_LED_GREEN, BTN
 // Audio playback tracking (declared here for global access)
 bool audioFinished = false;
 unsigned long audioStartTime = 0;
+int currentPlayingTrack = -1;  // Track which file is currently playing (-1 = none)
 
 // ---- Enhanced Audio System ----
 #ifdef USE_WOKWI
@@ -119,65 +120,77 @@ struct Audio {
   void playInvite() {
     if (!initialized) return;
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
+    currentPlayingTrack = inviteNum;
     dfPlayer.play(inviteNum);
     Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", inviteNum, inviteNum, inviteNum);
   }
-  
+
   void playInstructions() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_INSTRUCTIONS;
     dfPlayer.play(AUDIO_INSTRUCTIONS);
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
   }
-  
+
   void playMyTurn() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_MY_TURN;
     dfPlayer.play(AUDIO_MY_TURN);
     Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_MY_TURN, AUDIO_MY_TURN);
   }
-  
+
   void playYourTurn() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_YOUR_TURN;
     dfPlayer.play(AUDIO_YOUR_TURN);
     Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_YOUR_TURN, AUDIO_YOUR_TURN);
   }
-  
+
   void playColorName(Color c) {
     if (!initialized) return;
     // Play from folder 01, files 001-004.mp3
+    // Note: For folder playback, we don't track the track number as it's more complex
+    currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
     dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
     Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3 (DFPlayer.playFolder(%d, %d))\n",
                   c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
                   AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
   }
-  
+
   void playCorrect() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_CORRECT;
     dfPlayer.play(AUDIO_CORRECT);
     Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_CORRECT, AUDIO_CORRECT);
   }
-  
+
   void playWrong() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_WRONG;
     dfPlayer.play(AUDIO_WRONG);
     Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
   }
-  
+
   void playTimeout() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_TIMEOUT;
     dfPlayer.play(AUDIO_TIMEOUT);
     Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
   }
-  
+
   void playGameOver() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_GAME_OVER;
     dfPlayer.play(AUDIO_GAME_OVER);
     Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
   }
-  
+
   void playScore(uint8_t score) {
     if (!initialized) return;
     if (score <= 100) {
       // Play from folder 02, files 000-100.mp3
+      // Note: For folder playback, we don't track the track number as it's more complex
+      currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
       dfPlayer.playFolder(2, score);
       Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3 (DFPlayer.playFolder(2, %d))\n", score, score, score);
     }
@@ -193,8 +206,14 @@ struct Audio {
 
       switch (type) {
         case DFPlayerPlayFinished:
-          Serial.printf("Audio finished: track %d\n", value);
-          audioFinished = true; // Set flag when audio completes
+          Serial.printf("Audio finished: track %d (expected: %d)\n", value, currentPlayingTrack);
+          // Only set finished flag if this matches the track we're expecting
+          if (value == currentPlayingTrack || currentPlayingTrack == -1) {
+            audioFinished = true;
+            currentPlayingTrack = -1;  // Clear the expected track
+          } else {
+            Serial.printf("  -> Ignoring stale notification for track %d\n", value);
+          }
           break;
         case DFPlayerError:
           Serial.printf("DFPlayer error: %d\n", value);
@@ -418,8 +437,10 @@ bool anyButtonPressed() {
   for (int i = 0; i < COLOR_COUNT; i++) {
     if (getButtonPress((Color)i)) {
       lastButtonPressed = (Color)i;
-      Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n", 
+      Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n",
                     i==RED?"RED":i==BLUE?"BLUE":i==GREEN?"GREEN":"YELLOW", btnPins[i]);
+      // Light up button LED when button is pressed (in all states)
+      setBtnLed((Color)i, true);
       return true;
     }
   }
@@ -706,16 +727,38 @@ void setup() {
 
 void loop() {
   static unsigned long lastLoopDebug = 0;
-  
+
   digitalWrite(LED_SERVICE, (millis() >> 9) & 1); // Heartbeat LED
   updateButtonStates(); // Handle button debouncing
-  
+
+  // Update button LEDs to reflect button states (turn off when released)
+  // Only in non-gameplay states - SEQ_INPUT handles its own LED logic
+  static bool btnLedStates[4] = {false, false, false, false};
+  if (gameState != SEQ_INPUT && gameState != CORRECT_FEEDBACK && gameState != WRONG_FEEDBACK) {
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      // Only update if state changed to avoid debug spam
+      if (buttonStates[i] && !btnLedStates[i]) {
+        // Button pressed, turn on LED (handled by anyButtonPressed)
+        btnLedStates[i] = true;
+      } else if (!buttonStates[i] && btnLedStates[i]) {
+        // Button released, turn off LED
+        setBtnLed((Color)i, false);
+        btnLedStates[i] = false;
+      }
+    }
+  } else {
+    // In gameplay states, sync our tracking with actual button states
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      btnLedStates[i] = buttonStates[i];
+    }
+  }
+
 #ifndef USE_WOKWI
   audio.handleStatus(); // Handle DFPlayer status/errors for real hardware
 #endif
-  
+
   unsigned long now = millis();
-  
+
   // Debug: Print loop counter every 10 seconds
   if (now - lastLoopDebug > 10000) {
     Serial.printf("=== LOOP DEBUG: Running at %lu ms, State: %d ===\n", now, gameState);
@@ -727,17 +770,17 @@ void loop() {
       // Run ambient effects continuously
       updateAmbientEffects(now);
       
-      // Debug invite timing AND button states
+      // Debug invite timing
       static unsigned long lastDebug = 0;
       if (now - lastDebug > DEBUG_INTERVAL_MS) {
         unsigned long remaining = nextInviteDelay - (now - lastInvite);
         Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n",
                       remaining / 1000, currentAmbientEffect);
-        // RAW BUTTON DEBUG: Show if buttons are being read at all
-        Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (LOW=pressed, pins %d,%d,%d,%d)\n",
-                      digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
-                      digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
-                      btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
+        // RAW BUTTON DEBUG: Commented out to reduce clutter
+        // Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (LOW=pressed, pins %d,%d,%d,%d)\n",
+        //               digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
+        //               digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
+        //               btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
         lastDebug = now;
       }
       
@@ -880,16 +923,16 @@ void loop() {
       // Prevent double-detection with minimum time between button presses
       static unsigned long lastButtonDetectionTime = 0;
 
-      // Debug: Check raw button states every 500ms
-      static unsigned long lastButtonDebug = 0;
-      if (now - lastButtonDebug > 500) {
-        Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (pins %d,%d,%d,%d)\n",
-                      digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]), 
-                      digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
-                      btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
-        lastButtonDebug = now;
-      }
-      
+      // Debug: Raw button states - commented out to reduce clutter
+      // static unsigned long lastButtonDebug = 0;
+      // if (now - lastButtonDebug > 500) {
+      //   Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (pins %d,%d,%d,%d)\n",
+      //                 digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
+      //                 digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
+      //                 btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
+      //   lastButtonDebug = now;
+      // }
+
       // Check for timeout
       unsigned long elapsed = now - stateTimer;
       if (elapsed > game.inputTimeout) {
@@ -955,9 +998,11 @@ void loop() {
     
     case CORRECT_FEEDBACK: {
       // Keep button LED on while button is held during feedback
-      if (!pressed(lastButtonPressed)) {
-        // Button released, turn off button LED
+      static bool ledTurnedOff = false;
+      if (!pressed(lastButtonPressed) && !ledTurnedOff) {
+        // Button released, turn off button LED (only once)
         setBtnLed(lastButtonPressed, false);
+        ledTurnedOff = true;
       }
 
       if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
@@ -969,6 +1014,7 @@ void loop() {
 
         // Extend sequence and continue
         extendSequence();
+        ledTurnedOff = false; // Reset flag for next time
         gameState = SEQ_DISPLAY_INIT;
       }
       break;
@@ -976,9 +1022,11 @@ void loop() {
 
     case WRONG_FEEDBACK: {
       // Keep button LED on while button is held during feedback
-      if (!pressed(lastButtonPressed)) {
-        // Button released, turn off button LED
+      static bool ledTurnedOff = false;
+      if (!pressed(lastButtonPressed) && !ledTurnedOff) {
+        // Button released, turn off button LED (only once)
         setBtnLed(lastButtonPressed, false);
+        ledTurnedOff = true;
       }
 
       if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
@@ -987,6 +1035,7 @@ void loop() {
           setLed((Color)i, false);
           setBtnLed((Color)i, false);
         }
+        ledTurnedOff = false; // Reset flag for next time
         audioFinished = false; // Reset flag before playing
         audio.playGameOver();
         stateTimer = now;
@@ -1037,6 +1086,20 @@ void loop() {
     }
 
     case POST_GAME_INVITE: {
+      // Add delay to ensure Game Over audio completes before playing invite
+      static bool delayStarted = false;
+      if (!delayStarted) {
+        stateTimer = now;
+        delayStarted = true;
+        Serial.printf("Waiting %lu ms before post-game invite...\n", POST_GAME_INVITE_DELAY_MS);
+        break;
+      }
+
+      // Wait configured delay before playing invite to ensure Game Over audio finishes
+      if (now - stateTimer < POST_GAME_INVITE_DELAY_MS) {
+        break;
+      }
+
       // Play an invite message to encourage replay
       audioFinished = false; // Reset flag before playing
       audio.playInvite();
@@ -1047,6 +1110,7 @@ void loop() {
       scheduleNextInvite();
       ambientTimer = now;
       effectChangeTimer = now;
+      delayStarted = false; // Reset flag for next time
       gameState = IDLE;
       Serial.println("Back to idle mode");
       break;
