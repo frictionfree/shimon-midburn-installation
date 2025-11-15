@@ -6,7 +6,8 @@
 #include <DFRobotDFPlayerMini.h>
 #endif
 
-enum Color { RED=0, BLUE=1, GREEN=2, YELLOW=3 };
+// Color enum mapped to audio file numbers: Blue=1, Red=2, Green=3, Yellow=4
+enum Color { BLUE=0, RED=1, GREEN=2, YELLOW=3 };
 
 // --- Game Data Structure ---
 struct GameState {
@@ -20,12 +21,13 @@ struct GameState {
 };
 
 // --- Runtime Configurable Features ---
-bool ENABLE_AUDIO_CONFUSER = true; // Can be toggled in idle mode
+bool ENABLE_AUDIO_CONFUSER = false; // Default: confuser mode OFF (will be configurable via difficulty selection later)
 
-// --- Pin Arrays (derived from configuration) ---
-uint8_t ledPins[COLOR_COUNT] = {LED_RED, LED_BLUE, LED_GREEN, LED_YELLOW};
-uint8_t btnPins[COLOR_COUNT] = {BTN_RED, BTN_BLUE, BTN_GREEN, BTN_YELLOW};
-uint8_t btnLedPins[COLOR_COUNT] = {BTN_LED_RED, BTN_LED_BLUE, BTN_LED_GREEN, BTN_LED_YELLOW};
+// --- Pin Arrays (reordered to match Color enum: BLUE, RED, GREEN, YELLOW) ---
+// Note: GPIO pin numbers in shimon.h remain unchanged, only array order changes
+uint8_t ledPins[COLOR_COUNT] = {LED_BLUE, LED_RED, LED_GREEN, LED_YELLOW};
+uint8_t btnPins[COLOR_COUNT] = {BTN_BLUE, BTN_RED, BTN_GREEN, BTN_YELLOW};
+uint8_t btnLedPins[COLOR_COUNT] = {BTN_LED_BLUE, BTN_LED_RED, BTN_LED_GREEN, BTN_LED_YELLOW};
 
 // ---- Audio Playback Tracking ----
 // Audio playback tracking (declared here for global access)
@@ -60,7 +62,7 @@ struct Audio {
   
   void playColorName(Color c) {
     Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3\n",
-                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
                   AUDIO_COLOR_FOLDER, c+1);
   }
   
@@ -153,7 +155,7 @@ struct Audio {
     currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
     dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
     Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3 (DFPlayer.playFolder(%d, %d))\n",
-                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
                   AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
   }
 
@@ -238,8 +240,8 @@ enum GameFSM {
   SEQ_DISPLAY_INIT,     // Initialize sequence display
   SEQ_DISPLAY_MYTURN,   // Playing "My Turn" audio
   SEQ_DISPLAY,          // Showing LED sequence with audio
-  SEQ_DISPLAY_YOURTURN, // Playing "Your Turn" audio
-  SEQ_INPUT,            // Waiting for player input
+  SEQ_DISPLAY_YOURTURN, // UNUSED - "Your Turn" now plays during SEQ_INPUT for immediate responsiveness
+  SEQ_INPUT,            // Waiting for player input (with "Your Turn" audio playing in background)
   CORRECT_FEEDBACK,     // Playing correct sound
   WRONG_FEEDBACK,       // Playing wrong sound
   TIMEOUT_FEEDBACK,     // Playing timeout sound
@@ -709,7 +711,8 @@ void setup() {
   
   
   Serial.println("Shimon Game Ready - Butterfly Simon Says!");
-  
+  Serial.printf(">>> Confuser Mode: %s <<<\n", ENABLE_AUDIO_CONFUSER ? "ENABLED" : "DISABLED");
+
   // Play boot sequence
   Serial.println("Starting boot sequence...");
   bootSequence();
@@ -796,18 +799,9 @@ void loop() {
       
       // Check for any button press to start
       if (anyButtonPressed()) {
-        // Special handling: if YELLOW button pressed in idle, toggle confuser mode
-        if (lastButtonPressed == YELLOW) {
-          ENABLE_AUDIO_CONFUSER = !ENABLE_AUDIO_CONFUSER;
-          Serial.printf("Audio Confuser %s\n", ENABLE_AUDIO_CONFUSER ? "ENABLED" : "DISABLED");
-          // Flash yellow LED to confirm
-          for (int i = 0; i < 6; i++) {
-            setLed(YELLOW, i % 2);
-            delay(BUTTON_GUARD_MS * 3); // 3x guard time for visual feedback
-          }
-          break;
-        }
-        
+        // All buttons now behave the same - start game with instructions
+        // (Confuser mode toggle removed - will be replaced with difficulty selection later)
+
         // Clear ambient effects
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
@@ -895,12 +889,13 @@ void loop() {
         if (now - stateTimer > game.cueOnMs + game.cueGapMs) {
           currentStep++;
           if (currentStep >= game.level) {
-            // Sequence complete
-            audioFinished = false; // Reset flag before playing
-            audio.playYourTurn();
+            // Sequence complete - play "Your Turn" and immediately allow input
+            audio.playYourTurn(); // Play in background (non-blocking)
+            resetButtonEdgeDetection(); // Reset at start of input phase
             stateTimer = now;
             currentStep = 0;
-            gameState = SEQ_DISPLAY_YOURTURN;
+            gameState = SEQ_INPUT; // Skip SEQ_DISPLAY_YOURTURN - go directly to input
+            Serial.printf("INPUT DEBUG: Starting input phase at %lu ms (timeout: %lu ms)\n", now, game.inputTimeout);
           } else {
             ledOn = false; // Ready for next step
           }
@@ -909,16 +904,9 @@ void loop() {
       break;
     }
 
-    case SEQ_DISPLAY_YOURTURN: {
-      if (isAudioComplete(stateTimer, YOUR_TURN_DURATION_MS)) {
-        resetButtonEdgeDetection(); // Reset ONLY at start of input phase
-        stateTimer = now;
-        gameState = SEQ_INPUT;
-        Serial.printf("INPUT DEBUG: Starting input phase at %lu ms (timeout: %lu ms)\n", now, game.inputTimeout);
-      }
-      break;
-    }
-    
+    // SEQ_DISPLAY_YOURTURN removed - we now go directly to SEQ_INPUT
+    // to allow player to start responding immediately after sequence display
+
     case SEQ_INPUT: {
       // Prevent double-detection with minimum time between button presses
       static unsigned long lastButtonDetectionTime = 0;

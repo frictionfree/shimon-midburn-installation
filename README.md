@@ -99,8 +99,8 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0010.mp3 | Game Over |
 | /mp3/0011.mp3 | Positive Feedback / Level Complete |
 | /mp3/0012.mp3 | Timeout Notification |
-| /01/001.mp3  | Color: Red |
-| /01/002.mp3  | Color: Blue |
+| /01/001.mp3  | Color: Blue |
+| /01/002.mp3  | Color: Red |
 | /01/003.mp3  | Color: Green |
 | /01/004.mp3  | Color: Yellow |
 ---
