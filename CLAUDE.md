@@ -9,33 +9,62 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 ## Architecture
 
 ### Hardware Setup
-- **Platform**: ESP32 (espressif32)
+- **Platform**: ESP32 DevKitC-V4 (espressif32)
 - **Framework**: Arduino
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
-- **Pin Configuration** (src/main.cpp:6-8):
-  - Buttons: RED=13, BLUE=12, GREEN=14, YELLOW=27 (INPUT_PULLUP)
-  - LEDs: RED=19, BLUE=18, GREEN=5, YELLOW=4 (updated from 17 due to Wokwi issues)
-  - Service LED: Pin 2 (heartbeat indicator)
+- **Pin Configuration** (include/shimon.h):
+  - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5 (all on right header)
+  - **Button Inputs**: BLUE=21, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND)
+  - **Button LEDs**: BLUE=25, RED=26, GREEN=32, YELLOW=33 (left-side pins, 220-470Ω resistors)
+  - **DFPlayer Mini**: RX2=16, TX2=17 (Serial2)
+  - **Service LED**: Pin 2 (heartbeat indicator)
 
 ### Circuit Design
-- **LED Circuit**: `ESP32 GPIO → 330Ω resistor → LED anode → LED cathode → GND`
-- **Button Circuit**: `Button pin → ESP32 GPIO` with `INPUT_PULLUP` (other button pin to GND)
-- **Current-limiting resistors**: 330Ω resistors are essential for LED protection
+- **LED Strip Circuit (MOSFET-driven)**:
+  - `ESP32 GPIO → 330Ω resistor → MOSFET gate`
+  - `10kΩ resistor: MOSFET gate → GND` (pull-down)
+  - `MOSFET drain → LED strip "–" (cathode)`
+  - `LED strip "+" (anode) → +5V PSU rail`
+- **Button Input Circuit**:
+  - `Button switch → ESP32 GPIO (INPUT_PULLUP)`
+  - `Button other pin → GND`
+- **Button LED Circuit**:
+  - `ESP32 GPIO → 220-470Ω resistor → LED+ (anode)`
+  - `LED– (cathode) → GND`
+- **Power & Protection**:
+  - Common ground shared between ESP32, PSU, and DFPlayer
+  - TVS diode (SA5.0A) across +5V/GND after main fuse
+  - Per-channel PTC fuses on LED+ lines (add after testing)
 
 ### Game Logic
 The core game runs on a finite state machine (FSM) with these states:
-- `IDLE`: Waiting for any button press to start
-- `INSTRUCTIONS`: Playing audio instructions (1.2s timeout in sim)  
+- `IDLE`: Waiting for any button press to start, with ambient visual effects
+- `INSTRUCTIONS`: Playing audio instructions
 - `AWAIT_START`: Waiting for button press to begin game
 - `SEQ_DISPLAY_INIT`: Initialize new sequence
+- `SEQ_DISPLAY_MYTURN`: Playing "My Turn" audio
 - `SEQ_DISPLAY`: Show the sequence with LEDs and audio
+- `SEQ_DISPLAY_YOURTURN`: Playing "Your Turn" audio
 - `SEQ_INPUT`: Wait for player input with timeout
+- `CORRECT_FEEDBACK`: Playing correct feedback sound
+- `WRONG_FEEDBACK`: Playing wrong input sound
+- `TIMEOUT_FEEDBACK`: Playing timeout notification
 - `GAME_OVER`: End game state
+- `SCORE_DISPLAY`: Optional score announcement
+- `POST_GAME_INVITE`: Invite player to play again after game over
 
 ### Audio System
 **Dual Implementation:**
 - **Simulation (`USE_WOKWI`)**: Audio calls print to Serial for debugging
 - **Real Hardware**: Full DFPlayer Mini integration with MP3 playback
+
+**Audio Finish Detection System:**
+The game uses DFPlayer's `DFPlayerPlayFinished` event to detect when audio completes:
+- `audioFinished` global flag set when DFPlayer reports playback complete (src/main.cpp:32, 192)
+- `isAudioComplete()` helper function checks flag OR uses timeout as fallback (src/main.cpp:260-279)
+- All audio-playing states wait for actual completion instead of fixed timeouts
+- Timeout definitions in shimon.h remain as fallbacks for safety
+- Prevents audio cutoff issues and enables responsive timing
 
 **Hardware Requirements:**
 - DFPlayer Mini module
@@ -48,27 +77,26 @@ The core game runs on a finite state machine (FSM) with these states:
 ### **mp3 Directory (`/mp3/`) - Main Game Sounds**
 ```
 mp3/
-├── 0001.mp3    # Invite: "Come play with the butterfly!"
-├── 0002.mp3    # Invite: "Test your memory skills!"
-├── 0003.mp3    # Invite: "Ready for a challenge?"
-├── 0004.mp3    # Invite: "The butterfly wants to play!"
-├── 0005.mp3    # Invite: "Can you follow the pattern?"
-├── 0006.mp3    # Instructions: "Watch the colors, then repeat the sequence"
-├── 0007.mp3    # Timeout: "Time's up! Game over."
-├── 0008.mp3    # Wrong: "Oops! That's not right."
-├── 0009.mp3    # Game Over: "Game over! Thanks for playing!"
-├── 0010.mp3    # Correct: "Great job! Next level!"
-├── 0011.mp3    # My Turn: "My turn - watch carefully!"
-└── 0012.mp3    # Your Turn: "Your turn - repeat the sequence!"
-```
+| /mp3/0001.mp3 | Invitation 1 to Play (Idle) |
+| /mp3/0002.mp3 | Invitation 2 to Play |
+| /mp3/0003.mp3 | Invitation 3 to Play |
+| /mp3/0004.mp3 | Invitation 4 to Play |
+| /mp3/0005.mp3 | Invitation 5 to Play |
+| /mp3/0006.mp3 | Game Instructions |
+| /mp3/0007.mp3 | Announcement: “My Turn” |
+| /mp3/0008.mp3 | Announcement: “Your Turn” |
+| /mp3/0009.mp3 | Wrong Button Press |
+| /mp3/0010.mp3 | Game Over |
+| /mp3/0011.mp3 | Positive Feedback / Level Complete |
+| /mp3/0012.mp3 | Timeout Notification |
 
 ### **Folder 01 (`/01/`) - Color Names**
 ```
 01/
-├── 001.mp3     # "Red"
-├── 002.mp3     # "Blue"
-├── 003.mp3     # "Green"
-└── 004.mp3     # "Yellow"
+| /01/001.mp3  | Color: Red |
+| /01/002.mp3  | Color: Blue |
+| /01/003.mp3  | Color: Green |
+| /01/004.mp3  | Color: Yellow |```
 ```
 **Note**: These are used for the confuser mode where spoken color may differ from LED color.
 
@@ -156,22 +184,23 @@ The project includes complete Wokwi simulation setup:
 - **Pin Naming**: ESP32 pins must be referenced as `esp:D19`, `esp:D18`, etc. (not `esp:19`)
 - **GND References**: Use specific GND pins like `esp:GND.1`, `esp:GND.2` (not `esp:GND`)
 - **Resistors Required**: LEDs need 330Ω current-limiting resistors to function properly
-- **Pin Compatibility**: Some ESP32 pins may not work in Wokwi simulation:
-  - Pin 17: Had connection issues in Wokwi, moved Yellow LED to pin 4
-  - Pin 16: Also had issues, pin 4 works reliably
-  - Pins 19, 18, 5: Work correctly for RGB LEDs
+- **Pin Compatibility**: Some ESP32 pins may not work in Wokwi simulation
 - **Troubleshooting Checklist**:
   - If no connection wires visible → Check pin naming (use `esp:Dxx` format)
   - If LEDs don't light → Verify resistors are added to circuit
   - If specific LED doesn't work → Try different GPIO pin
   - Always refresh Wokwi page completely after changing diagram.json
-  
-**Working Pin Assignments** (tested in Wokwi):
+
+**Hardware Pin Assignments** (from include/shimon.h):
 ```
-Buttons: D13(RED), D12(BLUE), D14(GREEN), D27(YELLOW) 
-LEDs:    D19(RED), D18(BLUE), D5(GREEN),  D4(YELLOW)
-Service: D2 (heartbeat LED)
+LED Strips (MOSFET gates): BLUE=D23, RED=D19, GREEN=D18, YELLOW=D5
+Button Inputs:             BLUE=D21, RED=D13, GREEN=D14, YELLOW=D27
+Button LEDs:               BLUE=D25, RED=D26, GREEN=D32, YELLOW=D33
+DFPlayer Mini:             RX2=D16, TX2=D17 (Serial2)
+Service LED:               D2 (heartbeat)
 ```
+
+**Note**: Wokwi simulation may use simplified pin assignments. Always refer to `include/shimon.h` for the authoritative hardware configuration.
 
 ## Game States and Audio-Visual Sequences
 
@@ -255,12 +284,16 @@ Service: D2 (heartbeat LED)
 **Visual**: All LEDs OFF
 
 ### **Player Input Phase**
-**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms)  
-**Audio**: None during input  
-**Visual**: 
-- Brief LED flash on correct button press
+**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms)
+**Audio**: None during input
+**Visual**:
+- Wing LED flashes briefly on button press
+- **Button LED stays ON while button is physically held** (src/main.cpp:915, 927-937)
+- Button LED turns OFF when button is released
 - All LEDs OFF otherwise
 - Serial: `"Waiting for player input (timeout: Xms)"`
+
+**Button LED Behavior**: The illuminated button LEDs now stay lit while buttons are pressed, providing tactile feedback to players. This was implemented to fix the issue where button LEDs were only flashing briefly.
 
 ### **Feedback Sequences**
 
@@ -283,28 +316,40 @@ Service: D2 (heartbeat LED)
 **Result**: Game ends
 
 ### **Game Over Sequence**
-**Duration**: 2 seconds (+ optional score)  
-**Audio**: `[AUDIO] Game Over (0009.mp3)`  
-**Visual**: All LEDs OFF  
-**If Score > 0**: Proceeds to Score Display  
-**If Score = 0**: Returns directly to Idle Mode
+**Duration**: Wait for audio completion (with 3500ms timeout fallback)
+**Audio**: `[AUDIO] Game Over (0010.mp3)`
+**Visual**: All LEDs OFF
+**If Score > 0**: Proceeds to Score Display
+**If Score = 0**: Proceeds to Post-Game Invite
 
 ### **Score Display** (Optional)
-**Duration**: 2 seconds  
-**Audio**: `[AUDIO] Score: X (/02/XXX.mp3)`  
-**Visual**: All LEDs OFF  
+**Duration**: Wait for audio completion (with 3000ms timeout fallback)
+**Audio**: `[AUDIO] Score: X (/02/XXX.mp3)`
+**Visual**: All LEDs OFF
+**Result**: Proceeds to Post-Game Invite
+
+### **Post-Game Invite**
+**Duration**: ~3-4 seconds
+**Audio**: `[AUDIO] Playing invite X` (random 1-5) - Same as idle invites
+**Visual**:
+- Double flash: All LEDs flash twice (200ms on/off)
+- Spinning chase: 8 spins through colors (150ms each)
+- Final flash: All LEDs bright for 300ms
+- Serial: `"Post-game invite: encouraging player to play again"`
 **Result**: Returns to Idle Mode with ambient effects
+
+**Note**: The post-game invite was added to provide closure and encourage players to play again, rather than silently returning to idle mode.
 
 ## Key Configuration
 
-### Game Tuning Parameters (src/main.cpp:21-32)
+### Game Tuning Parameters (include/shimon.h)
 - `CUE_ON_MS_DEFAULT`: 450ms (min: 250ms) - LED on-time
-- `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues  
+- `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues
 - `INPUT_TIMEOUT_MS_DEFAULT`: 3000ms (min: 1800ms) - Player response limit
 - `SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels for gradual difficulty progression
-- `INVITE_INTERVAL`: 20-45 seconds (first invite: 5 seconds)
+- `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds (first invite: 5 seconds)
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
-- `ENABLE_AUDIO_CONFUSER`: Toggle with YELLOW button in idle
+- `ENABLE_AUDIO_CONFUSER`: Toggle with YELLOW button in idle (runtime configurable)
 
 ### Build Environments
 
@@ -349,10 +394,47 @@ Service: D2 (heartbeat LED)
 - **Progression**: Complete several levels, notice increasing speed
 - **Error Handling**: Test wrong buttons, timeouts, and game over sequences
 
+## Recent Changes & Implementation Notes
+
+### Latest Updates (November 2025)
+**Branch**: `feat/logic-change`
+
+1. **Audio Finish Detection System** (Commits: 11095ad, latest)
+   - Implemented DFPlayer `DFPlayerPlayFinished` event detection
+   - Added `audioFinished` flag and `isAudioComplete()` helper function
+   - Fixed audio cutoff issues by waiting for actual playback completion
+   - Timeout fallbacks remain for safety
+
+2. **Post-Game Invite Feature**
+   - Added `POST_GAME_INVITE` state to FSM
+   - Plays invite message after score display to encourage replay
+   - Provides better player engagement and clearer game flow
+
+3. **Button LED Behavior Fix**
+   - Button LEDs now stay ON while buttons are physically held
+   - Provides tactile feedback during gameplay
+   - Fixed issue where button LEDs only flashed briefly
+
+4. **Audio Timing Improvements**
+   - Increased feedback duration from 2000ms to 2800ms
+   - Increased game over duration from 2500ms to 3500ms
+   - Added delays between audio transitions (250ms, 200ms)
+   - Tuned for DFPlayer Mini hardware behavior
+
+### Known Issues (Resolved)
+- ✅ Audio messages getting cut off (fixed with finish detection)
+- ✅ No post-game prompt (fixed with POST_GAME_INVITE state)
+- ✅ Button LEDs flashing instead of staying on (fixed with hold detection)
+
+### PlatformIO Access
+PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`
+Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
+
 ## File Structure
 
-- `src/main.cpp`: Main game logic, FSM, and all visual effects (690+ lines)
-- `platformio.ini`: Build environments (sim + native testing)
+- `src/main.cpp`: Main game logic, FSM, and all visual effects (1050+ lines)
+- `include/shimon.h`: Configuration header with all tunable parameters
+- `platformio.ini`: Build environments (sim, hardware, native testing)
 - `wokwi.toml` + `diagram.json`: Wokwi simulation configuration with proper pin connections
 - `CLAUDE.md`: This comprehensive documentation file
-- Standard PlatformIO directories (`lib/`, `include/`, `test/`) currently unused
+- Standard PlatformIO directories (`lib/`, `test/`) currently unused

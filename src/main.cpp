@@ -27,6 +27,12 @@ uint8_t ledPins[COLOR_COUNT] = {LED_RED, LED_BLUE, LED_GREEN, LED_YELLOW};
 uint8_t btnPins[COLOR_COUNT] = {BTN_RED, BTN_BLUE, BTN_GREEN, BTN_YELLOW};
 uint8_t btnLedPins[COLOR_COUNT] = {BTN_LED_RED, BTN_LED_BLUE, BTN_LED_GREEN, BTN_LED_YELLOW};
 
+// ---- Audio Playback Tracking ----
+// Audio playback tracking (declared here for global access)
+bool audioFinished = false;
+unsigned long audioStartTime = 0;
+int currentPlayingTrack = -1;  // Track which file is currently playing (-1 = none)
+
 // ---- Enhanced Audio System ----
 #ifdef USE_WOKWI
 // Simulation version - prints to Serial
@@ -35,46 +41,47 @@ struct Audio {
     Serial.println("[AUDIO] DFPlayer initialized (simulation)");
   }
   
-  void playInvite() { 
+  void playInvite() {
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
-    Serial.printf("[AUDIO] Playing invite %d\n", inviteNum);
+    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3\n", inviteNum, inviteNum);
   }
   
-  void playInstructions() { 
-    Serial.println("[AUDIO] Playing instructions (0006.mp3)"); 
+  void playInstructions() {
+    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
   }
   
-  void playMyTurn() { 
-    Serial.println("[AUDIO] My Turn!"); 
+  void playMyTurn() {
+    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3\n", AUDIO_MY_TURN);
   }
   
-  void playYourTurn() { 
-    Serial.println("[AUDIO] Your Turn!"); 
+  void playYourTurn() {
+    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3\n", AUDIO_YOUR_TURN);
   }
   
-  void playColorName(Color c) { 
-    Serial.printf("[AUDIO] Color name: %s (/01/00%d.mp3)\n", 
-                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow", c+1);
+  void playColorName(Color c) {
+    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3\n",
+                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
+                  AUDIO_COLOR_FOLDER, c+1);
   }
   
-  void playCorrect() { 
-    Serial.println("[AUDIO] Correct! (0010.mp3)"); 
+  void playCorrect() {
+    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3\n", AUDIO_CORRECT);
+  }
+
+  void playWrong() {
+    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3\n", AUDIO_WRONG);
+  }
+
+  void playTimeout() {
+    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3\n", AUDIO_TIMEOUT);
+  }
+
+  void playGameOver() {
+    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3\n", AUDIO_GAME_OVER);
   }
   
-  void playWrong() { 
-    Serial.println("[AUDIO] Wrong (0008.mp3)"); 
-  }
-  
-  void playTimeout() { 
-    Serial.println("[AUDIO] Timeout -> Game Over (0007.mp3)"); 
-  }
-  
-  void playGameOver() { 
-    Serial.println("[AUDIO] Game Over (0009.mp3)"); 
-  }
-  
-  void playScore(uint8_t score) { 
-    Serial.printf("[AUDIO] Score: %d (/02/%03d.mp3)\n", score, score);
+  void playScore(uint8_t score) {
+    Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3\n", score, score);
   }
 } audio;
 
@@ -113,80 +120,100 @@ struct Audio {
   void playInvite() {
     if (!initialized) return;
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
+    currentPlayingTrack = inviteNum;
     dfPlayer.play(inviteNum);
-    Serial.printf("Playing invite %d\n", inviteNum);
+    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", inviteNum, inviteNum, inviteNum);
   }
-  
+
   void playInstructions() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_INSTRUCTIONS;
     dfPlayer.play(AUDIO_INSTRUCTIONS);
-    Serial.println("Playing instructions");
+    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
   }
-  
+
   void playMyTurn() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_MY_TURN;
     dfPlayer.play(AUDIO_MY_TURN);
-    Serial.println("Playing My Turn");
+    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_MY_TURN, AUDIO_MY_TURN);
   }
-  
+
   void playYourTurn() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_YOUR_TURN;
     dfPlayer.play(AUDIO_YOUR_TURN);
-    Serial.println("Playing Your Turn");
+    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_YOUR_TURN, AUDIO_YOUR_TURN);
   }
-  
+
   void playColorName(Color c) {
     if (!initialized) return;
     // Play from folder 01, files 001-004.mp3
-    dfPlayer.playFolder(1, c + 1);
-    Serial.printf("Playing color %s from folder 01\n", 
-                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow");
+    // Note: For folder playback, we don't track the track number as it's more complex
+    currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
+    dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
+    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3 (DFPlayer.playFolder(%d, %d))\n",
+                  c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
+                  AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
   }
-  
+
   void playCorrect() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_CORRECT;
     dfPlayer.play(AUDIO_CORRECT);
-    Serial.println("Playing correct sound");
+    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_CORRECT, AUDIO_CORRECT);
   }
-  
+
   void playWrong() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_WRONG;
     dfPlayer.play(AUDIO_WRONG);
-    Serial.println("Playing wrong sound");
+    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
   }
-  
+
   void playTimeout() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_TIMEOUT;
     dfPlayer.play(AUDIO_TIMEOUT);
-    Serial.println("Playing timeout sound");
+    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
   }
-  
+
   void playGameOver() {
     if (!initialized) return;
+    currentPlayingTrack = AUDIO_GAME_OVER;
     dfPlayer.play(AUDIO_GAME_OVER);
-    Serial.println("Playing game over sound");
+    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
   }
-  
+
   void playScore(uint8_t score) {
     if (!initialized) return;
     if (score <= 100) {
       // Play from folder 02, files 000-100.mp3
+      // Note: For folder playback, we don't track the track number as it's more complex
+      currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
       dfPlayer.playFolder(2, score);
-      Serial.printf("Playing score %d from folder 02\n", score);
+      Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3 (DFPlayer.playFolder(2, %d))\n", score, score, score);
     }
   }
   
   // Check DFPlayer status and handle errors
   void handleStatus() {
     if (!initialized) return;
-    
+
     if (dfPlayer.available()) {
       uint8_t type = dfPlayer.readType();
       int value = dfPlayer.read();
-      
+
       switch (type) {
         case DFPlayerPlayFinished:
-          Serial.printf("Audio finished: track %d\n", value);
+          Serial.printf("Audio finished: track %d (expected: %d)\n", value, currentPlayingTrack);
+          // Only set finished flag if this matches the track we're expecting
+          if (value == currentPlayingTrack || currentPlayingTrack == -1) {
+            audioFinished = true;
+            currentPlayingTrack = -1;  // Clear the expected track
+          } else {
+            Serial.printf("  -> Ignoring stale notification for track %d\n", value);
+          }
           break;
         case DFPlayerError:
           Serial.printf("DFPlayer error: %d\n", value);
@@ -204,20 +231,21 @@ struct Audio {
 #endif
 
 // ---- Game State Machine ----
-enum GameFSM { 
+enum GameFSM {
   IDLE,                 // Waiting for player, periodic invites
   INSTRUCTIONS,         // Playing instructions
   AWAIT_START,          // Waiting for start button
   SEQ_DISPLAY_INIT,     // Initialize sequence display
   SEQ_DISPLAY_MYTURN,   // Playing "My Turn" audio
   SEQ_DISPLAY,          // Showing LED sequence with audio
-  SEQ_DISPLAY_YOURTURN, // Playing "Your Turn" audio  
+  SEQ_DISPLAY_YOURTURN, // Playing "Your Turn" audio
   SEQ_INPUT,            // Waiting for player input
   CORRECT_FEEDBACK,     // Playing correct sound
   WRONG_FEEDBACK,       // Playing wrong sound
   TIMEOUT_FEEDBACK,     // Playing timeout sound
   GAME_OVER,            // Game over state
-  SCORE_DISPLAY         // Optional score announcement
+  SCORE_DISPLAY,        // Optional score announcement
+  POST_GAME_INVITE      // Post-game invite to encourage replay
 };
 
 // ---- Ambient Visual Effects ----
@@ -249,11 +277,32 @@ unsigned long effectChangeTimer = 0;
 uint8_t ambientStep = 0;
 
 // ---- Utility Functions ----
-static inline void setLed(Color c, bool on) { 
+// Helper function to check if audio playback is complete (with timeout fallback)
+bool isAudioComplete(unsigned long startTime, unsigned long timeoutMs) {
+  unsigned long elapsed = millis() - startTime;
+
+  #ifdef USE_WOKWI
+    // Simulation: just use timeout
+    return elapsed > timeoutMs;
+  #else
+    // Real hardware: check audio finished flag OR timeout
+    if (audioFinished) {
+      Serial.printf("Audio complete via DFPlayer notification (%lu ms)\n", elapsed);
+      return true;
+    }
+    if (elapsed > timeoutMs) {
+      Serial.printf("Audio complete via timeout fallback (%lu ms)\n", elapsed);
+      return true;
+    }
+    return false;
+  #endif
+}
+
+static inline void setLed(Color c, bool on) {
   // Normal logic for current-sourcing LEDs: HIGH = ON, LOW = OFF
   digitalWrite(ledPins[c], on ? HIGH : LOW);
   // Debug output for LED state changes
-  //Serial.printf("LED %s (pin %d) -> %s\n", 
+  //Serial.printf("LED %s (pin %d) -> %s\n",
   //              c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
   //              ledPins[c], on ? "ON" : "OFF");
 }
@@ -286,7 +335,8 @@ void initializeGame() {
 
 Color generateNextColor() {
   // Avoid too many consecutive same colors
-  if (game.level > MAX_SAME_COLOR) {
+  // Add bounds check to prevent array access issues
+  if (game.level > MAX_SAME_COLOR && game.level > 0 && game.level <= MAX_SEQUENCE_LENGTH) {
     uint8_t sameCount = 1;
     Color lastColor = (Color)game.seq[game.level - 1];
     
@@ -387,8 +437,10 @@ bool anyButtonPressed() {
   for (int i = 0; i < COLOR_COUNT; i++) {
     if (getButtonPress((Color)i)) {
       lastButtonPressed = (Color)i;
-      Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n", 
+      Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n",
                     i==RED?"RED":i==BLUE?"BLUE":i==GREEN?"GREEN":"YELLOW", btnPins[i]);
+      // Light up button LED when button is pressed (in all states)
+      setBtnLed((Color)i, true);
       return true;
     }
   }
@@ -655,6 +707,7 @@ void setup() {
   Serial.println("Setting random seed...");
   randomSeed(esp_random());
   
+  
   Serial.println("Shimon Game Ready - Butterfly Simon Says!");
   
   // Play boot sequence
@@ -674,16 +727,38 @@ void setup() {
 
 void loop() {
   static unsigned long lastLoopDebug = 0;
-  
+
   digitalWrite(LED_SERVICE, (millis() >> 9) & 1); // Heartbeat LED
   updateButtonStates(); // Handle button debouncing
-  
+
+  // Update button LEDs to reflect button states (turn off when released)
+  // Only in non-gameplay states - SEQ_INPUT handles its own LED logic
+  static bool btnLedStates[4] = {false, false, false, false};
+  if (gameState != SEQ_INPUT && gameState != CORRECT_FEEDBACK && gameState != WRONG_FEEDBACK) {
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      // Only update if state changed to avoid debug spam
+      if (buttonStates[i] && !btnLedStates[i]) {
+        // Button pressed, turn on LED (handled by anyButtonPressed)
+        btnLedStates[i] = true;
+      } else if (!buttonStates[i] && btnLedStates[i]) {
+        // Button released, turn off LED
+        setBtnLed((Color)i, false);
+        btnLedStates[i] = false;
+      }
+    }
+  } else {
+    // In gameplay states, sync our tracking with actual button states
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      btnLedStates[i] = buttonStates[i];
+    }
+  }
+
 #ifndef USE_WOKWI
   audio.handleStatus(); // Handle DFPlayer status/errors for real hardware
 #endif
-  
+
   unsigned long now = millis();
-  
+
   // Debug: Print loop counter every 10 seconds
   if (now - lastLoopDebug > 10000) {
     Serial.printf("=== LOOP DEBUG: Running at %lu ms, State: %d ===\n", now, gameState);
@@ -699,8 +774,13 @@ void loop() {
       static unsigned long lastDebug = 0;
       if (now - lastDebug > DEBUG_INTERVAL_MS) {
         unsigned long remaining = nextInviteDelay - (now - lastInvite);
-        Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n", 
+        Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n",
                       remaining / 1000, currentAmbientEffect);
+        // RAW BUTTON DEBUG: Commented out to reduce clutter
+        // Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (LOW=pressed, pins %d,%d,%d,%d)\n",
+        //               digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
+        //               digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
+        //               btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
         lastDebug = now;
       }
       
@@ -730,7 +810,8 @@ void loop() {
         
         // Clear ambient effects
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-        
+
+        audioFinished = false; // Reset flag before playing
         audio.playInstructions();
         instructionsSequence(); // Visual instructions!
         stateTimer = now;
@@ -739,9 +820,9 @@ void loop() {
       }
       break;
     }
-    
+
     case INSTRUCTIONS: {
-      if (now - stateTimer > INSTRUCTIONS_DURATION_MS) { // Instructions duration
+      if (isAudioComplete(stateTimer, INSTRUCTIONS_DURATION_MS)) {
         gameState = AWAIT_START;
         Serial.println("Press any button to start game...");
       }
@@ -769,16 +850,21 @@ void loop() {
       ledOn = false;
       // Turn off all LEDs
       for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-      
+
+      // Small delay to let DFPlayer finish previous audio
+      delay(250);
+      audioFinished = false; // Reset flag before playing
       audio.playMyTurn();
       stateTimer = now;
       gameState = SEQ_DISPLAY_MYTURN;
       Serial.printf("Displaying sequence level %d\n", game.level);
       break;
     }
-    
+
     case SEQ_DISPLAY_MYTURN: {
-      if (now - stateTimer > MY_TURN_DURATION_MS) { // "My Turn" duration
+      if (isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
+        // Small delay to let DFPlayer switch from /mp3/ to /01/ folder playback
+        delay(200);
         stateTimer = now;
         gameState = SEQ_DISPLAY;
       }
@@ -790,39 +876,41 @@ void loop() {
         // Turn on LED for current step
         Color ledColor = (Color)game.seq[currentStep];
         setLed(ledColor, true);
-        
+
         // Play color with potential confuser
         Color voiceColor = generateConfuserColor(ledColor);
         audio.playColorName(voiceColor);
-        
-        Serial.printf("Step %d: LED=%d, Voice=%d%s\n", 
+
+        Serial.printf("Step %d: LED=%d, Voice=%d%s\n",
                       currentStep, ledColor, voiceColor,
                       (ledColor != voiceColor) ? " (CONFUSER!)" : "");
-        
+
         stateTimer = now;
         ledOn = true;
       } else if (now - stateTimer > game.cueOnMs) {
-        // Turn off LED
+        // Turn off LED after cue time (keep ledOn=true to prevent retriggering)
         setLed((Color)game.seq[currentStep], false);
-        
+
+        // Check if gap period is also complete
         if (now - stateTimer > game.cueOnMs + game.cueGapMs) {
           currentStep++;
           if (currentStep >= game.level) {
             // Sequence complete
+            audioFinished = false; // Reset flag before playing
             audio.playYourTurn();
             stateTimer = now;
             currentStep = 0;
             gameState = SEQ_DISPLAY_YOURTURN;
           } else {
-            ledOn = false; // Next step
+            ledOn = false; // Ready for next step
           }
         }
       }
       break;
     }
-    
+
     case SEQ_DISPLAY_YOURTURN: {
-      if (now - stateTimer > YOUR_TURN_DURATION_MS) { // "Your Turn" duration
+      if (isAudioComplete(stateTimer, YOUR_TURN_DURATION_MS)) {
         resetButtonEdgeDetection(); // Reset ONLY at start of input phase
         stateTimer = now;
         gameState = SEQ_INPUT;
@@ -834,18 +922,17 @@ void loop() {
     case SEQ_INPUT: {
       // Prevent double-detection with minimum time between button presses
       static unsigned long lastButtonDetectionTime = 0;
-      const unsigned long MIN_BUTTON_INTERVAL_MS = 200; // Minimum time between button detections
-      
-      // Debug: Check raw button states every 500ms
-      static unsigned long lastButtonDebug = 0;
-      if (now - lastButtonDebug > 500) {
-        Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (pins %d,%d,%d,%d)\n",
-                      digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]), 
-                      digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
-                      btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
-        lastButtonDebug = now;
-      }
-      
+
+      // Debug: Raw button states - commented out to reduce clutter
+      // static unsigned long lastButtonDebug = 0;
+      // if (now - lastButtonDebug > 500) {
+      //   Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (pins %d,%d,%d,%d)\n",
+      //                 digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
+      //                 digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
+      //                 btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
+      //   lastButtonDebug = now;
+      // }
+
       // Check for timeout
       unsigned long elapsed = now - stateTimer;
       if (elapsed > game.inputTimeout) {
@@ -858,7 +945,7 @@ void loop() {
         break;
       }
       
-      // Check for button press (with minimum interval to prevent double-detection)
+            // Check for button press (with minimum interval to prevent double-detection)
       if (anyButtonPressed()) {
         if (now - lastButtonDetectionTime > MIN_BUTTON_INTERVAL_MS) {
           lastButtonDetectionTime = now;
@@ -867,30 +954,35 @@ void loop() {
                         lastButtonPressed, expectedColor, currentStep);
           
           if (lastButtonPressed == expectedColor) {
-          // Correct!
-          setLed(lastButtonPressed, true); // Brief wing LED feedback
-          setBtnLed(lastButtonPressed, true); // Brief button LED feedback
-          currentStep++;
-          
-          if (currentStep >= game.level) {
-            // Level complete!
-            audio.playCorrect();
-            game.score += game.level; // Score based on level
-            stateTimer = now;
-            gameState = CORRECT_FEEDBACK;
-            Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
+            // Correct!
+            setLed(lastButtonPressed, true); // Brief wing LED feedback
+            setBtnLed(lastButtonPressed, true); // Turn on button LED
+            currentStep++;
+
+            if (currentStep >= game.level) {
+              // Level complete!
+              audioFinished = false; // Reset flag before playing
+              audio.playCorrect();
+              game.score += game.level; // Score based on level
+              stateTimer = now;
+              gameState = CORRECT_FEEDBACK;
+              Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
+            } else {
+              // Continue with next input - keep button LED on while button is held
+              // Wait for button release before proceeding
+              while (pressed(lastButtonPressed)) {
+                delay(10); // Small delay to prevent tight loop
+              }
+              setLed(lastButtonPressed, false);
+              setBtnLed(lastButtonPressed, false);
+              // Reset timeout with fresh timestamp (after button release)
+              stateTimer = millis();
+              Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", stateTimer, currentStep);
+            }
           } else {
-            // Continue with next input - provide consistent button feedback duration
-            delay(200); // Brief consistent feedback duration for button press
-            setLed(lastButtonPressed, false);
-            setBtnLed(lastButtonPressed, false);
-            // Reset timeout AFTER clearing LEDs
-            stateTimer = now;
-            Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", now, currentStep);
-          }
-        } else {
             // Wrong!
-            setBtnLed(lastButtonPressed, true); // Brief button LED feedback for wrong press
+            setBtnLed(lastButtonPressed, true); // Turn on button LED for wrong press
+            audioFinished = false; // Reset flag before playing
             audio.playWrong();
             stateTimer = now;
             gameState = WRONG_FEEDBACK;
@@ -905,35 +997,61 @@ void loop() {
     }
     
     case CORRECT_FEEDBACK: {
-      if (now - stateTimer > FEEDBACK_DURATION_MS) {
-        // Turn off feedback LEDs
+      // Keep button LED on while button is held during feedback
+      static bool ledTurnedOff = false;
+      if (!pressed(lastButtonPressed) && !ledTurnedOff) {
+        // Button released, turn off button LED (only once)
+        setBtnLed(lastButtonPressed, false);
+        ledTurnedOff = true;
+      }
+
+      if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
+        // Turn off all feedback LEDs
         for (int i = 0; i < COLOR_COUNT; i++) {
           setLed((Color)i, false);
           setBtnLed((Color)i, false);
         }
-        
+
         // Extend sequence and continue
         extendSequence();
+        ledTurnedOff = false; // Reset flag for next time
         gameState = SEQ_DISPLAY_INIT;
       }
       break;
     }
-    
+
     case WRONG_FEEDBACK: {
-      if (now - stateTimer > FEEDBACK_DURATION_MS) {
-        // Clear wrong button LED feedback
+      // Keep button LED on while button is held during feedback
+      static bool ledTurnedOff = false;
+      if (!pressed(lastButtonPressed) && !ledTurnedOff) {
+        // Button released, turn off button LED (only once)
+        setBtnLed(lastButtonPressed, false);
+        ledTurnedOff = true;
+      }
+
+      if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
+        // Clear all LED feedback (both wing and button LEDs)
         for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, false);
           setBtnLed((Color)i, false);
         }
+        ledTurnedOff = false; // Reset flag for next time
+        audioFinished = false; // Reset flag before playing
         audio.playGameOver();
         stateTimer = now;
         gameState = GAME_OVER;
       }
       break;
     }
-    
+
     case TIMEOUT_FEEDBACK: {
-      if (now - stateTimer > FEEDBACK_DURATION_MS) {
+      if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
+        // Clear all LEDs before game over
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, false);
+          setBtnLed((Color)i, false);
+        }
+        audioFinished = false; // Reset flag before playing
         audio.playGameOver();
         stateTimer = now;
         gameState = GAME_OVER;
@@ -942,31 +1060,59 @@ void loop() {
     }
     
     case GAME_OVER: {
-      if (now - stateTimer > GAME_OVER_DURATION_MS) {
+      if (isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
         if (game.score > 0) {
+          audioFinished = false; // Reset flag before playing
           audio.playScore(game.score);
           stateTimer = now;
           gameState = SCORE_DISPLAY;
         } else {
-          // No score to announce, back to idle
-          scheduleNextInvite();
-          ambientTimer = now;
-          effectChangeTimer = now;
-          gameState = IDLE;
-          Serial.println("Back to idle mode");
+          // No score to announce, go to post-game invite
+          gameState = POST_GAME_INVITE;
+          stateTimer = now;
+          Serial.println("No score, moving to post-game invite");
         }
       }
       break;
     }
-    
+
     case SCORE_DISPLAY: {
-      if (now - stateTimer > SCORE_DISPLAY_DURATION_MS) {
-        scheduleNextInvite();
-        ambientTimer = now;
-        effectChangeTimer = now;
-        gameState = IDLE;
-        Serial.printf("Game over! Final score: %d - Back to idle\n", game.score);
+      if (isAudioComplete(stateTimer, SCORE_DISPLAY_DURATION_MS)) {
+        Serial.printf("Game over! Final score: %d\n", game.score);
+        gameState = POST_GAME_INVITE;
+        stateTimer = now;
       }
+      break;
+    }
+
+    case POST_GAME_INVITE: {
+      // Add delay to ensure Game Over audio completes before playing invite
+      static bool delayStarted = false;
+      if (!delayStarted) {
+        stateTimer = now;
+        delayStarted = true;
+        Serial.printf("Waiting %lu ms before post-game invite...\n", POST_GAME_INVITE_DELAY_MS);
+        break;
+      }
+
+      // Wait configured delay before playing invite to ensure Game Over audio finishes
+      if (now - stateTimer < POST_GAME_INVITE_DELAY_MS) {
+        break;
+      }
+
+      // Play an invite message to encourage replay
+      audioFinished = false; // Reset flag before playing
+      audio.playInvite();
+      inviteSequence(); // Visual invite
+      Serial.println("Post-game invite: encouraging player to play again");
+
+      // Now return to idle with ambient effects
+      scheduleNextInvite();
+      ambientTimer = now;
+      effectChangeTimer = now;
+      delayStarted = false; // Reset flag for next time
+      gameState = IDLE;
+      Serial.println("Back to idle mode");
       break;
     }
   }
