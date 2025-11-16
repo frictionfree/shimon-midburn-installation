@@ -96,6 +96,20 @@ constexpr uint8_t AUDIO_COLOR_BLUE = 2;          // /01/002.mp3 - "Blue"
 constexpr uint8_t AUDIO_COLOR_GREEN = 3;         // /01/003.mp3 - "Green"
 constexpr uint8_t AUDIO_COLOR_YELLOW = 4;        // /01/004.mp3 - "Yellow"
 
+// --- Multiple Audio Variations Configuration ---
+// New audio variation system for frequently repeated messages
+constexpr uint8_t MYTURN_BASE = 21;              // "My Turn" base file number (0021-0025.mp3)
+constexpr uint8_t MYTURN_COUNT = 5;              // Number of "My Turn" variations
+
+constexpr uint8_t YOURTURN_BASE = 31;            // "Your Turn" base file number (0031-0035.mp3)
+constexpr uint8_t YOURTURN_COUNT = 5;            // Number of "Your Turn" variations
+
+constexpr uint8_t POSITIVE_BASE = 41;            // Positive feedback base file number (0041-0045.mp3)
+constexpr uint8_t POSITIVE_COUNT = 5;            // Number of positive feedback variations
+
+// Anti-repetition tracking
+constexpr bool ENABLE_ANTI_REPETITION = true;    // Avoid playing same variation twice in a row
+
 // --- Game Features Configuration ---
 // Toggle these features on/off as desired
 

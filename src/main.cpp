@@ -33,6 +33,37 @@ bool audioFinished = false;
 unsigned long audioStartTime = 0;
 int currentPlayingTrack = -1;  // Track which file is currently playing (-1 = none)
 
+// ---- Audio Variation Tracking ----
+// Anti-repetition tracking for audio variations
+uint8_t lastMyTurn = 255;      // Last "My Turn" variation played (255 = none)
+uint8_t lastYourTurn = 255;    // Last "Your Turn" variation played (255 = none)
+uint8_t lastPositive = 255;    // Last positive feedback variation played (255 = none)
+
+// ---- Audio Variation Helper Functions ----
+uint8_t selectVariationWithFallback(uint8_t base, uint8_t count, uint8_t& lastPlayed, const char* category) {
+  uint8_t selection;
+  uint8_t attempts = 0;
+  const uint8_t maxAttempts = count * 2; // Prevent infinite loop
+  
+  do {
+    selection = random(0, count);  // 0 to count-1
+    attempts++;
+    if (attempts > maxAttempts) {
+      Serial.printf("[AUDIO] Warning: Too many attempts selecting %s variation, using %d\n", category, selection);
+      break;
+    }
+  } while (ENABLE_ANTI_REPETITION && selection == lastPlayed && count > 1);
+  
+  lastPlayed = selection;
+  uint8_t fileNumber = base + selection;
+  
+  Serial.printf("[AUDIO] Selected %s variation %d (file %04d.mp3), avoiding last: %s\n", 
+                category, selection + 1, fileNumber, 
+                lastPlayed == 255 ? "none" : String(lastPlayed + 1).c_str());
+  
+  return fileNumber;
+}
+
 // ---- Enhanced Audio System ----
 #ifdef USE_WOKWI
 // Simulation version - prints to Serial
@@ -50,12 +81,14 @@ struct Audio {
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
   }
   
-  void playMyTurn() {
-    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3\n", AUDIO_MY_TURN);
+  void playMyTurnVariation() {
+    uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
+    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
   }
   
-  void playYourTurn() {
-    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3\n", AUDIO_YOUR_TURN);
+  void playYourTurnVariation() {
+    uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
+    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
   }
   
   void playColorName(Color c) {
@@ -64,8 +97,9 @@ struct Audio {
                   AUDIO_COLOR_FOLDER, c+1);
   }
   
-  void playCorrect() {
-    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3\n", AUDIO_CORRECT);
+  void playPositiveFeedbackVariation() {
+    uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
+    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
   }
 
   void playWrong() {
@@ -132,18 +166,20 @@ struct Audio {
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
   }
 
-  void playMyTurn() {
+  void playMyTurnVariation() {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_MY_TURN;
-    dfPlayer.play(AUDIO_MY_TURN);
-    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_MY_TURN, AUDIO_MY_TURN);
+    uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
+    currentPlayingTrack = fileNumber;
+    dfPlayer.play(fileNumber);
+    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", fileNumber, fileNumber);
   }
 
-  void playYourTurn() {
+  void playYourTurnVariation() {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_YOUR_TURN;
-    dfPlayer.play(AUDIO_YOUR_TURN);
-    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_YOUR_TURN, AUDIO_YOUR_TURN);
+    uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
+    currentPlayingTrack = fileNumber;
+    dfPlayer.play(fileNumber);
+    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", fileNumber, fileNumber);
   }
 
   void playColorName(Color c) {
@@ -157,11 +193,12 @@ struct Audio {
                   AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
   }
 
-  void playCorrect() {
+  void playPositiveFeedbackVariation() {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_CORRECT;
-    dfPlayer.play(AUDIO_CORRECT);
-    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_CORRECT, AUDIO_CORRECT);
+    uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
+    currentPlayingTrack = fileNumber;
+    dfPlayer.play(fileNumber);
+    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", fileNumber, fileNumber);
   }
 
   void playWrong() {
@@ -854,7 +891,7 @@ void loop() {
       // Small delay to let DFPlayer finish previous audio
       delay(250);
       audioFinished = false; // Reset flag before playing
-      audio.playMyTurn();
+      audio.playMyTurnVariation();
       stateTimer = now;
       gameState = SEQ_DISPLAY_MYTURN;
       Serial.printf("Displaying sequence level %d\n", game.level);
@@ -897,7 +934,7 @@ void loop() {
           if (currentStep >= game.level) {
             // Sequence complete
             audioFinished = false; // Reset flag before playing
-            audio.playYourTurn();
+            audio.playYourTurnVariation();
             stateTimer = now;
             currentStep = 0;
             gameState = SEQ_DISPLAY_YOURTURN;
@@ -962,7 +999,7 @@ void loop() {
             if (currentStep >= game.level) {
               // Level complete!
               audioFinished = false; // Reset flag before playing
-              audio.playCorrect();
+              audio.playPositiveFeedbackVariation();
               game.score += game.level; // Score based on level
               stateTimer = now;
               gameState = CORRECT_FEEDBACK;
