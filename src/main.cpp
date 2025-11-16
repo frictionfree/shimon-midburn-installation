@@ -9,6 +9,31 @@
 // Color enum mapped to audio file numbers: Blue=1, Red=2, Green=3, Yellow=4
 enum Color { BLUE=0, RED=1, GREEN=2, YELLOW=3 };
 
+// --- Difficulty Level System ---
+enum DifficultyLevel {
+  NOVICE = 0,       // Blue button - Basic mode
+  INTERMEDIATE = 1, // Red button - Confuser mode
+  ADVANCED = 2,     // Green button - New sequence each turn
+  PRO = 3           // Yellow button - Alternating LED/audio
+};
+
+struct DifficultySettings {
+  uint8_t startingSequenceLength;
+  bool confuserEnabled;
+  bool speedProgressionEnabled;
+  bool regenerateSequenceEachTurn;  // For Green level
+  bool alternatingLedAudio;         // For Yellow level
+};
+
+const DifficultySettings difficultyConfigs[4] = {
+  {1, false, true, false, false},  // NOVICE (Blue)
+  {3, true, true, false, false},   // INTERMEDIATE (Red)
+  {3, false, false, true, false},  // ADVANCED (Green)
+  {1, false, true, false, true}    // PRO (Yellow)
+};
+
+DifficultyLevel selectedDifficulty = NOVICE;  // Default
+
 // --- Game Data Structure ---
 struct GameState {
   uint8_t seq[MAX_SEQUENCE_LENGTH]; // Color sequence storage
@@ -78,7 +103,19 @@ struct Audio {
   void playInstructions() {
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
   }
-  
+
+  void playDifficultyInstructions(DifficultyLevel difficulty) {
+    uint8_t instructionFiles[] = {
+      AUDIO_INSTRUCTIONS_BLUE,    // 12
+      AUDIO_INSTRUCTIONS_RED,     // 13
+      AUDIO_INSTRUCTIONS_GREEN,   // 14
+      AUDIO_INSTRUCTIONS_YELLOW   // 15
+    };
+    const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
+    Serial.printf("[AUDIO] Difficulty instructions (%s) from /mp3/%04d.mp3\n",
+                  difficultyNames[difficulty], instructionFiles[difficulty]);
+  }
+
   void playMyTurn() {
     uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
     Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
@@ -173,6 +210,23 @@ struct Audio {
     currentPlayingTrack = AUDIO_INSTRUCTIONS;
     dfPlayer.playMp3Folder(AUDIO_INSTRUCTIONS);
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
+  }
+
+  void playDifficultyInstructions(DifficultyLevel difficulty) {
+    if (!initialized) return;
+    uint8_t instructionFiles[] = {
+      AUDIO_INSTRUCTIONS_BLUE,    // 12
+      AUDIO_INSTRUCTIONS_RED,     // 13
+      AUDIO_INSTRUCTIONS_GREEN,   // 14
+      AUDIO_INSTRUCTIONS_YELLOW   // 15
+    };
+    const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
+    uint8_t fileNumber = instructionFiles[difficulty];
+    currentPlayingTrack = fileNumber;
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Difficulty instructions (%s) from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
+                  difficultyNames[difficulty], fileNumber, fileNumber);
+    audioFinished = false;
   }
 
   void playMyTurn() {
@@ -293,6 +347,8 @@ struct Audio {
 enum GameFSM {
   IDLE,                 // Waiting for player, periodic invites
   INSTRUCTIONS,         // Playing instructions
+  DIFFICULTY_SELECTION, // Waiting for difficulty button press
+  DIFFICULTY_INSTRUCTIONS, // Playing difficulty-specific instructions
   AWAIT_START,          // Waiting for start button
   SEQ_DISPLAY_INIT,     // Initialize sequence display
   SEQ_DISPLAY_MYTURN,   // Playing "My Turn" audio
@@ -374,22 +430,35 @@ static inline void setBtnLed(Color c, bool on) {
                 btnLedPins[c], on ? "ON" : "OFF");
 }
 
-static inline bool pressed(Color c) { 
-  return digitalRead(btnPins[c]) == LOW; 
+static inline bool pressed(Color c) {
+  return digitalRead(btnPins[c]) == LOW;
 }
 
+// Forward declarations
+void generateNewSequence(uint8_t length);
+Color generateNextColor();
+
 void initializeGame() {
-  game.level = 1;
+  // Apply difficulty settings
+  auto settings = difficultyConfigs[selectedDifficulty];
+
+  game.level = settings.startingSequenceLength;
   game.score = 0;
   game.strikes = 0;
   game.cueOnMs = CUE_ON_MS_DEFAULT;
   game.cueGapMs = CUE_GAP_MS_DEFAULT;
   game.inputTimeout = INPUT_TIMEOUT_MS_DEFAULT;
-  
-  // Initialize first sequence element
-  game.seq[0] = random(0, COLOR_COUNT);
-  
-  Serial.printf("Game initialized: Level %d, First color: %d\n", game.level, game.seq[0]);
+
+  // Set confuser mode based on difficulty
+  ENABLE_AUDIO_CONFUSER = settings.confuserEnabled;
+
+  // Generate initial sequence based on starting length
+  generateNewSequence(game.level);
+
+  const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
+  Serial.printf("Game initialized: Difficulty=%s, Level=%d, Confuser=%s\n",
+                difficultyNames[selectedDifficulty], game.level,
+                ENABLE_AUDIO_CONFUSER ? "ON" : "OFF");
 }
 
 Color generateNextColor() {
@@ -425,31 +494,33 @@ Color generateConfuserColor(Color ledColor) {
   if (!ENABLE_AUDIO_CONFUSER || !CONFUSER_MUST_DIFFER) {
     return ledColor; // No confuser or same color allowed
   }
-  
+
   // Generate different color for confuser
   Color voiceColor;
   do {
     voiceColor = (Color)random(0, COLOR_COUNT);
   } while (voiceColor == ledColor);
-  
+
   return voiceColor;
+}
+
+void generateNewSequence(uint8_t length) {
+  // Generate completely new random sequence (used for Green difficulty)
+  // Temporarily set game.level to generate sequence properly
+  uint8_t originalLevel = game.level;
+  for (int i = 0; i < length && i < MAX_SEQUENCE_LENGTH; i++) {
+    game.level = i;
+    game.seq[i] = generateNextColor();
+  }
+  game.level = originalLevel;  // Restore original level
+  Serial.printf("Generated new sequence of length %d\n", length);
 }
 
 void extendSequence() {
   if (game.level < MAX_SEQUENCE_LENGTH) {
     game.seq[game.level] = generateNextColor();
     game.level++;
-    
-    // Increase difficulty only every 3 levels for more gradual progression
-    if (game.level % 3 == 0) {
-      game.cueOnMs = max(CUE_ON_MS_MIN, (unsigned long)(game.cueOnMs * SPEED_STEP));
-      game.cueGapMs = max(CUE_GAP_MS_MIN, (unsigned long)(game.cueGapMs * SPEED_STEP));
-      Serial.printf("Sequence extended to level %d, speeds INCREASED: cue=%lu gap=%lu\n", 
-                    game.level, game.cueOnMs, game.cueGapMs);
-    } else {
-      Serial.printf("Sequence extended to level %d, speeds unchanged: cue=%lu gap=%lu\n", 
-                    game.level, game.cueOnMs, game.cueGapMs);
-    }
+    Serial.printf("Sequence extended to level %d\n", game.level);
   }
 }
 
@@ -874,12 +945,66 @@ void loop() {
 
     case INSTRUCTIONS: {
       if (isAudioComplete(stateTimer, INSTRUCTIONS_DURATION_MS)) {
+        // Turn off all LEDs
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+
+        stateTimer = now;
+        gameState = DIFFICULTY_SELECTION;
+        Serial.println("Select difficulty: Press Blue/Red/Green/Yellow button");
+      }
+      break;
+    }
+
+    case DIFFICULTY_SELECTION: {
+      // Visual feedback: pulse all 4 button LEDs
+      static unsigned long pulseTimer = 0;
+      if (now - pulseTimer > 500) {
+        static bool pulseState = false;
+        pulseState = !pulseState;
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setBtnLed((Color)i, pulseState);
+        }
+        pulseTimer = now;
+      }
+
+      // Wait for button press
+      if (anyButtonPressed()) {
+        selectedDifficulty = (DifficultyLevel)lastButtonPressed;
+
+        // Turn off all button LEDs except selected
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setBtnLed((Color)i, i == selectedDifficulty);
+        }
+
+        const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
+        Serial.printf("Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
+
+        audioFinished = false;
+        audio.playDifficultyInstructions(selectedDifficulty);
+        stateTimer = now;
+        gameState = DIFFICULTY_INSTRUCTIONS;
+      }
+      break;
+    }
+
+    case DIFFICULTY_INSTRUCTIONS: {
+      // Keep selected button LED on
+      setBtnLed((Color)selectedDifficulty, true);
+
+      // Wait for audio to finish
+      if (isAudioComplete(stateTimer, INSTRUCTIONS_DURATION_MS)) {
+        // Turn off selected button LED
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setBtnLed((Color)i, false);
+        }
+
+        stateTimer = now;
         gameState = AWAIT_START;
         Serial.println("Press any button to start game...");
       }
       break;
     }
-    
+
     case AWAIT_START: {
       // Show "ready to start" pulsing effect
       readyToStartEffect(now);
@@ -926,15 +1051,31 @@ void loop() {
       if (!ledOn) {
         // Turn on LED for current step
         Color ledColor = (Color)game.seq[currentStep];
-        setLed(ledColor, true);
+        auto settings = difficultyConfigs[selectedDifficulty];
 
-        // Play color with potential confuser
-        Color voiceColor = generateConfuserColor(ledColor);
-        audio.playColorName(voiceColor);
+        if (settings.alternatingLedAudio) {
+          // Yellow level - alternating LED/audio presentation
+          if (currentStep % 2 == 0) {
+            // Even step: LED only (no audio)
+            setLed(ledColor, true);
+            Serial.printf("Step %d: LED=%d (SILENT - Yellow mode)\n", currentStep, ledColor);
+          } else {
+            // Odd step: Audio only (no LED)
+            audio.playColorName(ledColor);  // Correct color
+            Serial.printf("Step %d: Voice=%d (DARK - Yellow mode)\n", currentStep, ledColor);
+          }
+        } else {
+          // Blue/Red/Green - normal presentation
+          setLed(ledColor, true);
 
-        Serial.printf("Step %d: LED=%d, Voice=%d%s\n",
-                      currentStep, ledColor, voiceColor,
-                      (ledColor != voiceColor) ? " (CONFUSER!)" : "");
+          // Play color with potential confuser
+          Color voiceColor = generateConfuserColor(ledColor);
+          audio.playColorName(voiceColor);
+
+          Serial.printf("Step %d: LED=%d, Voice=%d%s\n",
+                        currentStep, ledColor, voiceColor,
+                        (ledColor != voiceColor) ? " (CONFUSER!)" : "");
+        }
 
         stateTimer = now;
         ledOn = true;
@@ -1058,8 +1199,25 @@ void loop() {
           setBtnLed((Color)i, false);
         }
 
-        // Extend sequence and continue
-        extendSequence();
+        auto settings = difficultyConfigs[selectedDifficulty];
+
+        if (settings.regenerateSequenceEachTurn) {
+          // Green level - generate completely new sequence
+          game.level++;  // Increase length
+          generateNewSequence(game.level);  // Fresh random sequence
+          Serial.printf("Green level: Generated new sequence, length %d\n", game.level);
+        } else {
+          // Blue/Red/Yellow - extend existing sequence
+          extendSequence();
+        }
+
+        // Apply speed progression only if enabled for this difficulty
+        if (settings.speedProgressionEnabled && game.level % 3 == 0) {
+          game.cueOnMs = max(CUE_ON_MS_MIN, (unsigned long)(game.cueOnMs * SPEED_STEP));
+          game.cueGapMs = max(CUE_GAP_MS_MIN, (unsigned long)(game.cueGapMs * SPEED_STEP));
+          Serial.printf("Speed increased: cue=%lu gap=%lu\n", game.cueOnMs, game.cueGapMs);
+        }
+
         ledTurnedOff = false; // Reset flag for next time
         gameState = SEQ_DISPLAY_INIT;
       }
