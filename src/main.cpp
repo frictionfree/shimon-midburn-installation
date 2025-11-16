@@ -158,31 +158,31 @@ struct Audio {
     if (!initialized) return;
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
     currentPlayingTrack = inviteNum;
-    dfPlayer.play(inviteNum);
-    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", inviteNum, inviteNum, inviteNum);
+    dfPlayer.playMp3Folder(inviteNum);
+    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", inviteNum, inviteNum, inviteNum);
   }
 
   void playInstructions() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_INSTRUCTIONS;
-    dfPlayer.play(AUDIO_INSTRUCTIONS);
-    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
+    dfPlayer.playMp3Folder(AUDIO_INSTRUCTIONS);
+    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
   }
 
   void playMyTurnVariation() {
     if (!initialized) return;
     uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
     currentPlayingTrack = fileNumber;
-    dfPlayer.play(fileNumber);
-    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", fileNumber, fileNumber);
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
   }
 
   void playYourTurnVariation() {
     if (!initialized) return;
     uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
     currentPlayingTrack = fileNumber;
-    dfPlayer.play(fileNumber);
-    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", fileNumber, fileNumber);
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
   }
 
   void playColorName(Color c) {
@@ -191,8 +191,8 @@ struct Audio {
     uint8_t colorFileNumbers[] = {AUDIO_COLOR_RED, AUDIO_COLOR_BLUE, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
     uint8_t fileNumber = colorFileNumbers[c];
     currentPlayingTrack = fileNumber;
-    dfPlayer.play(fileNumber);
-    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3 (DFPlayer.play(%d))\n",
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
                   c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
                   fileNumber, fileNumber);
   }
@@ -201,29 +201,29 @@ struct Audio {
     if (!initialized) return;
     uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
     currentPlayingTrack = fileNumber;
-    dfPlayer.play(fileNumber);
-    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", fileNumber, fileNumber);
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
   }
 
   void playWrong() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_WRONG;
-    dfPlayer.play(AUDIO_WRONG);
-    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
+    dfPlayer.playMp3Folder(AUDIO_WRONG);
+    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
   }
 
   void playTimeout() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_TIMEOUT;
-    dfPlayer.play(AUDIO_TIMEOUT);
-    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
+    dfPlayer.playMp3Folder(AUDIO_TIMEOUT);
+    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
   }
 
   void playGameOver() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_GAME_OVER;
-    dfPlayer.play(AUDIO_GAME_OVER);
-    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
+    dfPlayer.playMp3Folder(AUDIO_GAME_OVER);
+    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
   }
 
   void playScore(uint8_t score) {
@@ -232,8 +232,8 @@ struct Audio {
       // Use direct file access from /mp3/ directory
       uint8_t fileNumber = AUDIO_SCORE_BASE + score;
       currentPlayingTrack = fileNumber;
-      dfPlayer.play(fileNumber);
-      Serial.printf("[AUDIO] Score: %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", score, fileNumber, fileNumber);
+      dfPlayer.playMp3Folder(fileNumber);
+      Serial.printf("[AUDIO] Score: %d from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", score, fileNumber, fileNumber);
     }
   }
   
