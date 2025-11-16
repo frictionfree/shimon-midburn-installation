@@ -87,8 +87,8 @@ mp3/
 ├── 0051.mp3          # Wrong button press (moved from 0009)
 ├── 0052.mp3          # Game over (moved from 0010)
 ├── 0053.mp3          # Timeout notification (moved from 0012)
-01/                    # Color names (unchanged)
-└── 02/               # Score announcements (unchanged)
+├── 0061-0064.mp3     # Color names (migrated from /01/ folder)
+└── 0070-0170.mp3     # Score announcements (migrated from /02/ folder)
 ```
 
 ### Code Changes Required

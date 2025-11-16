@@ -95,12 +95,15 @@ constexpr uint8_t AUDIO_GAME_OVER = 52;          // Game over (0052.mp3)
 constexpr uint8_t AUDIO_CORRECT = 41;            // Positive feedback / Level complete - Legacy, replaced by variations (0041-0045.mp3)
 constexpr uint8_t AUDIO_TIMEOUT = 53;            // Timeout notification (0053.mp3)
 
-// Color Audio Files (folder /01/)
-constexpr uint8_t AUDIO_COLOR_FOLDER = 1;        // Folder number for color audio files
-constexpr uint8_t AUDIO_COLOR_RED = 1;           // /01/001.mp3 - "Red"
-constexpr uint8_t AUDIO_COLOR_BLUE = 2;          // /01/002.mp3 - "Blue"
-constexpr uint8_t AUDIO_COLOR_GREEN = 3;         // /01/003.mp3 - "Green"
-constexpr uint8_t AUDIO_COLOR_YELLOW = 4;        // /01/004.mp3 - "Yellow"
+// Color Audio Files (migrated to /mp3/ directory)
+constexpr uint8_t AUDIO_COLOR_RED = 61;          // /mp3/0061.mp3 - "Red"
+constexpr uint8_t AUDIO_COLOR_BLUE = 62;         // /mp3/0062.mp3 - "Blue"
+constexpr uint8_t AUDIO_COLOR_GREEN = 63;        // /mp3/0063.mp3 - "Green"
+constexpr uint8_t AUDIO_COLOR_YELLOW = 64;       // /mp3/0064.mp3 - "Yellow"
+
+// Score Audio Files (migrated to /mp3/ directory)
+// Note: Score files use base + score value for direct calculation
+constexpr uint8_t AUDIO_SCORE_BASE = 70;         // Base for score files (0070.mp3 = score 0, 0071.mp3 = score 1, etc.)
 
 // --- Multiple Audio Variations Configuration ---
 // New audio variation system for frequently repeated messages

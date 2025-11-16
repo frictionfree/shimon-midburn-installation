@@ -92,9 +92,11 @@ struct Audio {
   }
   
   void playColorName(Color c) {
-    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3\n",
+    uint8_t colorFileNumbers[] = {AUDIO_COLOR_RED, AUDIO_COLOR_BLUE, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
+    uint8_t fileNumber = colorFileNumbers[c];
+    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3\n",
                   c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
-                  AUDIO_COLOR_FOLDER, c+1);
+                  fileNumber);
   }
   
   void playPositiveFeedbackVariation() {
@@ -115,7 +117,8 @@ struct Audio {
   }
   
   void playScore(uint8_t score) {
-    Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3\n", score, score);
+    uint8_t fileNumber = AUDIO_SCORE_BASE + score;
+    Serial.printf("[AUDIO] Score: %d from /mp3/%04d.mp3\n", score, fileNumber);
   }
 } audio;
 
@@ -184,13 +187,14 @@ struct Audio {
 
   void playColorName(Color c) {
     if (!initialized) return;
-    // Play from folder 01, files 001-004.mp3
-    // Note: For folder playback, we don't track the track number as it's more complex
-    currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
-    dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
-    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3 (DFPlayer.playFolder(%d, %d))\n",
+    // Use direct file access from /mp3/ directory
+    uint8_t colorFileNumbers[] = {AUDIO_COLOR_RED, AUDIO_COLOR_BLUE, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
+    uint8_t fileNumber = colorFileNumbers[c];
+    currentPlayingTrack = fileNumber;
+    dfPlayer.play(fileNumber);
+    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3 (DFPlayer.play(%d))\n",
                   c==RED?"Red":c==BLUE?"Blue":c==GREEN?"Green":"Yellow",
-                  AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
+                  fileNumber, fileNumber);
   }
 
   void playPositiveFeedbackVariation() {
@@ -225,11 +229,11 @@ struct Audio {
   void playScore(uint8_t score) {
     if (!initialized) return;
     if (score <= 100) {
-      // Play from folder 02, files 000-100.mp3
-      // Note: For folder playback, we don't track the track number as it's more complex
-      currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
-      dfPlayer.playFolder(2, score);
-      Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3 (DFPlayer.playFolder(2, %d))\n", score, score, score);
+      // Use direct file access from /mp3/ directory
+      uint8_t fileNumber = AUDIO_SCORE_BASE + score;
+      currentPlayingTrack = fileNumber;
+      dfPlayer.play(fileNumber);
+      Serial.printf("[AUDIO] Score: %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", score, fileNumber, fileNumber);
     }
   }
   

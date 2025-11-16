@@ -39,23 +39,23 @@ Main game sounds:
 - `mp3/0052.mp3` - Game Over: "Game over! Thanks for playing!"
 - `mp3/0053.mp3` - Timeout: "Time's up! Game over."
 
-### Folder 01 (`/01/`)
-Color names (001-004.mp3):
-- `001.mp3` - "Red"
-- `002.mp3` - "Blue" 
-- `003.mp3` - "Green"
-- `004.mp3` - "Yellow"
+### Color Audio Files (0061-0064.mp3)
+Color names for confuser mode:
+- `mp3/0061.mp3` - "Red"
+- `mp3/0062.mp3` - "Blue" 
+- `mp3/0063.mp3` - "Green"
+- `mp3/0064.mp3` - "Yellow"
 
-### Folder 02 (`/02/`)
-Score announcements (000-100.mp3):
-- `000.mp3` - "Zero points"
-- `001.mp3` - "One point"
-- `002.mp3` - "Two points"
-- `005.mp3` - "Five points"
-- `010.mp3` - "Ten points"
-- `025.mp3` - "Twenty-five points"
-- `050.mp3` - "Fifty points"
-- `100.mp3` - "One hundred points! Excellent!"
+### Score Audio Files (0070-0170.mp3)
+Score announcements (base 70 + score value):
+- `mp3/0070.mp3` - "Zero points"
+- `mp3/0071.mp3` - "One point"
+- `mp3/0072.mp3` - "Two points"
+- `mp3/0075.mp3` - "Five points"
+- `mp3/0080.mp3` - "Ten points"
+- `mp3/0095.mp3` - "Twenty-five points"
+- `mp3/0120.mp3` - "Fifty points"
+- `mp3/0170.mp3` - "One hundred points! Excellent!"
 
 ## Audio Specifications
 - **Format**: MP3, 16-bit, mono recommended
