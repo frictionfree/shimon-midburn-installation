@@ -97,7 +97,14 @@ struct Audio {
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
                   colorFileNumbers[c]);
   }
-  
+
+  void playButtonFeedback(Color c) {
+    uint8_t btnFeedbackFiles[] = {BTN_AUDIO_COLOR_BLUE, BTN_AUDIO_COLOR_RED, BTN_AUDIO_COLOR_GREEN, BTN_AUDIO_COLOR_YELLOW};
+    Serial.printf("[AUDIO] Button feedback: %s from /mp3/%04d.mp3\n",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
+                  btnFeedbackFiles[c]);
+  }
+
   void playCorrect() {
     uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
     Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
@@ -193,6 +200,17 @@ struct Audio {
     currentPlayingTrack = fileNumber;
     dfPlayer.playMp3Folder(fileNumber);
     Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
+                  fileNumber, fileNumber);
+  }
+
+  void playButtonFeedback(Color c) {
+    if (!initialized) return;
+    uint8_t btnFeedbackFiles[] = {BTN_AUDIO_COLOR_BLUE, BTN_AUDIO_COLOR_RED, BTN_AUDIO_COLOR_GREEN, BTN_AUDIO_COLOR_YELLOW};
+    uint8_t fileNumber = btnFeedbackFiles[c];
+    // Don't track this as currentPlayingTrack - it's immediate feedback, not tracked
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Button feedback: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
                   fileNumber, fileNumber);
   }
@@ -981,7 +999,8 @@ void loop() {
                         lastButtonPressed, expectedColor, currentStep);
           
           if (lastButtonPressed == expectedColor) {
-            // Correct!
+            // Correct! Play button feedback immediately for minimal latency
+            audio.playButtonFeedback(lastButtonPressed);
             setLed(lastButtonPressed, true); // Brief wing LED feedback
             setBtnLed(lastButtonPressed, true); // Turn on button LED
             currentStep++;

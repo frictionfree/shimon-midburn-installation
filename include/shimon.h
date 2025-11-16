@@ -91,15 +91,21 @@ constexpr uint8_t AUDIO_INSTRUCTIONS_YELLOW = 15;   // Yellow-themed instruction
 constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3) - Legacy, replaced by variations
 constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3) - Legacy, replaced by variations
 constexpr uint8_t AUDIO_WRONG = 51;              // Wrong button press (0051.mp3)
-constexpr uint8_t AUDIO_GAME_OVER = 52;          // Game over (0052.mp3)
+constexpr uint8_t AUDIO_GAME_OVER = 53;          // Game over (0052.mp3)
 constexpr uint8_t AUDIO_CORRECT = 41;            // Positive feedback / Level complete - Legacy, replaced by variations (0041-0045.mp3)
-constexpr uint8_t AUDIO_TIMEOUT = 53;            // Timeout notification (0053.mp3)
+constexpr uint8_t AUDIO_TIMEOUT = 52;            // Timeout notification (0053.mp3)
 
 // Color Audio Files (migrated to /mp3/ directory)
 constexpr uint8_t AUDIO_COLOR_RED = 61;          // /mp3/0061.mp3 - "Red"
 constexpr uint8_t AUDIO_COLOR_BLUE = 62;         // /mp3/0062.mp3 - "Blue"
 constexpr uint8_t AUDIO_COLOR_GREEN = 63;        // /mp3/0063.mp3 - "Green"
 constexpr uint8_t AUDIO_COLOR_YELLOW = 64;       // /mp3/0064.mp3 - "Yellow"
+
+// Color Audio Files for the button feedback (migrated to /mp3/ directory)
+constexpr uint8_t BTN_AUDIO_COLOR_RED = 65;          // /mp3/0061.mp3 - "Red"
+constexpr uint8_t BTN_AUDIO_COLOR_BLUE = 66;         // /mp3/0062.mp3 - "Blue"
+constexpr uint8_t BTN_AUDIO_COLOR_GREEN = 67;        // /mp3/0063.mp3 - "Green"
+constexpr uint8_t BTN_AUDIO_COLOR_YELLOW = 68;       // /mp3/0064.mp3 - "Yellow"
 
 // Score Audio Files (migrated to /mp3/ directory)
 // Note: Score files use base + score value for direct calculation
