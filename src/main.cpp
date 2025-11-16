@@ -35,6 +35,33 @@ bool audioFinished = false;
 unsigned long audioStartTime = 0;
 int currentPlayingTrack = -1;  // Track which file is currently playing (-1 = none)
 
+// --- Multiple Audio Variations Tracking ---
+// Global variables for variation tracking (255 = none played yet)
+uint8_t lastMyTurn = 255;      // Track last "My Turn" variation
+uint8_t lastYourTurn = 255;    // Track last "Your Turn" variation  
+uint8_t lastPositive = 255;    // Track last positive feedback variation
+
+// --- Variation Selection Helper Function ---
+uint8_t selectVariationWithFallback(uint8_t base, uint8_t count, uint8_t& lastPlayed, const char* category) {
+    if (count == 0) {
+        Serial.printf("[AUDIO] No variations available for %s, using base file %d\n", category, base);
+        return base;
+    }
+    
+    uint8_t selection;
+    do {
+        selection = random(0, count);
+    } while (ENABLE_ANTI_REPETITION && count > 1 && selection == lastPlayed);
+    
+    lastPlayed = selection;
+    uint8_t fileNumber = base + selection;
+    
+    Serial.printf("[AUDIO] Selected %s variation %d (file %04d.mp3), avoiding last: %d\n", 
+                  category, selection, fileNumber, (lastPlayed == 255) ? -1 : (int)(lastPlayed));
+    
+    return fileNumber;
+}
+
 // ---- Enhanced Audio System ----
 #ifdef USE_WOKWI
 // Simulation version - prints to Serial
@@ -53,21 +80,35 @@ struct Audio {
   }
   
   void playMyTurn() {
-    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3\n", AUDIO_MY_TURN);
+    uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
+    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
+    audioFinished = false;
   }
   
   void playYourTurn() {
-    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3\n", AUDIO_YOUR_TURN);
+    uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
+    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
+    audioFinished = false;
   }
   
   void playColorName(Color c) {
-    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3\n",
+    uint8_t colorFileNumbers[] = {AUDIO_COLOR_BLUE, AUDIO_COLOR_RED, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
+    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3\n",
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
-                  AUDIO_COLOR_FOLDER, c+1);
+                  colorFileNumbers[c]);
   }
-  
+
+  void playButtonFeedback(Color c) {
+    uint8_t btnFeedbackFiles[] = {BTN_AUDIO_COLOR_BLUE, BTN_AUDIO_COLOR_RED, BTN_AUDIO_COLOR_GREEN, BTN_AUDIO_COLOR_YELLOW};
+    Serial.printf("[AUDIO] Button feedback: %s from /mp3/%04d.mp3\n",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
+                  btnFeedbackFiles[c]);
+  }
+
   void playCorrect() {
-    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3\n", AUDIO_CORRECT);
+    uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
+    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
+    audioFinished = false;
   }
 
   void playWrong() {
@@ -123,78 +164,94 @@ struct Audio {
     if (!initialized) return;
     uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
     currentPlayingTrack = inviteNum;
-    dfPlayer.play(inviteNum);
-    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", inviteNum, inviteNum, inviteNum);
+    dfPlayer.playMp3Folder(inviteNum);
+    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", inviteNum, inviteNum, inviteNum);
   }
 
   void playInstructions() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_INSTRUCTIONS;
-    dfPlayer.play(AUDIO_INSTRUCTIONS);
-    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
+    dfPlayer.playMp3Folder(AUDIO_INSTRUCTIONS);
+    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
   }
 
   void playMyTurn() {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_MY_TURN;
-    dfPlayer.play(AUDIO_MY_TURN);
-    Serial.printf("[AUDIO] My Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_MY_TURN, AUDIO_MY_TURN);
+    uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
+    currentPlayingTrack = fileNumber;
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
+    audioFinished = false;
   }
 
   void playYourTurn() {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_YOUR_TURN;
-    dfPlayer.play(AUDIO_YOUR_TURN);
-    Serial.printf("[AUDIO] Your Turn from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_YOUR_TURN, AUDIO_YOUR_TURN);
+    uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
+    currentPlayingTrack = fileNumber;
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
+    audioFinished = false;
   }
 
   void playColorName(Color c) {
     if (!initialized) return;
-    // Play from folder 01, files 001-004.mp3
-    // Note: For folder playback, we don't track the track number as it's more complex
-    currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
-    dfPlayer.playFolder(AUDIO_COLOR_FOLDER, c + 1);
-    Serial.printf("[AUDIO] Color name: %s from /%02d/%03d.mp3 (DFPlayer.playFolder(%d, %d))\n",
+    uint8_t colorFileNumbers[] = {AUDIO_COLOR_BLUE, AUDIO_COLOR_RED, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
+    uint8_t fileNumber = colorFileNumbers[c];
+    currentPlayingTrack = fileNumber;
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
-                  AUDIO_COLOR_FOLDER, c+1, AUDIO_COLOR_FOLDER, c+1);
+                  fileNumber, fileNumber);
+  }
+
+  void playButtonFeedback(Color c) {
+    if (!initialized) return;
+    uint8_t btnFeedbackFiles[] = {BTN_AUDIO_COLOR_BLUE, BTN_AUDIO_COLOR_RED, BTN_AUDIO_COLOR_GREEN, BTN_AUDIO_COLOR_YELLOW};
+    uint8_t fileNumber = btnFeedbackFiles[c];
+    // Don't track this as currentPlayingTrack - it's immediate feedback, not tracked
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Button feedback: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
+                  fileNumber, fileNumber);
   }
 
   void playCorrect() {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_CORRECT;
-    dfPlayer.play(AUDIO_CORRECT);
-    Serial.printf("[AUDIO] Correct from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_CORRECT, AUDIO_CORRECT);
+    uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
+    currentPlayingTrack = fileNumber;
+    dfPlayer.playMp3Folder(fileNumber);
+    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
+    audioFinished = false;
   }
 
   void playWrong() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_WRONG;
-    dfPlayer.play(AUDIO_WRONG);
-    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
+    dfPlayer.playMp3Folder(AUDIO_WRONG);
+    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
   }
 
   void playTimeout() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_TIMEOUT;
-    dfPlayer.play(AUDIO_TIMEOUT);
-    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
+    dfPlayer.playMp3Folder(AUDIO_TIMEOUT);
+    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
   }
 
   void playGameOver() {
     if (!initialized) return;
     currentPlayingTrack = AUDIO_GAME_OVER;
-    dfPlayer.play(AUDIO_GAME_OVER);
-    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.play(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
+    dfPlayer.playMp3Folder(AUDIO_GAME_OVER);
+    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
   }
 
   void playScore(uint8_t score) {
     if (!initialized) return;
     if (score <= 100) {
-      // Play from folder 02, files 000-100.mp3
-      // Note: For folder playback, we don't track the track number as it's more complex
-      currentPlayingTrack = -1;  // Folder playback - don't validate finish notifications
-      dfPlayer.playFolder(2, score);
-      Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3 (DFPlayer.playFolder(2, %d))\n", score, score, score);
+      uint8_t fileNumber = AUDIO_SCORE_BASE + score;  // 70 + score
+      currentPlayingTrack = fileNumber;
+      dfPlayer.playMp3Folder(fileNumber);
+      Serial.printf("[AUDIO] Score: %d from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", score, fileNumber, fileNumber);
     }
   }
   
@@ -942,7 +999,8 @@ void loop() {
                         lastButtonPressed, expectedColor, currentStep);
           
           if (lastButtonPressed == expectedColor) {
-            // Correct!
+            // Correct! Play button feedback immediately for minimal latency
+            audio.playButtonFeedback(lastButtonPressed);
             setLed(lastButtonPressed, true); // Brief wing LED feedback
             setBtnLed(lastButtonPressed, true); // Turn on button LED
             currentStep++;

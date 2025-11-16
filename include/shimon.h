@@ -81,20 +81,49 @@ constexpr uint8_t DFPLAYER_EQ = 0;               // EQ setting (0=Normal, 1=Pop,
 
 // Audio File Mapping (do not change unless you modify the SD card structure)
 constexpr uint8_t AUDIO_INVITE_COUNT = 5;        // Number of invite audio files (0001-0005.mp3)
-constexpr uint8_t AUDIO_INSTRUCTIONS = 6;        // Instructions file (0006.mp3)
-constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3)
-constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3)fist thing that 
-constexpr uint8_t AUDIO_WRONG = 9;               // Wrong button press (0009.mp3)
-constexpr uint8_t AUDIO_GAME_OVER = 10;          // Game over (0010.mp3)
-constexpr uint8_t AUDIO_CORRECT = 11;            // Positive feedback / Level complete (0011.mp3)
-constexpr uint8_t AUDIO_TIMEOUT = 12;            // Timeout notification (0012.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS = 11;       // Instructions file (0011.mp3)
 
-// Color Audio Files (folder /01/)
-constexpr uint8_t AUDIO_COLOR_FOLDER = 1;        // Folder number for color audio files
-constexpr uint8_t AUDIO_COLOR_RED = 1;           // /01/001.mp3 - "Red"
-constexpr uint8_t AUDIO_COLOR_BLUE = 2;          // /01/002.mp3 - "Blue"
-constexpr uint8_t AUDIO_COLOR_GREEN = 3;         // /01/003.mp3 - "Green"
-constexpr uint8_t AUDIO_COLOR_YELLOW = 4;        // /01/004.mp3 - "Yellow"
+// Color-specific Instructions Files (for future logic implementation)
+constexpr uint8_t AUDIO_INSTRUCTIONS_BLUE = 12;     // Blue-themed instructions (0012.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS_RED = 13;      // Red-themed instructions (0013.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS_GREEN = 14;    // Green-themed instructions (0014.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS_YELLOW = 15;   // Yellow-themed instructions (0015.mp3)
+constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3) - Legacy, replaced by variations
+constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3) - Legacy, replaced by variations
+constexpr uint8_t AUDIO_WRONG = 51;              // Wrong button press (0051.mp3)
+constexpr uint8_t AUDIO_GAME_OVER = 53;          // Game over (0052.mp3)
+constexpr uint8_t AUDIO_CORRECT = 41;            // Positive feedback / Level complete - Legacy, replaced by variations (0041-0045.mp3)
+constexpr uint8_t AUDIO_TIMEOUT = 52;            // Timeout notification (0053.mp3)
+
+// Color Audio Files (migrated to /mp3/ directory)
+constexpr uint8_t AUDIO_COLOR_RED = 61;          // /mp3/0061.mp3 - "Red"
+constexpr uint8_t AUDIO_COLOR_BLUE = 62;         // /mp3/0062.mp3 - "Blue"
+constexpr uint8_t AUDIO_COLOR_GREEN = 63;        // /mp3/0063.mp3 - "Green"
+constexpr uint8_t AUDIO_COLOR_YELLOW = 64;       // /mp3/0064.mp3 - "Yellow"
+
+// Color Audio Files for the button feedback (migrated to /mp3/ directory)
+constexpr uint8_t BTN_AUDIO_COLOR_RED = 65;          // /mp3/0061.mp3 - "Red"
+constexpr uint8_t BTN_AUDIO_COLOR_BLUE = 66;         // /mp3/0062.mp3 - "Blue"
+constexpr uint8_t BTN_AUDIO_COLOR_GREEN = 67;        // /mp3/0063.mp3 - "Green"
+constexpr uint8_t BTN_AUDIO_COLOR_YELLOW = 68;       // /mp3/0064.mp3 - "Yellow"
+
+// Score Audio Files (migrated to /mp3/ directory)
+// Note: Score files use base + score value for direct calculation
+constexpr uint8_t AUDIO_SCORE_BASE = 70;         // Base for score files (0070.mp3 = score 0, 0071.mp3 = score 1, etc.)
+
+// --- Multiple Audio Variations Configuration ---
+// New audio variation system for frequently repeated messages
+constexpr uint8_t MYTURN_BASE = 21;              // "My Turn" base file number (0021-0025.mp3)
+constexpr uint8_t MYTURN_COUNT = 5;              // Number of "My Turn" variations
+
+constexpr uint8_t YOURTURN_BASE = 31;            // "Your Turn" base file number (0031-0035.mp3)
+constexpr uint8_t YOURTURN_COUNT = 5;            // Number of "Your Turn" variations
+
+constexpr uint8_t POSITIVE_BASE = 41;            // Positive feedback base file number (0041-0045.mp3)
+constexpr uint8_t POSITIVE_COUNT = 5;            // Number of positive feedback variations
+
+// Anti-repetition tracking
+constexpr bool ENABLE_ANTI_REPETITION = true;    // Avoid playing same variation twice in a row
 
 // --- Game Features Configuration ---
 // Toggle these features on/off as desired

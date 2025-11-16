@@ -46,6 +46,8 @@ GAME_OVER → IDLE
 ```
 
 **Key features:**
+- **Multiple audio variations** for \"My Turn\", \"Your Turn\", and positive feedback (5 variations each).
+- **Anti-repetition system** prevents playing the same audio variation consecutively.
 - Confuser mode (`ENABLE_AUDIO_CONFUSER`) mismatches spoken vs. shown colors.
 - Adjustable timing: `CUE_ON_MS`, `CUE_GAP_MS`, `INPUT_TIMEOUT_MS`.
 - PWM-driven LED channels (4 × 4 kHz).
@@ -92,17 +94,33 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0003.mp3 | Invitation 3 to Play |
 | /mp3/0004.mp3 | Invitation 4 to Play |
 | /mp3/0005.mp3 | Invitation 5 to Play |
-| /mp3/0006.mp3 | Game Instructions |
-| /mp3/0007.mp3 | Announcement: “My Turn” |
-| /mp3/0008.mp3 | Announcement: “Your Turn” |
-| /mp3/0009.mp3 | Wrong Button Press |
-| /mp3/0010.mp3 | Game Over |
-| /mp3/0011.mp3 | Positive Feedback / Level Complete |
-| /mp3/0012.mp3 | Timeout Notification |
-| /01/001.mp3  | Color: Blue |
-| /01/002.mp3  | Color: Red |
-| /01/003.mp3  | Color: Green |
-| /01/004.mp3  | Color: Yellow |
+| /mp3/0007.mp3 | ~~Announcement: \"My Turn\"~~ *(Legacy - replaced by variations)* |
+| /mp3/0008.mp3 | ~~Announcement: \"Your Turn\"~~ *(Legacy - replaced by variations)* |
+| /mp3/0011.mp3 | Game Instructions (General) |
+| /mp3/0012.mp3 | Game Instructions (Blue theme) |
+| /mp3/0013.mp3 | Game Instructions (Red theme) |
+| /mp3/0014.mp3 | Game Instructions (Green theme) |
+| /mp3/0015.mp3 | Game Instructions (Yellow theme) |
+| /mp3/0041.mp3 | ~~Positive Feedback / Level Complete~~ *(Legacy - replaced by variations)* |
+| /mp3/0051.mp3 | Wrong Button Press |
+| /mp3/0052.mp3 | Game Over |
+| /mp3/0053.mp3 | Timeout Notification |
+| **Audio Variations** | **Multiple versions to reduce repetition** |
+| /mp3/0021-0025.mp3 | \"My Turn\" variations (5 files): \"My turn!\", \"Watch carefully!\", etc. |
+| /mp3/0031-0035.mp3 | \"Your Turn\" variations (5 files): \"Your turn!\", \"Now you try!\", etc. |
+| /mp3/0041-0045.mp3 | Positive feedback variations (5 files): \"Great job!\", \"Perfect!\", etc. |
+| **Color Audio** | **Direct mp3 files** |
+| /mp3/0061.mp3  | Color: Red |
+| /mp3/0062.mp3  | Color: Blue |
+| /mp3/0063.mp3  | Color: Green |
+| /mp3/0064.mp3  | Color: Yellow |
+| **Score Audio** | **Direct mp3 files (0070 + score)** |
+| /mp3/0070.mp3  | Score: 0 points |
+| /mp3/0071.mp3  | Score: 1 point |
+| /mp3/0075.mp3  | Score: 5 points |
+| /mp3/0080.mp3  | Score: 10 points |
+| /mp3/0100.mp3  | Score: 30 points |
+| /mp3/0170.mp3  | Score: 100 points |
 ---
 
 ## 🛠️ Development & Simulation
@@ -121,12 +139,21 @@ code .
 **Build and simulate:**
 
 ```bash
+# Simulation (Wokwi) - shows audio variation selection in Serial output
 pio run -e sim
+
+# Hardware (ESP32 + DFPlayer Mini) - plays actual audio files
+pio run -e hardware
 ```
 
-Then in VS Code → **Wokwi: Start Simulation** to visualize LEDs and button inputs.  
-To always show serial output in Wokwi (web or VS Code), add this to your `diagram.json`:
+For **Wokwi simulation**, use VS Code → **Wokwi: Start Simulation** to visualize LEDs and button inputs.  
+The simulation will show detailed logs of which audio variations are selected:
+```
+[AUDIO] Selected My Turn variation 3 (file 0023.mp3), avoiding last: 1
+[AUDIO] My Turn variation from /mp3/0023.mp3 (simulation)
+```
 
+To always show serial output in Wokwi, add this to your `diagram.json`:
 ```json
 "serialMonitor": { "display": "always" }
 ```
