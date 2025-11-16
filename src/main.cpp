@@ -102,6 +102,7 @@ struct Audio {
   
   void playInstructions() {
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
+    audioFinished = false;
   }
 
   void playDifficultyInstructions(DifficultyLevel difficulty) {
@@ -114,6 +115,7 @@ struct Audio {
     const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
     Serial.printf("[AUDIO] Difficulty instructions (%s) from /mp3/%04d.mp3\n",
                   difficultyNames[difficulty], instructionFiles[difficulty]);
+    audioFinished = false;
   }
 
   void playMyTurn() {
@@ -137,6 +139,7 @@ struct Audio {
 
   void playButtonFeedback(Color c) {
     uint8_t btnFeedbackFiles[] = {BTN_AUDIO_COLOR_BLUE, BTN_AUDIO_COLOR_RED, BTN_AUDIO_COLOR_GREEN, BTN_AUDIO_COLOR_YELLOW};
+    audioFinished = false;
     Serial.printf("[AUDIO] Button feedback: %s from /mp3/%04d.mp3\n",
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
                   btnFeedbackFiles[c]);
@@ -210,6 +213,7 @@ struct Audio {
     currentPlayingTrack = AUDIO_INSTRUCTIONS;
     dfPlayer.playMp3Folder(AUDIO_INSTRUCTIONS);
     Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
+    audioFinished = false;
   }
 
   void playDifficultyInstructions(DifficultyLevel difficulty) {
@@ -262,7 +266,9 @@ struct Audio {
     if (!initialized) return;
     uint8_t btnFeedbackFiles[] = {BTN_AUDIO_COLOR_BLUE, BTN_AUDIO_COLOR_RED, BTN_AUDIO_COLOR_GREEN, BTN_AUDIO_COLOR_YELLOW};
     uint8_t fileNumber = btnFeedbackFiles[c];
-    // Don't track this as currentPlayingTrack - it's immediate feedback, not tracked
+    // Track button feedback to prevent stale notifications
+    currentPlayingTrack = fileNumber;
+    audioFinished = false;
     dfPlayer.playMp3Folder(fileNumber);
     Serial.printf("[AUDIO] Button feedback: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
@@ -319,14 +325,13 @@ struct Audio {
 
       switch (type) {
         case DFPlayerPlayFinished:
-          Serial.printf("Audio finished: track %d (expected: %d)\n", value, currentPlayingTrack);
           // Only set finished flag if this matches the track we're expecting
           if (value == currentPlayingTrack || currentPlayingTrack == -1) {
+            Serial.printf("Audio finished: track %d\n", value);
             audioFinished = true;
             currentPlayingTrack = -1;  // Clear the expected track
-          } else {
-            Serial.printf("  -> Ignoring stale notification for track %d\n", value);
           }
+          // Silently ignore stale notifications - DFPlayer sends late completion events
           break;
         case DFPlayerError:
           Serial.printf("DFPlayer error: %d\n", value);
@@ -424,10 +429,17 @@ static inline void setLed(Color c, bool on) {
 
 static inline void setBtnLed(Color c, bool on) {
   // Control illuminated button LEDs: HIGH = ON, LOW = OFF
-  digitalWrite(btnLedPins[c], on ? HIGH : LOW);
-  Serial.printf("Button LED %s (pin %d) -> %s\n", 
-                c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
-                btnLedPins[c], on ? "ON" : "OFF");
+  static bool lastBtnLedStates[4] = {false, false, false, false};
+
+  // Only update if state changed
+  if (lastBtnLedStates[c] != on) {
+    digitalWrite(btnLedPins[c], on ? HIGH : LOW);
+    lastBtnLedStates[c] = on;
+    // Commented out to reduce debug spam - uncomment if needed for debugging button LEDs
+    // Serial.printf("Button LED %s (pin %d) -> %s\n",
+    //               c==BLUE?"BLUE":c==RED?"RED":c==GREEN?"GREEN":"YELLOW",
+    //               btnLedPins[c], on ? "ON" : "OFF");
+  }
 }
 
 static inline bool pressed(Color c) {
@@ -944,9 +956,14 @@ void loop() {
     }
 
     case INSTRUCTIONS: {
-      if (isAudioComplete(stateTimer, INSTRUCTIONS_DURATION_MS)) {
+      // Allow user to skip instructions by pressing any button, OR wait for audio completion
+      if (anyButtonPressed() || isAudioComplete(stateTimer, MAIN_INSTRUCTIONS_DURATION_MS)) {
         // Turn off all LEDs
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+
+        if (anyButtonPressed()) {
+          Serial.println("Instructions skipped by user");
+        }
 
         stateTimer = now;
         gameState = DIFFICULTY_SELECTION;
@@ -991,11 +1008,15 @@ void loop() {
       // Keep selected button LED on
       setBtnLed((Color)selectedDifficulty, true);
 
-      // Wait for audio to finish
-      if (isAudioComplete(stateTimer, INSTRUCTIONS_DURATION_MS)) {
+      // Allow user to skip instructions by pressing any button, OR wait for audio completion
+      if (anyButtonPressed() || isAudioComplete(stateTimer, DIFFICULTY_INSTRUCTIONS_DURATION_MS)) {
         // Turn off selected button LED
         for (int i = 0; i < COLOR_COUNT; i++) {
           setBtnLed((Color)i, false);
+        }
+
+        if (anyButtonPressed()) {
+          Serial.println("Difficulty instructions skipped by user");
         }
 
         stateTimer = now;
@@ -1038,7 +1059,12 @@ void loop() {
     }
 
     case SEQ_DISPLAY_MYTURN: {
-      if (isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
+      // Allow user to skip "My Turn" by pressing any button, OR wait for audio completion
+      if (anyButtonPressed() || isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
+        if (anyButtonPressed()) {
+          Serial.println("'My Turn' skipped by user");
+        }
+
         // Small delay to let DFPlayer switch from /mp3/ to /01/ folder playback
         delay(200);
         stateTimer = now;
@@ -1240,6 +1266,9 @@ void loop() {
           setBtnLed((Color)i, false);
         }
         ledTurnedOff = false; // Reset flag for next time
+
+        // Add delay to allow DFPlayer to finish previous audio before playing Game Over
+        delay(400);
         audioFinished = false; // Reset flag before playing
         audio.playGameOver();
         stateTimer = now;
@@ -1255,6 +1284,9 @@ void loop() {
           setLed((Color)i, false);
           setBtnLed((Color)i, false);
         }
+
+        // Add delay to allow DFPlayer to finish previous audio before playing Game Over
+        delay(400);
         audioFinished = false; // Reset flag before playing
         audio.playGameOver();
         stateTimer = now;
@@ -1266,6 +1298,8 @@ void loop() {
     case GAME_OVER: {
       if (isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
         if (game.score > 0) {
+          // Add longer delay for Game Over (typically a longer message)
+          delay(500);
           audioFinished = false; // Reset flag before playing
           audio.playScore(game.score);
           stateTimer = now;

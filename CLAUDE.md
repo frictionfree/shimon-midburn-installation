@@ -74,75 +74,86 @@ The game uses DFPlayer's `DFPlayerPlayFinished` event to detect when audio compl
 
 **Required SD Card File Structure and Audio Content:**
 
-### **mp3 Directory (`/mp3/`) - Main Game Sounds**
+### **mp3 Directory (`/mp3/`) - All Game Sounds**
+All audio files are now in the `/mp3/` directory for simplicity.
+
 ```
 mp3/
-| /mp3/0001.mp3 | Invitation 1 to Play (Idle) |
-| /mp3/0002.mp3 | Invitation 2 to Play |
-| /mp3/0003.mp3 | Invitation 3 to Play |
-| /mp3/0004.mp3 | Invitation 4 to Play |
-| /mp3/0005.mp3 | Invitation 5 to Play |
-| /mp3/0006.mp3 | Game Instructions |
-| /mp3/0007.mp3 | Announcement: “My Turn” |
-| /mp3/0008.mp3 | Announcement: “Your Turn” |
-| /mp3/0009.mp3 | Wrong Button Press |
-| /mp3/0010.mp3 | Game Over |
-| /mp3/0011.mp3 | Positive Feedback / Level Complete |
-| /mp3/0012.mp3 | Timeout Notification |
+├── 0001-0005.mp3  # Invitation messages (5 variations to play when idle)
+│   ├── 0001.mp3   # "Come play with me!"
+│   ├── 0002.mp3   # "Want to test your memory?"
+│   ├── 0003.mp3   # "Press any button to begin!"
+│   ├── 0004.mp3   # "Let's play Simon Says!"
+│   └── 0005.mp3   # "Can you remember the pattern?"
+│
+├── 0011.mp3       # Main game instructions with difficulty selection explanation
+├── 0012.mp3       # Blue/Novice difficulty instructions
+├── 0013.mp3       # Red/Intermediate difficulty instructions
+├── 0014.mp3       # Green/Advanced difficulty instructions
+├── 0015.mp3       # Yellow/Pro difficulty instructions
+│
+├── 0021-0025.mp3  # "My Turn" variations (5 different announcements)
+│   ├── 0021.mp3   # "My turn!"
+│   ├── 0022.mp3   # "Watch carefully!"
+│   ├── 0023.mp3   # "Pay attention!"
+│   ├── 0024.mp3   # "Here's the sequence!"
+│   └── 0025.mp3   # "Follow along!"
+│
+├── 0031-0035.mp3  # "Your Turn" variations (5 different announcements)
+│   ├── 0031.mp3   # "Your turn!"
+│   ├── 0032.mp3   # "Now you try!"
+│   ├── 0033.mp3   # "Can you repeat it?"
+│   ├── 0034.mp3   # "Show me what you remember!"
+│   └── 0035.mp3   # "Go ahead!"
+│
+├── 0041-0045.mp3  # Positive feedback variations (5 different celebrations)
+│   ├── 0041.mp3   # "Correct! Well done!"
+│   ├── 0042.mp3   # "Excellent memory!"
+│   ├── 0043.mp3   # "Perfect! Keep going!"
+│   ├── 0044.mp3   # "You got it!"
+│   └── 0045.mp3   # "Great job!"
+│
+├── 0051.mp3       # Wrong button press ("Oops! Wrong button")
+├── 0052.mp3       # Timeout notification ("Too slow! Time's up")
+├── 0053.mp3       # Game over ("Game over! Thanks for playing")
+│
+├── 0061-0064.mp3  # Color names for sequence display
+│   ├── 0061.mp3   # "Red"
+│   ├── 0062.mp3   # "Blue"
+│   ├── 0063.mp3   # "Green"
+│   └── 0064.mp3   # "Yellow"
+│
+├── 0065-0068.mp3  # Color names for button feedback (can be same as 61-64)
+│   ├── 0065.mp3   # "Red"
+│   ├── 0066.mp3   # "Blue"
+│   ├── 0067.mp3   # "Green"
+│   └── 0068.mp3   # "Yellow"
+│
+└── 0070-0170.mp3  # Score announcements (base 70 + score value)
+    ├── 0070.mp3   # "Zero points"
+    ├── 0071.mp3   # "One point"
+    ├── 0072.mp3   # "Two points"
+    ├── 0075.mp3   # "Five points"
+    ├── 0080.mp3   # "Ten points"
+    ├── 0085.mp3   # "Fifteen points"
+    ├── 0090.mp3   # "Twenty points"
+    └── 0170.mp3   # "One hundred points! Amazing!"
+```
 
-### **Folder 01 (`/01/`) - Color Names**
-```
-01/
-| /01/001.mp3  | Color: Blue |
-| /01/002.mp3  | Color: Red |
-| /01/003.mp3  | Color: Green |
-| /01/004.mp3  | Color: Yellow |```
-```
-**Note**: These are used for the confuser mode where spoken color may differ from LED color.
-
-### **Folder 02 (`/02/`) - Score Announcements**
-```
-02/
-├── 000.mp3     # "Zero points"
-├── 001.mp3     # "One point" 
-├── 002.mp3     # "Two points"
-├── 003.mp3     # "Three points"
-├── 004.mp3     # "Four points"
-├── 005.mp3     # "Five points"
-├── 010.mp3     # "Ten points"
-├── 015.mp3     # "Fifteen points"
-├── 020.mp3     # "Twenty points"
-├── 025.mp3     # "Twenty-five points"
-├── 030.mp3     # "Thirty points"
-├── 050.mp3     # "Fifty points"
-├── 075.mp3     # "Seventy-five points"
-└── 100.mp3     # "One hundred points! Excellent!"
-```
-**Note**: Create files for common score ranges. Game scores are level-based: Level 1 = 1 point, Level 5 = 5 points, etc.
+**Notes**:
+- All files are in `/mp3/` directory (no `/01/` or `/02/` subfolders)
+- Game uses variations for "My Turn", "Your Turn", and positive feedback to reduce repetition
+- Score files use formula: file number = 70 + score (e.g., score of 12 → file 0082.mp3)
+- Create score files for common values or use gaps for efficiency
 
 ### **Audio File Specifications:**
 - **Format**: MP3, 16-bit, mono recommended for smaller file size
-- **Sample Rate**: 22kHz or 44.1kHz 
+- **Sample Rate**: 22kHz or 44.1kHz
 - **Bitrate**: 128kbps recommended
 - **Volume**: Normalize to consistent levels across all files
 - **Length**: Keep files concise (1-3 seconds for most sounds)
 - **Voice**: Clear, friendly tone suitable for all ages
-- **Language**: Adjust color names and narration as needed for target audience
-
-### **Optional Enhancements:**
-```
-mp3/
-├── 0013.mp3    # Welcome: "Welcome to Butterfly Simon!"
-├── 0014.mp3    # Confuser Toggle: "Confuser mode enabled"
-├── 0015.mp3    # Confuser Toggle: "Confuser mode disabled"
-├── 0016.mp3    # High Score: "New high score!"
-├── 0017.mp3    # Background Music (low volume ambient)
-└── 03/         # Alternative voice sets or languages
-    ├── 001.mp3 # "Rouge" (French)
-    ├── 002.mp3 # "Bleu" (French)
-    ├── 003.mp3 # "Vert" (French)
-    └── 004.mp3 # "Jaune" (French)
-```
+- **Language**: Hebrew recommended for Midburn audience
 
 ## Development Commands
 

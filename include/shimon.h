@@ -164,13 +164,14 @@ constexpr uint8_t HIGH_LEVEL_THRESHOLD = 10;    // Level at which bonus scoring 
 constexpr bool ENSURE_VARIETY = true;            // Prevent too many consecutive same colors
 constexpr uint8_t MIN_DIFFERENT_COLORS = 3;     // Minimum different colors in sequences > 8
 
-// State Machine Timeouts
-constexpr unsigned long INSTRUCTIONS_DURATION_MS = 2000;    // Instructions audio duration
-constexpr unsigned long MY_TURN_DURATION_MS = 1800;         // "My Turn" audio duration (tuned for DFPlayer)
-constexpr unsigned long YOUR_TURN_DURATION_MS = 1800;       // "Your Turn" audio duration (tuned for DFPlayer)
-constexpr unsigned long FEEDBACK_DURATION_MS = 3500;        // Correct/Wrong feedback duration (increased to prevent audio cutoff)
-constexpr unsigned long GAME_OVER_DURATION_MS = 5000;       // Game over message duration (increased to allow full audio playback)
-constexpr unsigned long SCORE_DISPLAY_DURATION_MS = 4000;   // Score announcement duration
+// State Machine Timeouts (increased as fallback safety - primary detection via DFPlayer finish notification)
+constexpr unsigned long MAIN_INSTRUCTIONS_DURATION_MS = 10000;       // Main instructions with difficulty selection explanation (10 sec fallback)
+constexpr unsigned long DIFFICULTY_INSTRUCTIONS_DURATION_MS = 8000;  // Difficulty-specific instructions (8 sec fallback)
+constexpr unsigned long MY_TURN_DURATION_MS = 3000;                  // "My Turn" audio duration (increased fallback)
+constexpr unsigned long YOUR_TURN_DURATION_MS = 3000;                // "Your Turn" audio duration (increased fallback)
+constexpr unsigned long FEEDBACK_DURATION_MS = 4000;                 // Correct/Wrong feedback duration (increased fallback)
+constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message duration (increased fallback)
+constexpr unsigned long SCORE_DISPLAY_DURATION_MS = 5000;            // Score announcement duration (increased fallback)
 constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 3000;   // Delay before playing post-game invite (pause after game over)
 
 // Visual Effect Durations (for blocking sequences like boot, invite, instructions)
