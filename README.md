@@ -46,6 +46,8 @@ GAME_OVER → IDLE
 ```
 
 **Key features:**
+- **Multiple audio variations** for "My Turn", "Your Turn", and positive feedback (5 variations each).
+- **Anti-repetition system** prevents playing the same audio variation consecutively.
 - Confuser mode (`ENABLE_AUDIO_CONFUSER`) mismatches spoken vs. shown colors.
 - Adjustable timing: `CUE_ON_MS`, `CUE_GAP_MS`, `INPUT_TIMEOUT_MS`.
 - PWM-driven LED channels (4 × 4 kHz).
@@ -93,12 +95,17 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0004.mp3 | Invitation 4 to Play |
 | /mp3/0005.mp3 | Invitation 5 to Play |
 | /mp3/0006.mp3 | Game Instructions |
-| /mp3/0007.mp3 | Announcement: “My Turn” |
-| /mp3/0008.mp3 | Announcement: “Your Turn” |
+| /mp3/0007.mp3 | ~~Announcement: "My Turn"~~ *(Legacy - replaced by variations)* |
+| /mp3/0008.mp3 | ~~Announcement: "Your Turn"~~ *(Legacy - replaced by variations)* |
 | /mp3/0009.mp3 | Wrong Button Press |
 | /mp3/0010.mp3 | Game Over |
-| /mp3/0011.mp3 | Positive Feedback / Level Complete |
+| /mp3/0011.mp3 | ~~Positive Feedback / Level Complete~~ *(Legacy - replaced by variations)* |
 | /mp3/0012.mp3 | Timeout Notification |
+| **Audio Variations** | **Multiple versions to reduce repetition** |
+| /mp3/0021-0025.mp3 | "My Turn" variations (5 files): "My turn!", "Watch carefully!", etc. |
+| /mp3/0031-0035.mp3 | "Your Turn" variations (5 files): "Your turn!", "Now you try!", etc. |
+| /mp3/0041-0045.mp3 | Positive feedback variations (5 files): "Great job!", "Perfect!", etc. |
+| **Color Audio** | **Folder-based files** |
 | /01/001.mp3  | Color: Red |
 | /01/002.mp3  | Color: Blue |
 | /01/003.mp3  | Color: Green |
@@ -121,12 +128,21 @@ code .
 **Build and simulate:**
 
 ```bash
+# Simulation (Wokwi) - shows audio variation selection in Serial output
 pio run -e sim
+
+# Hardware (ESP32 + DFPlayer Mini) - plays actual audio files
+pio run -e hardware
 ```
 
-Then in VS Code → **Wokwi: Start Simulation** to visualize LEDs and button inputs.  
-To always show serial output in Wokwi (web or VS Code), add this to your `diagram.json`:
+For **Wokwi simulation**, use VS Code → **Wokwi: Start Simulation** to visualize LEDs and button inputs.  
+The simulation will show detailed logs of which audio variations are selected:
+```
+[AUDIO] Selected My Turn variation 3 (file 0023.mp3), avoiding last: 1
+[AUDIO] My Turn variation from /mp3/0023.mp3 (simulation)
+```
 
+To always show serial output in Wokwi, add this to your `diagram.json`:
 ```json
 "serialMonitor": { "display": "always" }
 ```
