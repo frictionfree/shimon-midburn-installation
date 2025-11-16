@@ -93,8 +93,8 @@ mp3/
 ### **Folder 01 (`/01/`) - Color Names**
 ```
 01/
-| /01/001.mp3  | Color: Red |
-| /01/002.mp3  | Color: Blue |
+| /01/001.mp3  | Color: Blue |
+| /01/002.mp3  | Color: Red |
 | /01/003.mp3  | Color: Green |
 | /01/004.mp3  | Color: Yellow |```
 ```
