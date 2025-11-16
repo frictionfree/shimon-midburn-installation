@@ -81,13 +81,19 @@ constexpr uint8_t DFPLAYER_EQ = 0;               // EQ setting (0=Normal, 1=Pop,
 
 // Audio File Mapping (do not change unless you modify the SD card structure)
 constexpr uint8_t AUDIO_INVITE_COUNT = 5;        // Number of invite audio files (0001-0005.mp3)
-constexpr uint8_t AUDIO_INSTRUCTIONS = 6;        // Instructions file (0006.mp3)
-constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3)
-constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3)fist thing that 
-constexpr uint8_t AUDIO_WRONG = 9;               // Wrong button press (0009.mp3)
-constexpr uint8_t AUDIO_GAME_OVER = 10;          // Game over (0010.mp3)
-constexpr uint8_t AUDIO_CORRECT = 11;            // Positive feedback / Level complete (0011.mp3)
-constexpr uint8_t AUDIO_TIMEOUT = 12;            // Timeout notification (0012.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS = 11;       // Instructions file (0011.mp3)
+
+// Color-specific Instructions Files (for future logic implementation)
+constexpr uint8_t AUDIO_INSTRUCTIONS_BLUE = 12;     // Blue-themed instructions (0012.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS_RED = 13;      // Red-themed instructions (0013.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS_GREEN = 14;    // Green-themed instructions (0014.mp3)
+constexpr uint8_t AUDIO_INSTRUCTIONS_YELLOW = 15;   // Yellow-themed instructions (0015.mp3)
+constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3) - Legacy, replaced by variations
+constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3) - Legacy, replaced by variations
+constexpr uint8_t AUDIO_WRONG = 51;              // Wrong button press (0051.mp3)
+constexpr uint8_t AUDIO_GAME_OVER = 52;          // Game over (0052.mp3)
+constexpr uint8_t AUDIO_CORRECT = 41;            // Positive feedback / Level complete - Legacy, replaced by variations (0041-0045.mp3)
+constexpr uint8_t AUDIO_TIMEOUT = 53;            // Timeout notification (0053.mp3)
 
 // Color Audio Files (folder /01/)
 constexpr uint8_t AUDIO_COLOR_FOLDER = 1;        // Folder number for color audio files

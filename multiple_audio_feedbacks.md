@@ -79,14 +79,14 @@ mp3/
 #### Existing Files Remain Unchanged
 ```
 mp3/
-├── 0001-0005.mp3     # Invite messages (already multiple)
-├── 0006.mp3          # Instructions  
-├── 0007.mp3          # "My Turn" (original - can be kept as fallback)
-├── 0008.mp3          # "Your Turn" (original - can be kept as fallback)
-├── 0009.mp3          # Wrong button press
-├── 0010.mp3          # Game over
-├── 0011.mp3          # Positive feedback (original - can be kept as fallback)
-├── 0012.mp3          # Timeout notification
+├── 0001-0005.mp3     # Invite messages (unchanged)
+├── 0007.mp3          # "My Turn" (legacy - replaced by 0021-0025)
+├── 0008.mp3          # "Your Turn" (legacy - replaced by 0031-0035)  
+├── 0011.mp3          # Instructions (moved from 0006)
+├── 0041.mp3          # Positive feedback (legacy - replaced by 0041-0045)
+├── 0051.mp3          # Wrong button press (moved from 0009)
+├── 0052.mp3          # Game over (moved from 0010)
+├── 0053.mp3          # Timeout notification (moved from 0012)
 01/                    # Color names (unchanged)
 └── 02/               # Score announcements (unchanged)
 ```

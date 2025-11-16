@@ -94,13 +94,17 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0003.mp3 | Invitation 3 to Play |
 | /mp3/0004.mp3 | Invitation 4 to Play |
 | /mp3/0005.mp3 | Invitation 5 to Play |
-| /mp3/0006.mp3 | Game Instructions |
 | /mp3/0007.mp3 | ~~Announcement: "My Turn"~~ *(Legacy - replaced by variations)* |
 | /mp3/0008.mp3 | ~~Announcement: "Your Turn"~~ *(Legacy - replaced by variations)* |
-| /mp3/0009.mp3 | Wrong Button Press |
-| /mp3/0010.mp3 | Game Over |
-| /mp3/0011.mp3 | ~~Positive Feedback / Level Complete~~ *(Legacy - replaced by variations)* |
-| /mp3/0012.mp3 | Timeout Notification |
+| /mp3/0011.mp3 | Game Instructions (General) |
+| /mp3/0012.mp3 | Game Instructions (Blue theme) |
+| /mp3/0013.mp3 | Game Instructions (Red theme) |
+| /mp3/0014.mp3 | Game Instructions (Green theme) |
+| /mp3/0015.mp3 | Game Instructions (Yellow theme) |
+| /mp3/0041.mp3 | ~~Positive Feedback / Level Complete~~ *(Legacy - replaced by variations)* |
+| /mp3/0051.mp3 | Wrong Button Press |
+| /mp3/0052.mp3 | Game Over |
+| /mp3/0053.mp3 | Timeout Notification |
 | **Audio Variations** | **Multiple versions to reduce repetition** |
 | /mp3/0021-0025.mp3 | "My Turn" variations (5 files): "My turn!", "Watch carefully!", etc. |
 | /mp3/0031-0035.mp3 | "Your Turn" variations (5 files): "Your turn!", "Now you try!", etc. |

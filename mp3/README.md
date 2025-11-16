@@ -1,0 +1,72 @@
+# Audio Files for Shimon Game
+
+This directory contains the MP3 audio files required for the Shimon Butterfly Simon Says game.
+
+## Directory Structure
+
+Copy these files to your MicroSD card for the DFPlayer Mini module:
+
+### mp3 Directory (`/mp3/`)
+Main game sounds:
+- `mp3/0001.mp3` - Invite: "Come play with the butterfly!"
+- `mp3/0002.mp3` - Invite: "Test your memory skills!"
+- `mp3/0003.mp3` - Invite: "Ready for a challenge?"
+- `mp3/0004.mp3` - Invite: "The butterfly wants to play!"
+- `mp3/0005.mp3` - Invite: "Can you follow the pattern?"
+- `mp3/0007.mp3` - Legacy My Turn: "My turn - watch carefully!" (replaced by variations)
+- `mp3/0008.mp3` - Legacy Your Turn: "Your turn - repeat the sequence!" (replaced by variations)
+- `mp3/0011.mp3` - Instructions (General): "Watch the colors, then repeat the sequence"
+- `mp3/0012.mp3` - Instructions (Blue): "Blue butterfly instructions"
+- `mp3/0013.mp3` - Instructions (Red): "Red butterfly instructions"
+- `mp3/0014.mp3` - Instructions (Green): "Green butterfly instructions"
+- `mp3/0015.mp3` - Instructions (Yellow): "Yellow butterfly instructions"
+- `mp3/0021.mp3` - My Turn Variation 1: "My turn!"
+- `mp3/0022.mp3` - My Turn Variation 2: "Watch carefully!"
+- `mp3/0023.mp3` - My Turn Variation 3: "Here's the pattern!"
+- `mp3/0024.mp3` - My Turn Variation 4: "Follow this sequence!"
+- `mp3/0025.mp3` - My Turn Variation 5: "Pay attention!"
+- `mp3/0031.mp3` - Your Turn Variation 1: "Your turn!"
+- `mp3/0032.mp3` - Your Turn Variation 2: "Now you try!"
+- `mp3/0033.mp3` - Your Turn Variation 3: "Repeat the pattern!"
+- `mp3/0034.mp3` - Your Turn Variation 4: "Show me the sequence!"
+- `mp3/0035.mp3` - Your Turn Variation 5: "Your move!"
+- `mp3/0041.mp3` - Positive Feedback Variation 1: "Great job!"
+- `mp3/0042.mp3` - Positive Feedback Variation 2: "Perfect!"
+- `mp3/0043.mp3` - Positive Feedback Variation 3: "Excellent!"
+- `mp3/0044.mp3` - Positive Feedback Variation 4: "Well done!"
+- `mp3/0045.mp3` - Positive Feedback Variation 5: "Correct!"
+- `mp3/0051.mp3` - Wrong: "Oops! That's not right."
+- `mp3/0052.mp3` - Game Over: "Game over! Thanks for playing!"
+- `mp3/0053.mp3` - Timeout: "Time's up! Game over."
+
+### Folder 01 (`/01/`)
+Color names (001-004.mp3):
+- `001.mp3` - "Red"
+- `002.mp3` - "Blue" 
+- `003.mp3` - "Green"
+- `004.mp3` - "Yellow"
+
+### Folder 02 (`/02/`)
+Score announcements (000-100.mp3):
+- `000.mp3` - "Zero points"
+- `001.mp3` - "One point"
+- `002.mp3` - "Two points"
+- `005.mp3` - "Five points"
+- `010.mp3` - "Ten points"
+- `025.mp3` - "Twenty-five points"
+- `050.mp3` - "Fifty points"
+- `100.mp3` - "One hundred points! Excellent!"
+
+## Audio Specifications
+- **Format**: MP3, 16-bit, mono recommended
+- **Sample Rate**: 22kHz or 44.1kHz
+- **Bitrate**: 128kbps recommended
+- **Volume**: Normalize to consistent levels
+- **Length**: Keep concise (1-3 seconds for most sounds)
+- **Voice**: Clear, friendly tone suitable for all ages
+
+## Usage Notes
+1. Copy all files to your MicroSD card maintaining the exact folder structure
+2. Insert SD card into DFPlayer Mini module
+3. Build with `pio run -e hardware` for real hardware with audio
+4. For simulation testing, use `pio run -e sim` (audio will print to Serial)
