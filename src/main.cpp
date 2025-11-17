@@ -653,12 +653,14 @@ void bootSequence() {
     }
   }
   
-  // All flash together
+  // Rapid sequential flash (power-safe - one LED at a time)
   for (int flash = 0; flash < 4; flash++) {
-    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
-    delay(BOOT_FLASH_DELAY_MS);
-    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-    delay(BOOT_FLASH_DELAY_MS);
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      setLed((Color)i, true);
+      delay(BOOT_FLASH_DELAY_MS / 4);  // Rapid sequential
+      setLed((Color)i, false);
+    }
+    delay(BOOT_FLASH_DELAY_MS / 2);
   }
   
   Serial.println("Boot sequence complete!");
@@ -666,67 +668,78 @@ void bootSequence() {
 
 void inviteSequence() {
   Serial.println("Playing invite LED sequence...");
-  
-  // Quick attention-grabbing sequence
-  // Double flash all colors
+
+  // Quick attention-grabbing sequence (power-safe - one LED at a time)
+  // Rapid sequential flash pattern
   for (int flash = 0; flash < 2; flash++) {
-    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
-    delay(INVITE_FLASH_DELAY_MS);
-    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-    delay(INVITE_FLASH_DELAY_MS);
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      setLed((Color)i, true);
+      delay(INVITE_FLASH_DELAY_MS / 4);
+      setLed((Color)i, false);
+    }
+    delay(INVITE_FLASH_DELAY_MS / 2);
   }
-  
-  // Spinning pattern
+
+  // Spinning pattern (already sequential - keep as is)
   for (int spin = 0; spin < 8; spin++) {
     setLed((Color)(spin % COLOR_COUNT), true);
     delay(INVITE_SPIN_DELAY_MS);
     setLed((Color)(spin % COLOR_COUNT), false);
   }
-  
-  // Final all flash
-  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
-  delay(300); // Final invite flash
-  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+
+  // Final rapid sequential flash
+  for (int i = 0; i < COLOR_COUNT; i++) {
+    setLed((Color)i, true);
+    delay(75); // Rapid final sequence
+    setLed((Color)i, false);
+  }
 }
 
 void instructionsSequence() {
   Serial.println("Playing instructions LED sequence...");
-  
-  // Alternating pairs
-  for (int i = 0; i < 6; i++) {
-    if (i % 2 == 0) {
-      setLed(RED, true);
-      setLed(GREEN, true);
-      setLed(BLUE, false);
-      setLed(YELLOW, false);
-    } else {
-      setLed(RED, false);
-      setLed(GREEN, false);
-      setLed(BLUE, true);
-      setLed(YELLOW, true);
-    }
-    delay(INSTRUCTIONS_PATTERN_DELAY_MS);
+
+  // Sequential wave pattern (power-safe - one LED at a time)
+  // Creates visual rhythm similar to alternating pairs but sequential
+  for (int cycle = 0; cycle < 6; cycle++) {
+    // First sequence: RED -> GREEN
+    setLed(RED, true);
+    delay(INSTRUCTIONS_PATTERN_DELAY_MS / 2);
+    setLed(RED, false);
+    setLed(GREEN, true);
+    delay(INSTRUCTIONS_PATTERN_DELAY_MS / 2);
+    setLed(GREEN, false);
+
+    // Second sequence: BLUE -> YELLOW
+    setLed(BLUE, true);
+    delay(INSTRUCTIONS_PATTERN_DELAY_MS / 2);
+    setLed(BLUE, false);
+    setLed(YELLOW, true);
+    delay(INSTRUCTIONS_PATTERN_DELAY_MS / 2);
+    setLed(YELLOW, false);
   }
-  
-  // Turn off all
+
+  // Turn off all (already off but for safety)
   for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 }
 
 void readyToStartEffect(unsigned long now) {
-  // Gentle pulsing of all LEDs to indicate "ready to start"
+  // Gentle rotating pulse to indicate "ready to start" (power-safe - one LED at a time)
   static unsigned long readyTimer = 0;
   static uint8_t readyStep = 0;
-  
+
   if (now - readyTimer > READY_PULSE_INTERVAL_MS) { // Update from config
-    // Gentle pulse - not as slow as breathing, faster than idle
-    float pulse = (sin(readyStep * 0.3) + 1.0) * 0.5; // 0 to 1
-    bool ledState = pulse > 0.4; // Higher threshold for cleaner on/off
-    
-    // All LEDs pulse together in a warm, inviting way
+    // Turn off all first
     for (int i = 0; i < COLOR_COUNT; i++) {
-      setLed((Color)i, ledState);
+      setLed((Color)i, false);
     }
-    
+
+    // Rotating pulse pattern - creates a "breathing" effect by changing which LED is on
+    float pulse = (sin(readyStep * 0.3) + 1.0) * 0.5; // 0 to 1
+    if (pulse > 0.4) {
+      // Light up one LED based on step, rotating through colors
+      setLed((Color)(readyStep % COLOR_COUNT), true);
+    }
+
     readyStep++;
     if (readyStep >= 42) readyStep = 0; // Shorter cycle than breathing
     readyTimer = now;
@@ -735,21 +748,25 @@ void readyToStartEffect(unsigned long now) {
 
 void gameStartSequence() {
   Serial.println("Game starting visual confirmation!");
-  
-  // Quick burst effect to show game is starting
+
+  // Quick burst effect to show game is starting (power-safe - one LED at a time)
   for (int burst = 0; burst < 3; burst++) {
-    // All on
-    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
-    delay(START_BURST_DELAY_MS);
-    // All off
-    for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-    delay(START_BURST_DELAY_MS);
+    // Rapid sequential burst
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      setLed((Color)i, true);
+      delay(START_BURST_DELAY_MS / 4);
+      setLed((Color)i, false);
+    }
+    delay(START_BURST_DELAY_MS / 2);
   }
-  
-  // Final bright flash
-  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, true);
-  delay(200); // Final game start flash
-  for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+
+  // Final rapid sequential flash
+  for (int i = 0; i < COLOR_COUNT; i++) {
+    setLed((Color)i, true);
+    delay(50); // Rapid final sequence
+    setLed((Color)i, false);
+  }
+
   Serial.println("Game start sequence complete - all LEDs should be OFF");
 }
 
@@ -766,15 +783,22 @@ void updateAmbientEffects(unsigned long now) {
   
   switch (currentAmbientEffect) {
     case BREATHING: {
-      // Gentle breathing effect - all LEDs slowly pulse together
+      // Gentle rotating breathing effect (power-safe - one LED at a time)
       if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[BREATHING]) {
+        // Turn off all first
+        for (int i = 0; i < COLOR_COUNT; i++) {
+          setLed((Color)i, false);
+        }
+
+        // Gentle pulse - determine if LED should be on based on sine wave
         float breath = (sin(ambientStep * 0.2) + 1.0) * 0.5; // 0 to 1
         bool ledState = breath > 0.3; // Threshold for on/off
-        
-        for (int i = 0; i < COLOR_COUNT; i++) {
-          setLed((Color)i, ledState);
+
+        if (ledState) {
+          // Rotate which LED is "breathing" through the colors
+          setLed((Color)(ambientStep % COLOR_COUNT), true);
         }
-        
+
         ambientStep++;
         if (ambientStep >= 63) ambientStep = 0; // Full cycle
         ambientTimer = now;
@@ -816,18 +840,15 @@ void updateAmbientEffects(unsigned long now) {
     }
     
     case PULSE_WAVE: {
-      // Wave pulse effect
+      // Wave pulse effect (power-safe - one LED at a time)
       if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[PULSE_WAVE]) {
         // Turn off all
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-        
-        // Create wave pattern
-        int wave1 = ambientStep % 8;
-        int wave2 = (ambientStep + 4) % 8;
-        
-        if (wave1 < COLOR_COUNT) setLed((Color)wave1, true);
-        if (wave2 < COLOR_COUNT) setLed((Color)wave2, true);
-        
+
+        // Create single wave pattern (simpler, power-safe)
+        int wave = ambientStep % COLOR_COUNT;
+        setLed((Color)wave, true);
+
         ambientStep++;
         ambientTimer = now;
       }
