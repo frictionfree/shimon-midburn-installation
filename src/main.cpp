@@ -159,10 +159,16 @@ struct Audio {
     Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3\n", AUDIO_TIMEOUT);
   }
 
-  void playGameOver() {
-    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3\n", AUDIO_GAME_OVER);
+  void playGameOver(uint8_t messageFile) {
+    Serial.printf("[AUDIO] Personalized Game Over from /mp3/%04d.mp3\n", messageFile);
+    audioFinished = false;
   }
-  
+
+  void playGeneralGameOver() {
+    Serial.printf("[AUDIO] General Game Over from /mp3/%04d.mp3\n", AUDIO_GAME_OVER_GENERAL);
+    audioFinished = false;
+  }
+
   void playScore(uint8_t score) {
     Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3\n", score, score);
   }
@@ -298,11 +304,23 @@ struct Audio {
     Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
   }
 
-  void playGameOver() {
+  void playGameOver(uint8_t messageFile) {
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_GAME_OVER;
-    dfPlayer.playMp3Folder(AUDIO_GAME_OVER);
-    Serial.printf("[AUDIO] Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_GAME_OVER, AUDIO_GAME_OVER);
+    currentPlayingTrack = messageFile;
+    audioFinished = false;
+    dfPlayer.playMp3Folder(messageFile);
+    Serial.printf("[AUDIO] Personalized Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", messageFile, messageFile);
+  }
+
+  void playGeneralGameOver() {
+    if (!initialized) return;
+    // Stop any currently playing track to ensure clean transition
+    dfPlayer.stop();
+    delay(100);  // Brief pause after stop
+    currentPlayingTrack = AUDIO_GAME_OVER_GENERAL;
+    audioFinished = false;
+    dfPlayer.playMp3Folder(AUDIO_GAME_OVER_GENERAL);
+    Serial.printf("[AUDIO] General Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_GAME_OVER_GENERAL, AUDIO_GAME_OVER_GENERAL);
   }
 
   void playScore(uint8_t score) {
@@ -363,8 +381,8 @@ enum GameFSM {
   CORRECT_FEEDBACK,     // Playing correct sound
   WRONG_FEEDBACK,       // Playing wrong sound
   TIMEOUT_FEEDBACK,     // Playing timeout sound
-  GAME_OVER,            // Game over state
-  SCORE_DISPLAY,        // Optional score announcement
+  GAME_OVER,            // Personalized game over message based on difficulty/score
+  GENERAL_GAME_OVER,    // General game over message (plays after personalized)
   POST_GAME_INVITE      // Post-game invite to encourage replay
 };
 
@@ -444,6 +462,25 @@ static inline void setBtnLed(Color c, bool on) {
 
 static inline bool pressed(Color c) {
   return digitalRead(btnPins[c]) == LOW;
+}
+
+// Helper function to select appropriate game over message based on difficulty and score
+uint8_t getGameOverMessage(DifficultyLevel difficulty, uint8_t score) {
+  // Check strong scorer thresholds for each difficulty level
+  if (difficulty == NOVICE && score >= 8) {
+    return AUDIO_GAME_OVER_NOVICE_STRONG;
+  }
+  if (difficulty == INTERMEDIATE && score >= 8) {
+    return AUDIO_GAME_OVER_INTERMEDIATE_STRONG;
+  }
+  if (difficulty == ADVANCED && score >= 10) {
+    return AUDIO_GAME_OVER_ADVANCED_STRONG;
+  }
+  if (difficulty == PRO && score >= 10) {
+    return AUDIO_GAME_OVER_PRO_STRONG;
+  }
+  // Below threshold - mediocre scorer
+  return AUDIO_GAME_OVER_MEDIOCRE;
 }
 
 // Forward declarations
@@ -1267,12 +1304,17 @@ void loop() {
         }
         ledTurnedOff = false; // Reset flag for next time
 
+        // Calculate personalized game over message based on difficulty and score
+        uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
+
         // Add delay to allow DFPlayer to finish previous audio before playing Game Over
         delay(400);
         audioFinished = false; // Reset flag before playing
-        audio.playGameOver();
+        audio.playGameOver(gameOverMsg);
         stateTimer = now;
         gameState = GAME_OVER;
+        Serial.printf("Game over! Difficulty: %d, Score: %d, Message: %d\n",
+                      selectedDifficulty, game.score, gameOverMsg);
       }
       break;
     }
@@ -1285,37 +1327,37 @@ void loop() {
           setBtnLed((Color)i, false);
         }
 
+        // Calculate personalized game over message based on difficulty and score
+        uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
+
         // Add delay to allow DFPlayer to finish previous audio before playing Game Over
         delay(400);
         audioFinished = false; // Reset flag before playing
-        audio.playGameOver();
+        audio.playGameOver(gameOverMsg);
         stateTimer = now;
         gameState = GAME_OVER;
+        Serial.printf("Game over! Difficulty: %d, Score: %d, Message: %d\n",
+                      selectedDifficulty, game.score, gameOverMsg);
       }
       break;
     }
     
     case GAME_OVER: {
       if (isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
-        if (game.score > 0) {
-          // Add longer delay for Game Over (typically a longer message)
-          delay(500);
-          audioFinished = false; // Reset flag before playing
-          audio.playScore(game.score);
-          stateTimer = now;
-          gameState = SCORE_DISPLAY;
-        } else {
-          // No score to announce, go to post-game invite
-          gameState = POST_GAME_INVITE;
-          stateTimer = now;
-          Serial.println("No score, moving to post-game invite");
-        }
+        // Personalized message finished, play general game over
+        delay(GAME_OVER_MESSAGE_DELAY_MS);  // Short delay between messages
+        audioFinished = false;
+        audio.playGeneralGameOver();
+        stateTimer = now;
+        gameState = GENERAL_GAME_OVER;
+        Serial.println("Playing general game over message...");
       }
       break;
     }
 
-    case SCORE_DISPLAY: {
-      if (isAudioComplete(stateTimer, SCORE_DISPLAY_DURATION_MS)) {
+    case GENERAL_GAME_OVER: {
+      if (isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
+        // General game over finished, move to post-game invite
         Serial.printf("Game over! Final score: %d\n", game.score);
         gameState = POST_GAME_INVITE;
         stateTimer = now;

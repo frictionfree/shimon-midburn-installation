@@ -91,9 +91,16 @@ constexpr uint8_t AUDIO_INSTRUCTIONS_YELLOW = 15;   // Yellow-themed instruction
 constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3) - Legacy, replaced by variations
 constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3) - Legacy, replaced by variations
 constexpr uint8_t AUDIO_WRONG = 51;              // Wrong button press (0051.mp3)
-constexpr uint8_t AUDIO_GAME_OVER = 53;          // Game over (0052.mp3)
+constexpr uint8_t AUDIO_TIMEOUT = 52;            // Timeout notification (0052.mp3)
 constexpr uint8_t AUDIO_CORRECT = 41;            // Positive feedback / Level complete - Legacy, replaced by variations (0041-0045.mp3)
-constexpr uint8_t AUDIO_TIMEOUT = 52;            // Timeout notification (0053.mp3)
+
+// Game Over Messages (personalized based on difficulty and score)
+constexpr uint8_t AUDIO_GAME_OVER_NOVICE_STRONG = 53;       // 0053.mp3 - Novice, score >= 8
+constexpr uint8_t AUDIO_GAME_OVER_INTERMEDIATE_STRONG = 54; // 0054.mp3 - Intermediate, score >= 8
+constexpr uint8_t AUDIO_GAME_OVER_ADVANCED_STRONG = 55;     // 0055.mp3 - Advanced, score >= 10
+constexpr uint8_t AUDIO_GAME_OVER_PRO_STRONG = 56;          // 0056.mp3 - Pro, score >= 10
+constexpr uint8_t AUDIO_GAME_OVER_MEDIOCRE = 57;            // 0057.mp3 - Below threshold for any level
+constexpr uint8_t AUDIO_GAME_OVER_GENERAL = 58;             // 0058.mp3 - General game over (plays after personalized)
 
 // Color Audio Files (migrated to /mp3/ directory)
 constexpr uint8_t AUDIO_COLOR_RED = 61;          // /mp3/0061.mp3 - "Red"
@@ -171,8 +178,8 @@ constexpr unsigned long MY_TURN_DURATION_MS = 3000;                  // "My Turn
 constexpr unsigned long YOUR_TURN_DURATION_MS = 3000;                // "Your Turn" audio duration (increased fallback)
 constexpr unsigned long FEEDBACK_DURATION_MS = 4000;                 // Correct/Wrong feedback duration (increased fallback)
 constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message duration (increased fallback)
-constexpr unsigned long SCORE_DISPLAY_DURATION_MS = 5000;            // Score announcement duration (increased fallback)
-constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 3000;   // Delay before playing post-game invite (pause after game over)
+constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 6000;            // Delay before playing post-game invite (pause after general game over)
+constexpr unsigned long GAME_OVER_MESSAGE_DELAY_MS = 1000;           // Delay between personalized and general game over messages (increased to prevent overlap)
 
 // Visual Effect Durations (for blocking sequences like boot, invite, instructions)
 constexpr unsigned long BOOT_WAVE_DELAY_MS = 150;           // Boot rainbow wave speed

@@ -49,8 +49,8 @@ The core game runs on a finite state machine (FSM) with these states:
 - `CORRECT_FEEDBACK`: Playing correct feedback sound
 - `WRONG_FEEDBACK`: Playing wrong input sound
 - `TIMEOUT_FEEDBACK`: Playing timeout notification
-- `GAME_OVER`: End game state
-- `SCORE_DISPLAY`: Optional score announcement
+- `GAME_OVER`: Personalized game over message (based on difficulty and score)
+- `GENERAL_GAME_OVER`: General game over message (always plays after personalized)
 - `POST_GAME_INVITE`: Invite player to play again after game over
 
 ### Audio System
@@ -115,7 +115,14 @@ mp3/
 │
 ├── 0051.mp3       # Wrong button press ("Oops! Wrong button")
 ├── 0052.mp3       # Timeout notification ("Too slow! Time's up")
-├── 0053.mp3       # Game over ("Game over! Thanks for playing")
+│
+├── 0053-0058.mp3  # Game over messages (personalized + general)
+│   ├── 0053.mp3   # Novice strong scorer (score >= 8): "Ready for Intermediate!"
+│   ├── 0054.mp3   # Intermediate strong scorer (score >= 8): "Move up to Advanced!"
+│   ├── 0055.mp3   # Advanced strong scorer (score >= 10): "Join finals Friday!"
+│   ├── 0056.mp3   # Pro strong scorer (score >= 10): "Memory master! See you at finals!"
+│   ├── 0057.mp3   # Mediocre scorer (below threshold): "Good try! Practice makes perfect!"
+│   └── 0058.mp3   # General game over (plays after personalized): "Thanks for playing!"
 │
 ├── 0061-0064.mp3  # Color names for sequence display
 │   ├── 0061.mp3   # "Red"
@@ -143,8 +150,11 @@ mp3/
 **Notes**:
 - All files are in `/mp3/` directory (no `/01/` or `/02/` subfolders)
 - Game uses variations for "My Turn", "Your Turn", and positive feedback to reduce repetition
-- Score files use formula: file number = 70 + score (e.g., score of 12 → file 0082.mp3)
-- Create score files for common values or use gaps for efficiency
+- **Personalized game over messages** (0053-0058): System evaluates difficulty level and score, then plays appropriate message
+  - Strong performers encouraged to advance to next difficulty level
+  - Top performers (Advanced/Pro) invited to finals on Friday
+  - General game over message (0058) always plays after personalized message
+- Score files (0070-0170) reserved for future use (not currently announced in-game)
 
 ### **Audio File Specifications:**
 - **Format**: MP3, 16-bit, mono recommended for smaller file size
@@ -327,16 +337,25 @@ Service LED:               D2 (heartbeat)
 **Result**: Game ends
 
 ### **Game Over Sequence**
-**Duration**: Wait for audio completion (with 3500ms timeout fallback)
-**Audio**: `[AUDIO] Game Over (0010.mp3)`
-**Visual**: All LEDs OFF
-**If Score > 0**: Proceeds to Score Display
-**If Score = 0**: Proceeds to Post-Game Invite
+**Duration**: Wait for audio completion (with 6000ms timeout fallback)
+**Audio Phase 1**: Personalized message based on difficulty and score:
+- Novice (score ≥ 8): `[AUDIO] 0053.mp3` - "Ready for Intermediate!"
+- Intermediate (score ≥ 8): `[AUDIO] 0054.mp3` - "Move up to Advanced!"
+- Advanced (score ≥ 10): `[AUDIO] 0055.mp3` - "Join finals Friday!"
+- Pro (score ≥ 10): `[AUDIO] 0056.mp3` - "Memory master! See you at finals!"
+- Below threshold: `[AUDIO] 0057.mp3` - "Good try! Practice makes perfect!"
 
-### **Score Display** (Optional)
-**Duration**: Wait for audio completion (with 3000ms timeout fallback)
-**Audio**: `[AUDIO] Score: X (/02/XXX.mp3)`
+**Delay**: 300ms between personalized and general message
+
+**Audio Phase 2**: General game over message
+- `[AUDIO] 0058.mp3` - "Thanks for playing!"
+
 **Visual**: All LEDs OFF
+**Result**: Proceeds to General Game Over → Post-Game Invite
+
+### **General Game Over**
+**Duration**: Wait for audio completion (with 6000ms timeout fallback)
+**Delay**: 6000ms pause after audio completes (let message sink in)
 **Result**: Proceeds to Post-Game Invite
 
 ### **Post-Game Invite**
@@ -431,6 +450,15 @@ Service LED:               D2 (heartbeat)
    - Increased game over duration from 2500ms to 3500ms
    - Added delays between audio transitions (250ms, 200ms)
    - Tuned for DFPlayer Mini hardware behavior
+
+5. **Personalized Game Over Messages** (Latest)
+   - Added difficulty-based and score-based game over messages (0053-0058.mp3)
+   - Strong scorers encouraged to advance: Novice/Intermediate (≥8), Advanced/Pro (≥10)
+   - Top performers invited to finals on Friday afternoon
+   - Two-phase game over: Personalized message → General message (0058.mp3)
+   - Removed SCORE_DISPLAY state (no individual score announcements)
+   - Added GENERAL_GAME_OVER state with 6-second pause before invite
+   - Score thresholds: Novice/Int ≥8, Advanced/Pro ≥10
 
 ### Known Issues (Resolved)
 - ✅ Audio messages getting cut off (fixed with finish detection)
