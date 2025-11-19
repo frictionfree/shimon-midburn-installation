@@ -103,17 +103,11 @@ constexpr uint8_t AUDIO_GAME_OVER_PRO_STRONG = 56;          // 0056.mp3 - Pro, s
 constexpr uint8_t AUDIO_GAME_OVER_MEDIOCRE = 57;            // 0057.mp3 - Below threshold for any level
 constexpr uint8_t AUDIO_GAME_OVER_GENERAL = 58;             // 0058.mp3 - General game over (plays after personalized)
 
-// Color Audio Files (migrated to /mp3/ directory)
+// Color Audio Files for sequence display (migrated to /mp3/ directory)
 constexpr uint8_t AUDIO_COLOR_RED = 61;          // /mp3/0061.mp3 - "Red"
 constexpr uint8_t AUDIO_COLOR_BLUE = 62;         // /mp3/0062.mp3 - "Blue"
 constexpr uint8_t AUDIO_COLOR_GREEN = 63;        // /mp3/0063.mp3 - "Green"
 constexpr uint8_t AUDIO_COLOR_YELLOW = 64;       // /mp3/0064.mp3 - "Yellow"
-
-// Color Audio Files for the button feedback (migrated to /mp3/ directory)
-constexpr uint8_t BTN_AUDIO_COLOR_RED = 65;          // /mp3/0061.mp3 - "Red"
-constexpr uint8_t BTN_AUDIO_COLOR_BLUE = 66;         // /mp3/0062.mp3 - "Blue"
-constexpr uint8_t BTN_AUDIO_COLOR_GREEN = 67;        // /mp3/0063.mp3 - "Green"
-constexpr uint8_t BTN_AUDIO_COLOR_YELLOW = 68;       // /mp3/0064.mp3 - "Yellow"
 
 // Score Audio Files (migrated to /mp3/ directory)
 // Note: Score files use base + score value for direct calculation

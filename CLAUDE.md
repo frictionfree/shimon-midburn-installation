@@ -130,12 +130,6 @@ mp3/
 │   ├── 0063.mp3   # "Green"
 │   └── 0064.mp3   # "Yellow"
 │
-├── 0065-0068.mp3  # Color names for button feedback (can be same as 61-64)
-│   ├── 0065.mp3   # "Red"
-│   ├── 0066.mp3   # "Blue"
-│   ├── 0067.mp3   # "Green"
-│   └── 0068.mp3   # "Yellow"
-│
 └── 0070-0170.mp3  # Score announcements (base 70 + score value)
     ├── 0070.mp3   # "Zero points"
     ├── 0071.mp3   # "One point"
