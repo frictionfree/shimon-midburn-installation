@@ -379,7 +379,7 @@ Service LED:               D2 (heartbeat)
 - `SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels for gradual difficulty progression
 - `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds (first invite: 5 seconds)
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
-- `ENABLE_AUDIO_CONFUSER`: Toggle with YELLOW button in idle (runtime configurable)
+- `ENABLE_AUDIO_CONFUSER`: Configured automatically based on difficulty level (Intermediate/Red only)
 
 ### Build Environments
 
@@ -413,15 +413,16 @@ Service LED:               D2 (heartbeat)
 7. **Wrong/Timeout**: Game over → back to idle with ambient
 
 ### **Special Controls:**
-- **YELLOW button in IDLE**: Toggle confuser mode (LED flashes 6 times to confirm)
 - **Serial Monitor**: Essential for understanding audio cues and game state
 - **Service LED**: Always blinking (heartbeat indicator)
+- **Difficulty Selection**: Press any colored button during difficulty selection to choose game mode
 
 ### **Testing Scenarios:**
 - **Visual Engagement**: Wait and observe ambient effects cycling
 - **Invite System**: Wait 5 seconds for first invite, then longer intervals
-- **Confuser Mode**: Toggle with YELLOW, observe "CONFUSER!" in serial during sequence
-- **Progression**: Complete several levels, notice increasing speed
+- **Difficulty Levels**: Test all 4 difficulties (Blue/Red/Green/Yellow) for different game mechanics
+- **Confuser Mode**: Play Intermediate (Red) difficulty to see voice mismatch with LED
+- **Progression**: Complete several levels, notice increasing speed (except Advanced/Green)
 - **Error Handling**: Test wrong buttons, timeouts, and game over sequences
 
 ## Recent Changes & Implementation Notes

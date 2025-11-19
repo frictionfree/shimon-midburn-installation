@@ -59,12 +59,13 @@ constexpr unsigned long CUE_ON_MS_MIN = 250;        // Minimum LED on-time at hi
 constexpr unsigned long CUE_GAP_MS_DEFAULT = 250;   // Gap between LED cues (ms)
 constexpr unsigned long CUE_GAP_MS_MIN = 120;       // Minimum gap at high levels
 
-// Player Input Settings  
+// Player Input Settings
 constexpr unsigned long INPUT_TIMEOUT_MS_DEFAULT = 3000;  // Time limit for player input
 constexpr unsigned long INPUT_TIMEOUT_MS_MIN = 1800;      // Minimum timeout at high levels
 
-// Difficulty Progression
-constexpr float SPEED_STEP = 0.97f;              // Speed multiplier per level (0.8-0.98 recommended) - slower progression
+// Difficulty Progression - separate controls for sequence display vs player input
+constexpr float SEQUENCE_SPEED_STEP = 0.97f;     // Sequence display acceleration (every 3 levels)
+constexpr float INPUT_SPEED_STEP = 0.97f;        // Input timeout acceleration (every 3 levels)
 constexpr uint8_t MAX_SEQUENCE_LENGTH = 64;      // Maximum sequence length
 constexpr uint8_t MAX_SAME_COLOR = 2;            // Max consecutive identical colors in sequence
 
@@ -137,7 +138,7 @@ constexpr bool ENABLE_ANTI_REPETITION = true;    // Avoid playing same variation
 
 // Confuser Mode Settings
 constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must differ from LED color
-// Note: ENABLE_AUDIO_CONFUSER is runtime configurable via YELLOW button in idle mode
+// Note: ENABLE_AUDIO_CONFUSER is configured automatically based on selected difficulty level
 
 // Button Input Settings
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 15;        // Button debounce time

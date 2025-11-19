@@ -20,16 +20,15 @@ enum DifficultyLevel {
 struct DifficultySettings {
   uint8_t startingSequenceLength;
   bool confuserEnabled;
-  bool speedProgressionEnabled;
-  bool regenerateSequenceEachTurn;  // For Green level
-  bool alternatingLedAudio;         // For Yellow level
+  bool regenerateSequenceEachTurn;  // For Green level - generates completely new sequence each turn
+  bool alternatingLedAudio;         // For Yellow level - alternates LED and audio presentation
 };
 
 const DifficultySettings difficultyConfigs[4] = {
-  {1, false, true, false, false},  // NOVICE (Blue)
-  {3, true, true, false, false},   // INTERMEDIATE (Red)
-  {3, false, false, true, false},  // ADVANCED (Green)
-  {1, false, true, false, true}    // PRO (Yellow)
+  {1, false, false, false},  // NOVICE (Blue) - starts at 1, extends cumulatively
+  {3, true, false, false},   // INTERMEDIATE (Red) - confuser mode, starts at 3
+  {3, false, true, false},   // ADVANCED (Green) - new sequence each turn, starts at 3
+  {1, false, false, true}    // PRO (Yellow) - alternating LED/audio, starts at 1
 };
 
 DifficultyLevel selectedDifficulty = NOVICE;  // Default
@@ -40,13 +39,11 @@ struct GameState {
   uint8_t level;             // Current level (sequence length)
   uint8_t score;             // Player score
   uint8_t strikes;           // Number of mistakes
-  unsigned long cueOnMs;     // Current LED on-time
-  unsigned long cueGapMs;    // Current gap between cues
-  unsigned long inputTimeout; // Current input timeout
+  // Timing values removed - now calculated on-the-fly based on level
 };
 
 // --- Runtime Configurable Features ---
-bool ENABLE_AUDIO_CONFUSER = false; // Default: confuser mode OFF (will be configurable via difficulty selection later)
+bool ENABLE_AUDIO_CONFUSER = false; // Default: confuser mode OFF (configured automatically based on difficulty level)
 
 // --- Pin Arrays (reordered to match Color enum: BLUE, RED, GREEN, YELLOW) ---
 // Note: GPIO pin numbers in shimon.h remain unchanged, only array order changes
@@ -171,6 +168,12 @@ struct Audio {
 
   void playScore(uint8_t score) {
     Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3\n", score, score);
+  }
+
+  void stop() {
+    Serial.println("[AUDIO] Stop called (simulation)");
+    audioFinished = true;
+    currentPlayingTrack = -1;
   }
 } audio;
 
@@ -363,6 +366,14 @@ struct Audio {
       }
     }
   }
+
+  void stop() {
+    if (!initialized) return;
+    Serial.println("[AUDIO] Stop called - stopping DFPlayer playback");
+    dfPlayer.stop();
+    audioFinished = true;
+    currentPlayingTrack = -1;
+  }
 } audio;
 #endif
 
@@ -483,6 +494,22 @@ uint8_t getGameOverMessage(DifficultyLevel difficulty, uint8_t score) {
   return AUDIO_GAME_OVER_MEDIOCRE;
 }
 
+// Helper functions to calculate timing based on level (accelerates every 3 levels)
+unsigned long getCurrentCueOnMs(uint8_t level) {
+  unsigned long calculated = (unsigned long)(CUE_ON_MS_DEFAULT * pow(SEQUENCE_SPEED_STEP, level / 3));
+  return max(CUE_ON_MS_MIN, calculated);
+}
+
+unsigned long getCurrentCueGapMs(uint8_t level) {
+  unsigned long calculated = (unsigned long)(CUE_GAP_MS_DEFAULT * pow(SEQUENCE_SPEED_STEP, level / 3));
+  return max(CUE_GAP_MS_MIN, calculated);
+}
+
+unsigned long getCurrentInputTimeout(uint8_t level) {
+  unsigned long calculated = (unsigned long)(INPUT_TIMEOUT_MS_DEFAULT * pow(INPUT_SPEED_STEP, level / 3));
+  return max(INPUT_TIMEOUT_MS_MIN, calculated);
+}
+
 // Forward declarations
 void generateNewSequence(uint8_t length);
 Color generateNextColor();
@@ -494,9 +521,7 @@ void initializeGame() {
   game.level = settings.startingSequenceLength;
   game.score = 0;
   game.strikes = 0;
-  game.cueOnMs = CUE_ON_MS_DEFAULT;
-  game.cueGapMs = CUE_GAP_MS_DEFAULT;
-  game.inputTimeout = INPUT_TIMEOUT_MS_DEFAULT;
+  // Timing values now calculated on-the-fly based on level using helper functions
 
   // Set confuser mode based on difficulty
   ENABLE_AUDIO_CONFUSER = settings.confuserEnabled;
@@ -574,19 +599,36 @@ void extendSequence() {
 }
 
 // ---- Button Input Handling ----
+// Enhanced debouncing with consecutive read requirement
+static uint8_t buttonConsistentCount[4] = {0, 0, 0, 0};
+constexpr uint8_t REQUIRED_CONSISTENT_READS = 3; // Require 3 consecutive consistent reads
+
 void updateButtonStates() {
   unsigned long now = millis();
-  
+
   for (int i = 0; i < COLOR_COUNT; i++) {
     bool rawState = pressed((Color)i);
-    
-    // Debouncing: only update if stable for debounce time
+
+    // Enhanced debouncing: require multiple consecutive consistent reads
     if (rawState != lastButtonStates[i]) {
+      // State change detected - reset consistency counter and timer
       buttonDebounceTime[i] = now;
-    } else if (now - buttonDebounceTime[i] > BUTTON_DEBOUNCE_MS) {
-      buttonStates[i] = rawState;
+      buttonConsistentCount[i] = 1;
+    } else {
+      // Same state as last read - increment consistency counter
+      if (buttonConsistentCount[i] < REQUIRED_CONSISTENT_READS) {
+        buttonConsistentCount[i]++;
+      }
+
+      // Only update button state if:
+      // 1. We've seen enough consistent reads AND
+      // 2. Enough time has passed (debounce time)
+      if (buttonConsistentCount[i] >= REQUIRED_CONSISTENT_READS &&
+          now - buttonDebounceTime[i] > BUTTON_DEBOUNCE_MS) {
+        buttonStates[i] = rawState;
+      }
     }
-    
+
     lastButtonStates[i] = rawState;
   }
 }
@@ -1021,6 +1063,7 @@ void loop() {
 
         if (anyButtonPressed()) {
           Serial.println("Instructions skipped by user");
+          audio.stop();  // Stop audio playback immediately
         }
 
         stateTimer = now;
@@ -1075,6 +1118,7 @@ void loop() {
 
         if (anyButtonPressed()) {
           Serial.println("Difficulty instructions skipped by user");
+          audio.stop();  // Stop audio playback immediately
         }
 
         stateTimer = now;
@@ -1121,6 +1165,7 @@ void loop() {
       if (anyButtonPressed() || isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
         if (anyButtonPressed()) {
           Serial.println("'My Turn' skipped by user");
+          audio.stop();  // Stop audio playback immediately
         }
 
         // Small delay to let DFPlayer switch from /mp3/ to /01/ folder playback
@@ -1163,12 +1208,12 @@ void loop() {
 
         stateTimer = now;
         ledOn = true;
-      } else if (now - stateTimer > game.cueOnMs) {
+      } else if (now - stateTimer > getCurrentCueOnMs(game.level)) {
         // Turn off LED after cue time (keep ledOn=true to prevent retriggering)
         setLed((Color)game.seq[currentStep], false);
 
         // Check if gap period is also complete
-        if (now - stateTimer > game.cueOnMs + game.cueGapMs) {
+        if (now - stateTimer > getCurrentCueOnMs(game.level) + getCurrentCueGapMs(game.level)) {
           currentStep++;
           if (currentStep >= game.level) {
             // Sequence complete - play "Your Turn" and immediately allow input
@@ -1177,7 +1222,7 @@ void loop() {
             stateTimer = now;
             currentStep = 0;
             gameState = SEQ_INPUT; // Skip SEQ_DISPLAY_YOURTURN - go directly to input
-            Serial.printf("INPUT DEBUG: Starting input phase at %lu ms (timeout: %lu ms)\n", now, game.inputTimeout);
+            Serial.printf("INPUT DEBUG: Starting input phase at %lu ms (timeout: %lu ms)\n", now, getCurrentInputTimeout(game.level));
           } else {
             ledOn = false; // Ready for next step
           }
@@ -1205,9 +1250,9 @@ void loop() {
 
       // Check for timeout
       unsigned long elapsed = now - stateTimer;
-      if (elapsed > game.inputTimeout) {
-        Serial.printf("TIMEOUT DEBUG: now=%lu, stateTimer=%lu, elapsed=%lu, timeout=%lu\n", 
-                      now, stateTimer, elapsed, game.inputTimeout);
+      if (elapsed > getCurrentInputTimeout(game.level)) {
+        Serial.printf("TIMEOUT DEBUG: now=%lu, stateTimer=%lu, elapsed=%lu, timeout=%lu\n",
+                      now, stateTimer, elapsed, getCurrentInputTimeout(game.level));
         audio.playTimeout();
         stateTimer = now;
         gameState = TIMEOUT_FEEDBACK;
@@ -1234,7 +1279,7 @@ void loop() {
               // Level complete!
               audioFinished = false; // Reset flag before playing
               audio.playCorrect();
-              game.score += game.level; // Score based on level
+              game.score++; // Score = number of levels successfully completed
               stateTimer = now;
               gameState = CORRECT_FEEDBACK;
               Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
@@ -1295,11 +1340,10 @@ void loop() {
           extendSequence();
         }
 
-        // Apply speed progression only if enabled for this difficulty
-        if (settings.speedProgressionEnabled && game.level % 3 == 0) {
-          game.cueOnMs = max(CUE_ON_MS_MIN, (unsigned long)(game.cueOnMs * SPEED_STEP));
-          game.cueGapMs = max(CUE_GAP_MS_MIN, (unsigned long)(game.cueGapMs * SPEED_STEP));
-          Serial.printf("Speed increased: cue=%lu gap=%lu\n", game.cueOnMs, game.cueGapMs);
+        // Speed progression now calculated automatically based on level
+        if (game.level % 3 == 0) {
+          Serial.printf("Level %d: Speed progression - cue=%lu gap=%lu timeout=%lu\n",
+                        game.level, getCurrentCueOnMs(game.level), getCurrentCueGapMs(game.level), getCurrentInputTimeout(game.level));
         }
 
         ledTurnedOff = false; // Reset flag for next time
@@ -1364,7 +1408,13 @@ void loop() {
     }
     
     case GAME_OVER: {
-      if (isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
+      // Allow user to skip game over message by pressing any button, OR wait for audio completion
+      if (anyButtonPressed() || isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
+        if (anyButtonPressed()) {
+          Serial.println("Game over message skipped by user");
+          audio.stop();  // Stop audio playback immediately
+        }
+
         // Personalized message finished, play general game over
         delay(GAME_OVER_MESSAGE_DELAY_MS);  // Short delay between messages
         audioFinished = false;
@@ -1377,7 +1427,13 @@ void loop() {
     }
 
     case GENERAL_GAME_OVER: {
-      if (isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
+      // Allow user to skip general game over message by pressing any button, OR wait for audio completion
+      if (anyButtonPressed() || isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
+        if (anyButtonPressed()) {
+          Serial.println("General game over message skipped by user");
+          audio.stop();  // Stop audio playback immediately
+        }
+
         // General game over finished, move to post-game invite
         Serial.printf("Game over! Final score: %d\n", game.score);
         gameState = POST_GAME_INVITE;
@@ -1387,6 +1443,23 @@ void loop() {
     }
 
     case POST_GAME_INVITE: {
+      // Allow user to skip post-game invite entirely by pressing any button
+      if (anyButtonPressed()) {
+        Serial.println("Post-game invite skipped by user");
+        audio.stop();  // Stop any audio playback
+
+        // Reset delay flag and return to idle immediately
+        static bool delayStarted = false;
+        delayStarted = false;
+
+        scheduleNextInvite();
+        ambientTimer = now;
+        effectChangeTimer = now;
+        gameState = IDLE;
+        Serial.println("Back to idle mode (skipped)");
+        break;
+      }
+
       // Add delay to ensure Game Over audio completes before playing invite
       static bool delayStarted = false;
       if (!delayStarted) {
