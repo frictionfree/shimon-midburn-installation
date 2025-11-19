@@ -28,7 +28,7 @@ const DifficultySettings difficultyConfigs[4] = {
   {1, false, false, false},  // NOVICE (Blue) - starts at 1, extends cumulatively
   {3, true, false, false},   // INTERMEDIATE (Red) - confuser mode, starts at 3
   {3, false, true, false},   // ADVANCED (Green) - new sequence each turn, starts at 3
-  {1, false, false, true}    // PRO (Yellow) - alternating LED/audio, starts at 1
+  {3, false, false, true}    // PRO (Yellow) - alternating LED/audio, starts at 3
 };
 
 DifficultyLevel selectedDifficulty = NOVICE;  // Default
