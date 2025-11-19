@@ -1059,13 +1059,15 @@ void loop() {
       // After 2 seconds, allow button press to select difficulty directly
       const unsigned long INSTRUCTIONS_MIN_DURATION_MS = 2000;
       bool minTimeElapsed = (now - stateTimer) >= INSTRUCTIONS_MIN_DURATION_MS;
+      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
+      bool audioComplete = isAudioComplete(stateTimer, MAIN_INSTRUCTIONS_DURATION_MS);
 
       // Check if user pressed button after minimum time OR audio completed
-      if ((minTimeElapsed && anyButtonPressed()) || isAudioComplete(stateTimer, MAIN_INSTRUCTIONS_DURATION_MS)) {
+      if ((minTimeElapsed && buttonPressed) || audioComplete) {
         // Turn off all LEDs
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
-        if (minTimeElapsed && anyButtonPressed()) {
+        if (minTimeElapsed && buttonPressed) {
           // User pressed button - use it to select difficulty directly
           selectedDifficulty = (DifficultyLevel)lastButtonPressed;
           audio.stop();  // Stop audio playback immediately
@@ -1128,20 +1130,30 @@ void loop() {
       setBtnLed((Color)selectedDifficulty, true);
 
       // Allow user to skip instructions by pressing any button, OR wait for audio completion
-      if (anyButtonPressed() || isAudioComplete(stateTimer, DIFFICULTY_INSTRUCTIONS_DURATION_MS)) {
+      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
+      bool audioComplete = isAudioComplete(stateTimer, DIFFICULTY_INSTRUCTIONS_DURATION_MS);
+
+      if (buttonPressed || audioComplete) {
         // Turn off selected button LED
         for (int i = 0; i < COLOR_COUNT; i++) {
           setBtnLed((Color)i, false);
         }
 
-        if (anyButtonPressed()) {
-          Serial.println("Difficulty instructions skipped by user");
+        if (buttonPressed) {
+          Serial.println("Difficulty instructions skipped by user - starting game immediately");
           audio.stop();  // Stop audio playback immediately
-        }
 
-        stateTimer = now;
-        gameState = AWAIT_START;
-        Serial.println("Press any button to start game...");
+          // Skip AWAIT_START and go directly to game start
+          gameStartSequence();
+          initializeGame();
+          gameState = SEQ_DISPLAY_INIT;
+          Serial.println("Game starting!");
+        } else {
+          // Audio completed naturally - go to AWAIT_START
+          stateTimer = now;
+          gameState = AWAIT_START;
+          Serial.println("Press any button to start game...");
+        }
       }
       break;
     }
@@ -1179,13 +1191,8 @@ void loop() {
     }
 
     case SEQ_DISPLAY_MYTURN: {
-      // Allow user to skip "My Turn" by pressing any button, OR wait for audio completion
-      if (anyButtonPressed() || isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
-        if (anyButtonPressed()) {
-          Serial.println("'My Turn' skipped by user");
-          audio.stop();  // Stop audio playback immediately
-        }
-
+      // Wait for "My Turn" audio to complete (no skip - message is short and important)
+      if (isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
         // Small delay to let DFPlayer switch from /mp3/ to /01/ folder playback
         delay(200);
         stateTimer = now;
@@ -1427,8 +1434,11 @@ void loop() {
     
     case GAME_OVER: {
       // Allow user to skip game over message by pressing any button, OR wait for audio completion
-      if (anyButtonPressed() || isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
-        if (anyButtonPressed()) {
+      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
+      bool audioComplete = isAudioComplete(stateTimer, GAME_OVER_DURATION_MS);
+
+      if (buttonPressed || audioComplete) {
+        if (buttonPressed) {
           Serial.println("Game over message skipped by user");
           audio.stop();  // Stop audio playback immediately
         }
@@ -1446,8 +1456,11 @@ void loop() {
 
     case GENERAL_GAME_OVER: {
       // Allow user to skip general game over message by pressing any button, OR wait for audio completion
-      if (anyButtonPressed() || isAudioComplete(stateTimer, GAME_OVER_DURATION_MS)) {
-        if (anyButtonPressed()) {
+      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
+      bool audioComplete = isAudioComplete(stateTimer, GAME_OVER_DURATION_MS);
+
+      if (buttonPressed || audioComplete) {
+        if (buttonPressed) {
           Serial.println("General game over message skipped by user");
           audio.stop();  // Stop audio playback immediately
         }
