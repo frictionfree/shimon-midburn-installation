@@ -1056,19 +1056,37 @@ void loop() {
     }
 
     case INSTRUCTIONS: {
-      // Allow user to skip instructions by pressing any button, OR wait for audio completion
-      if (anyButtonPressed() || isAudioComplete(stateTimer, MAIN_INSTRUCTIONS_DURATION_MS)) {
+      // After 2 seconds, allow button press to select difficulty directly
+      const unsigned long INSTRUCTIONS_MIN_DURATION_MS = 2000;
+      bool minTimeElapsed = (now - stateTimer) >= INSTRUCTIONS_MIN_DURATION_MS;
+
+      // Check if user pressed button after minimum time OR audio completed
+      if ((minTimeElapsed && anyButtonPressed()) || isAudioComplete(stateTimer, MAIN_INSTRUCTIONS_DURATION_MS)) {
         // Turn off all LEDs
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
-        if (anyButtonPressed()) {
-          Serial.println("Instructions skipped by user");
+        if (minTimeElapsed && anyButtonPressed()) {
+          // User pressed button - use it to select difficulty directly
+          selectedDifficulty = (DifficultyLevel)lastButtonPressed;
           audio.stop();  // Stop audio playback immediately
-        }
 
-        stateTimer = now;
-        gameState = DIFFICULTY_SELECTION;
-        Serial.println("Select difficulty: Press Blue/Red/Green/Yellow button");
+          const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
+          Serial.printf("Instructions skipped - Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
+
+          // Turn on selected button LED
+          setBtnLed((Color)selectedDifficulty, true);
+
+          // Play difficulty-specific instructions
+          audioFinished = false;
+          audio.playDifficultyInstructions(selectedDifficulty);
+          stateTimer = now;
+          gameState = DIFFICULTY_INSTRUCTIONS;
+        } else {
+          // Audio completed naturally - go to difficulty selection
+          stateTimer = now;
+          gameState = DIFFICULTY_SELECTION;
+          Serial.println("Select difficulty: Press Blue/Red/Green/Yellow button");
+        }
       }
       break;
     }
