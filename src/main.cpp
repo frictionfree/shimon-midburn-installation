@@ -84,6 +84,12 @@ uint8_t selectVariationWithFallback(uint8_t base, uint8_t count, uint8_t& lastPl
     return fileNumber;
 }
 
+// ---- Forward Declarations for Visual Pattern Functions ----
+void clockwiseRotation(uint8_t cycles, uint16_t delayMs);
+void sparkleBurstSequence(uint8_t sparkleCount, uint8_t delayMs);
+void diagonalCrossPattern(uint8_t cycles, uint16_t delayMs);
+void acceleratingChaseSequence();
+
 // ---- Enhanced Audio System ----
 #ifdef USE_WOKWI
 // Simulation version - prints to Serial
@@ -673,47 +679,24 @@ void bootSequence() {
       setLed((Color)i, false);
     }
   }
-  
-  // Rapid sequential flash (power-safe - one LED at a time)
-  for (int flash = 0; flash < 4; flash++) {
-    for (int i = 0; i < COLOR_COUNT; i++) {
-      setLed((Color)i, true);
-      delay(BOOT_FLASH_DELAY_MS / 4);  // Rapid sequential
-      setLed((Color)i, false);
-    }
-    delay(BOOT_FLASH_DELAY_MS / 2);
-  }
-  
+
+  // Exciting sparkle burst finale
+  sparkleBurstSequence(20, 80);
+
   Serial.println("Boot sequence complete!");
 }
 
 void inviteSequence() {
   Serial.println("Playing invite LED sequence...");
 
-  // Quick attention-grabbing sequence (power-safe - one LED at a time)
-  // Rapid sequential flash pattern
-  for (int flash = 0; flash < 2; flash++) {
-    for (int i = 0; i < COLOR_COUNT; i++) {
-      setLed((Color)i, true);
-      delay(INVITE_FLASH_DELAY_MS / 4);
-      setLed((Color)i, false);
-    }
-    delay(INVITE_FLASH_DELAY_MS / 2);
-  }
+  // Eye-catching sparkle burst to grab attention
+  sparkleBurstSequence(15, 75);
 
-  // Spinning pattern (already sequential - keep as is)
-  for (int spin = 0; spin < 8; spin++) {
-    setLed((Color)(spin % COLOR_COUNT), true);
-    delay(INVITE_SPIN_DELAY_MS);
-    setLed((Color)(spin % COLOR_COUNT), false);
-  }
+  // Fast clockwise rotation accent
+  clockwiseRotation(2, 150);
 
-  // Final rapid sequential flash
-  for (int i = 0; i < COLOR_COUNT; i++) {
-    setLed((Color)i, true);
-    delay(75); // Rapid final sequence
-    setLed((Color)i, false);
-  }
+  // Finale sparkle burst
+  sparkleBurstSequence(10, 60);
 }
 
 void instructionsSequence() {
@@ -744,25 +727,23 @@ void instructionsSequence() {
 }
 
 void readyToStartEffect(unsigned long now) {
-  // Gentle rotating pulse to indicate "ready to start" (power-safe - one LED at a time)
+  // Clockwise rotation at medium speed to indicate "ready to start"
+  // Consistent visual cue for player input states
   static unsigned long readyTimer = 0;
   static uint8_t readyStep = 0;
+  const Color clockwiseOrder[] = {BLUE, RED, GREEN, YELLOW};
+  const uint16_t INPUT_ROTATION_DELAY_MS = 400;  // Medium speed
 
-  if (now - readyTimer > READY_PULSE_INTERVAL_MS) { // Update from config
-    // Turn off all first
+  if (now - readyTimer > INPUT_ROTATION_DELAY_MS) {
+    // Turn off all wings
     for (int i = 0; i < COLOR_COUNT; i++) {
       setLed((Color)i, false);
     }
 
-    // Rotating pulse pattern - creates a "breathing" effect by changing which LED is on
-    float pulse = (sin(readyStep * 0.3) + 1.0) * 0.5; // 0 to 1
-    if (pulse > 0.4) {
-      // Light up one LED based on step, rotating through colors
-      setLed((Color)(readyStep % COLOR_COUNT), true);
-    }
+    // Light up current wing in clockwise sequence
+    setLed(clockwiseOrder[readyStep % COLOR_COUNT], true);
 
     readyStep++;
-    if (readyStep >= 42) readyStep = 0; // Shorter cycle than breathing
     readyTimer = now;
   }
 }
@@ -770,111 +751,95 @@ void readyToStartEffect(unsigned long now) {
 void gameStartSequence() {
   Serial.println("Game starting visual confirmation!");
 
-  // Quick burst effect to show game is starting (power-safe - one LED at a time)
-  for (int burst = 0; burst < 3; burst++) {
-    // Rapid sequential burst
-    for (int i = 0; i < COLOR_COUNT; i++) {
-      setLed((Color)i, true);
-      delay(START_BURST_DELAY_MS / 4);
-      setLed((Color)i, false);
-    }
-    delay(START_BURST_DELAY_MS / 2);
-  }
-
-  // Final rapid sequential flash
-  for (int i = 0; i < COLOR_COUNT; i++) {
-    setLed((Color)i, true);
-    delay(50); // Rapid final sequence
-    setLed((Color)i, false);
-  }
+  // Exciting sparkle burst to energize game start
+  sparkleBurstSequence(15, 70);
 
   Serial.println("Game start sequence complete - all LEDs should be OFF");
 }
 
+// ---- New Visual Pattern Functions ----
+
+void clockwiseRotation(uint8_t cycles, uint16_t delayMs) {
+  // Smooth clockwise rotation: BLUE→RED→GREEN→YELLOW (follows butterfly perimeter)
+  const Color clockwiseOrder[] = {BLUE, RED, GREEN, YELLOW};
+
+  for (uint8_t cycle = 0; cycle < cycles; cycle++) {
+    for (uint8_t i = 0; i < COLOR_COUNT; i++) {
+      setLed(clockwiseOrder[i], true);
+      delay(delayMs);
+      setLed(clockwiseOrder[i], false);
+    }
+  }
+}
+
+void sparkleBurstSequence(uint8_t sparkleCount, uint8_t delayMs) {
+  // Random wing sparkles for exciting, unpredictable effect
+  for (uint8_t i = 0; i < sparkleCount; i++) {
+    Color randomWing = (Color)random(0, COLOR_COUNT);
+    setLed(randomWing, true);
+    delay(delayMs);
+    setLed(randomWing, false);
+  }
+}
+
+void diagonalCrossPattern(uint8_t cycles, uint16_t delayMs) {
+  // Slow alternating diagonal pattern (BLUE↔GREEN, RED↔YELLOW)
+  for (uint8_t cycle = 0; cycle < cycles; cycle++) {
+    // Top-left to bottom-right diagonal
+    setLed(BLUE, true);
+    delay(delayMs);
+    setLed(BLUE, false);
+
+    setLed(GREEN, true);
+    delay(delayMs);
+    setLed(GREEN, false);
+
+    // Top-right to bottom-left diagonal
+    setLed(RED, true);
+    delay(delayMs);
+    setLed(RED, false);
+
+    setLed(YELLOW, true);
+    delay(delayMs);
+    setLed(YELLOW, false);
+  }
+}
+
+void acceleratingChaseSequence() {
+  // Speed builds excitement - starts slow, accelerates to very fast
+  const Color clockwiseOrder[] = {BLUE, RED, GREEN, YELLOW};
+  uint16_t currentDelay = 400; // Start slow
+  const uint16_t minDelay = 50; // Very fast finale
+  const float speedStep = 0.8; // 20% faster each cycle
+
+  for (uint8_t cycle = 0; cycle < 3; cycle++) {
+    for (uint8_t i = 0; i < COLOR_COUNT; i++) {
+      setLed(clockwiseOrder[i], true);
+      delay(currentDelay);
+      setLed(clockwiseOrder[i], false);
+    }
+    currentDelay = max(minDelay, (uint16_t)(currentDelay * speedStep));
+  }
+}
+
 // ---- Ambient Effects for Idle State ----
 void updateAmbientEffects(unsigned long now) {
-  // Change effect every configured duration
-  if (now - effectChangeTimer > (AMBIENT_EFFECT_DURATION_SEC * 1000)) {
-    currentAmbientEffect = (AmbientEffect)((currentAmbientEffect + 1) % AMBIENT_EFFECT_COUNT);
-    effectChangeTimer = now;
-    ambientStep = 0;
+  // Smooth clockwise rotation ambient effect (non-blocking)
+  // BLUE→RED→GREEN→YELLOW at 600ms per wing
+  const Color clockwiseOrder[] = {BLUE, RED, GREEN, YELLOW};
+  const uint16_t IDLE_ROTATION_DELAY_MS = 600;
+
+  if (now - ambientTimer > IDLE_ROTATION_DELAY_MS) {
+    // Turn off all wings
+    for (int i = 0; i < COLOR_COUNT; i++) {
+      setLed((Color)i, false);
+    }
+
+    // Light up current wing in clockwise sequence
+    setLed(clockwiseOrder[ambientStep % COLOR_COUNT], true);
+
+    ambientStep++;
     ambientTimer = now;
-    Serial.printf("Switching to ambient effect: %d\n", currentAmbientEffect);
-  }
-  
-  switch (currentAmbientEffect) {
-    case BREATHING: {
-      // Gentle rotating breathing effect (power-safe - one LED at a time)
-      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[BREATHING]) {
-        // Turn off all first
-        for (int i = 0; i < COLOR_COUNT; i++) {
-          setLed((Color)i, false);
-        }
-
-        // Gentle pulse - determine if LED should be on based on sine wave
-        float breath = (sin(ambientStep * 0.2) + 1.0) * 0.5; // 0 to 1
-        bool ledState = breath > 0.3; // Threshold for on/off
-
-        if (ledState) {
-          // Rotate which LED is "breathing" through the colors
-          setLed((Color)(ambientStep % COLOR_COUNT), true);
-        }
-
-        ambientStep++;
-        if (ambientStep >= 63) ambientStep = 0; // Full cycle
-        ambientTimer = now;
-      }
-      break;
-    }
-    
-    case SLOW_CHASE: {
-      // Slow color chase around the ring
-      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[SLOW_CHASE]) {
-        // Turn off all
-        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-        
-        // Light up current LED
-        setLed((Color)(ambientStep % COLOR_COUNT), true);
-        
-        ambientStep++;
-        ambientTimer = now;
-      }
-      break;
-    }
-    
-    case TWINKLE: {
-      // Random twinkling effect
-      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[TWINKLE]) {
-        // Turn off all first
-        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-        
-        // Light up 1-2 random LEDs
-        int numLeds = random(1, 3);
-        for (int i = 0; i < numLeds; i++) {
-          Color randomColor = (Color)random(0, COLOR_COUNT);
-          setLed(randomColor, true);
-        }
-        
-        ambientTimer = now;
-      }
-      break;
-    }
-    
-    case PULSE_WAVE: {
-      // Wave pulse effect (power-safe - one LED at a time)
-      if (now - ambientTimer > AMBIENT_UPDATE_INTERVALS[PULSE_WAVE]) {
-        // Turn off all
-        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-
-        // Create single wave pattern (simpler, power-safe)
-        int wave = ambientStep % COLOR_COUNT;
-        setLed((Color)wave, true);
-
-        ambientStep++;
-        ambientTimer = now;
-      }
-      break;
-    }
   }
 }
 
@@ -1073,15 +1038,23 @@ void loop() {
     }
 
     case DIFFICULTY_SELECTION: {
-      // Visual feedback: pulse all 4 button LEDs
-      static unsigned long pulseTimer = 0;
-      if (now - pulseTimer > 500) {
-        static bool pulseState = false;
-        pulseState = !pulseState;
+      // Visual feedback: clockwise rotation (consistent input cue)
+      static unsigned long selectionTimer = 0;
+      static uint8_t selectionStep = 0;
+      const Color clockwiseOrder[] = {BLUE, RED, GREEN, YELLOW};
+      const uint16_t INPUT_ROTATION_DELAY_MS = 400;  // Medium speed
+
+      if (now - selectionTimer > INPUT_ROTATION_DELAY_MS) {
+        // Turn off all wing LEDs
         for (int i = 0; i < COLOR_COUNT; i++) {
-          setBtnLed((Color)i, pulseState);
+          setLed((Color)i, false);
         }
-        pulseTimer = now;
+
+        // Light up current wing in clockwise sequence
+        setLed(clockwiseOrder[selectionStep % COLOR_COUNT], true);
+
+        selectionStep++;
+        selectionTimer = now;
       }
 
       // Wait for button press
@@ -1316,6 +1289,13 @@ void loop() {
     }
     
     case CORRECT_FEEDBACK: {
+      // Play celebratory sparkle burst (only once when entering state)
+      static bool celebrationPlayed = false;
+      if (!celebrationPlayed) {
+        sparkleBurstSequence(12, 60);  // Quick celebration
+        celebrationPlayed = true;
+      }
+
       // Keep button LED on while button is held during feedback
       static bool ledTurnedOff = false;
       if (!pressed(lastButtonPressed) && !ledTurnedOff) {
@@ -1325,6 +1305,7 @@ void loop() {
       }
 
       if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
+        celebrationPlayed = false;  // Reset for next time
         // Turn off all feedback LEDs
         for (int i = 0; i < COLOR_COUNT; i++) {
           setLed((Color)i, false);
@@ -1411,6 +1392,42 @@ void loop() {
     }
     
     case GAME_OVER: {
+      // Visual pattern during personalized game over message
+      static bool patternPlayed = false;
+      static unsigned long patternTimer = 0;
+
+      if (!patternPlayed) {
+        // Check if good score - use existing thresholds
+        bool goodScore = false;
+        if ((selectedDifficulty == NOVICE || selectedDifficulty == INTERMEDIATE) && game.score >= 8) {
+          goodScore = true;
+        } else if ((selectedDifficulty == ADVANCED || selectedDifficulty == PRO) && game.score >= 10) {
+          goodScore = true;
+        }
+
+        if (goodScore) {
+          // Impressive celebration!
+          acceleratingChaseSequence();
+          sparkleBurstSequence(20, 50);  // Extra sparkles!
+        } else {
+          // Gentle, encouraging diagonal cross
+          diagonalCrossPattern(2, 500);
+        }
+
+        patternPlayed = true;
+        patternTimer = now;
+      }
+
+      // Continue diagonal cross pattern periodically during audio for low scores
+      if (!patternPlayed || (now - patternTimer > 2000)) {  // Every 2 seconds
+        bool goodScore = ((selectedDifficulty <= INTERMEDIATE && game.score >= 8) ||
+                          (selectedDifficulty >= ADVANCED && game.score >= 10));
+        if (!goodScore) {
+          diagonalCrossPattern(1, 500);  // Calm, mellow pattern
+          patternTimer = now;
+        }
+      }
+
       // Allow user to skip game over message by pressing any button, OR wait for audio completion
       bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
       bool audioComplete = isAudioComplete(stateTimer, GAME_OVER_DURATION_MS);
@@ -1420,6 +1437,8 @@ void loop() {
           Serial.println("Game over message skipped by user");
           audio.stop();  // Stop audio playback immediately
         }
+
+        patternPlayed = false;  // Reset for next game
 
         // Personalized message finished, play general game over
         delay(GAME_OVER_MESSAGE_DELAY_MS);  // Short delay between messages
@@ -1433,6 +1452,16 @@ void loop() {
     }
 
     case GENERAL_GAME_OVER: {
+      // Slow clockwise rotation during general game over message
+      static unsigned long generalPatternTimer = 0;
+      static bool generalPatternStarted = false;
+
+      if (!generalPatternStarted || (now - generalPatternTimer > 2400)) {  // Every 2.4 seconds (full rotation)
+        clockwiseRotation(1, 600);  // One slow, calm rotation
+        generalPatternTimer = now;
+        generalPatternStarted = true;
+      }
+
       // Allow user to skip general game over message by pressing any button, OR wait for audio completion
       bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
       bool audioComplete = isAudioComplete(stateTimer, GAME_OVER_DURATION_MS);
@@ -1442,6 +1471,8 @@ void loop() {
           Serial.println("General game over message skipped by user");
           audio.stop();  // Stop audio playback immediately
         }
+
+        generalPatternStarted = false;  // Reset for next game
 
         // General game over finished, move to post-game invite
         Serial.printf("Game over! Final score: %d\n", game.score);
