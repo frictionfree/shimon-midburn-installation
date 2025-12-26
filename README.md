@@ -111,8 +111,8 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0031-0035.mp3 | \"Your Turn\" variations (5 files): \"Your turn!\", \"Now you try!\", etc. |
 | /mp3/0041-0045.mp3 | Positive feedback variations (5 files): \"Great job!\", \"Perfect!\", etc. |
 | **Color Audio** | **Direct mp3 files** |
-| /mp3/0061.mp3  | Color: Red |
-| /mp3/0062.mp3  | Color: Blue |
+| /mp3/0061.mp3  | Color: Blue |
+| /mp3/0062.mp3  | Color: Red |
 | /mp3/0063.mp3  | Color: Green |
 | /mp3/0064.mp3  | Color: Yellow |
 | **Score Audio** | **Direct mp3 files (0070 + score)** |

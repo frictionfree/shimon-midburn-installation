@@ -51,8 +51,8 @@ All 39 audio files in single directory structure:
 
 ### Color Audio Files (0061-0064.mp3)
 Color names for confuser mode:
-- `mp3/0061.mp3` - "Red"
-- `mp3/0062.mp3` - "Blue" 
+- `mp3/0061.mp3` - "Blue"
+- `mp3/0062.mp3` - "Red" 
 - `mp3/0063.mp3` - "Green"
 - `mp3/0064.mp3` - "Yellow"
 

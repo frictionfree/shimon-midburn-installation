@@ -125,8 +125,8 @@ mp3/
 │   └── 0058.mp3   # General game over (plays after personalized): "Thanks for playing!"
 │
 ├── 0061-0064.mp3  # Color names for sequence display
-│   ├── 0061.mp3   # "Red"
-│   ├── 0062.mp3   # "Blue"
+│   ├── 0061.mp3   # "Blue"
+│   ├── 0062.mp3   # "Red"
 │   ├── 0063.mp3   # "Green"
 │   └── 0064.mp3   # "Yellow"
 │

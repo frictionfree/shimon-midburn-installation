@@ -92,8 +92,8 @@ mp3/
 ├── 0051.mp3          # Wrong: "Oops! That's not right."
 ├── 0052.mp3          # Game Over: "Game over! Thanks for playing!"
 ├── 0053.mp3          # Timeout: "Time's up! Game over."
-├── 0061.mp3          # Color: "Red"
-├── 0062.mp3          # Color: "Blue"
+├── 0061.mp3          # Color: "Blue"
+├── 0062.mp3          # Color: "Red"
 ├── 0063.mp3          # Color: "Green"
 ├── 0064.mp3          # Color: "Yellow"
 ├── 0070.mp3          # Score: 0 points
@@ -167,8 +167,8 @@ constexpr uint8_t AUDIO_CORRECT = 41;            // Legacy positive feedback - n
 constexpr uint8_t AUDIO_TIMEOUT = 53;            // Timeout notification (0053.mp3) - migrated from 0012.mp3
 
 // Color Audio Files (migrated from /01/ to /mp3/)
-constexpr uint8_t AUDIO_COLOR_RED = 61;          // /mp3/0061.mp3 - "Red"
-constexpr uint8_t AUDIO_COLOR_BLUE = 62;         // /mp3/0062.mp3 - "Blue"
+constexpr uint8_t AUDIO_COLOR_BLUE = 61;         // /mp3/0061.mp3 - "Blue"
+constexpr uint8_t AUDIO_COLOR_RED = 62;          // /mp3/0062.mp3 - "Red"
 constexpr uint8_t AUDIO_COLOR_GREEN = 63;        // /mp3/0063.mp3 - "Green"
 constexpr uint8_t AUDIO_COLOR_YELLOW = 64;       // /mp3/0064.mp3 - "Yellow"
 
