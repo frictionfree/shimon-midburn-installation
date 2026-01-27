@@ -14,8 +14,8 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
 - **Pin Configuration** (include/shimon.h):
   - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5 (all on right header)
-  - **Button Inputs**: BLUE=21, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND)
-  - **Button LEDs**: BLUE=25, RED=26, GREEN=32, YELLOW=33 (left-side pins, 220-470Ω resistors)
+  - **Button Inputs**: BLUE=21, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND, with hardware pull-up + capacitor)
+  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (GPIOs unused/reserved - button LEDs hardwired to mirror LED strips)
   - **DFPlayer Mini**: RX2=16, TX2=17 (Serial2)
   - **Service LED**: Pin 2 (heartbeat indicator)
 
@@ -28,13 +28,60 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Button Input Circuit**:
   - `Button switch → ESP32 GPIO (INPUT_PULLUP)`
   - `Button other pin → GND`
-- **Button LED Circuit**:
-  - `ESP32 GPIO → 220-470Ω resistor → LED+ (anode)`
-  - `LED– (cathode) → GND`
+  - **Hardware conditioning**: 10kΩ pull-up to 3.3V + 100nF capacitor to GND (eliminates ghost presses)
+- **Button LED Circuit** (HARDWARE-CONTROLLED):
+  - Button LEDs (12V) are **hardwired to mirror LED strips** via MOSFET channels
+  - Button LED anode → +12V
+  - Button LED cathode → Same MOSFET drain as corresponding LED strip
+  - **Result**: Button LEDs automatically turn on/off when LED strips do (no firmware control needed)
+  - **GPIOs 25, 26, 32, 33 are UNUSED/RESERVED** (previously assigned for button LEDs)
 - **Power & Protection**:
   - Common ground shared between ESP32, PSU, and DFPlayer
   - TVS diode (SA5.0A) across +5V/GND after main fuse
   - Per-channel PTC fuses on LED+ lines (add after testing)
+
+### Hardware Constraints (Critical - From As-Built Baseline)
+
+**IMPORTANT**: These constraints are validated in hardware and **must be respected** in all firmware:
+
+#### PWM Minimum Duty Limitation
+- **Issue**: IRF540N MOSFETs driven at 3.3V gate voltage do not conduct linearly at very low PWM duty
+- **Minimum Effective Duty**: ~70/255 (empirically validated)
+- **Firmware Requirement**:
+  - On button press or LED activation, **immediately jump PWM duty to minimum visible value** (70/255 or higher)
+  - After initial jump, PWM may ramp linearly to full brightness
+  - **Do NOT ramp from 0** - LEDs will remain dark or flicker inconsistently
+  - Fade-out to zero duty does not require minimum clamp
+- **Purpose**: Guarantees instant visual feedback on short button presses
+- **Configuration**: See `PWM_MIN_EFFECTIVE_DUTY` in `shimon.h`
+
+#### Power Budget Constraint
+- **LED PSU**: 12V / 100W (~8.3A max continuous)
+- **Per-wing current**: ~3A at full brightness
+- **Constraint**: Sustained full-brightness operation of all four wings simultaneously is **not allowed**
+- **Firmware Requirement**:
+  - Lighting patterns must prefer one dominant wing at a time
+  - Allow short overlaps of two wings
+  - Reserve four-wing activation for brief, low-duty accents
+  - Respect global brightness cap to avoid PSU overload
+- **Configuration**: See power budget settings in `shimon.h`
+
+#### PWM Configuration
+- **Method**: `analogWrite()` / ESP32 LEDC backend
+- **Stable Operating Envelope**:
+  - Frequency: 12-12.5 kHz
+  - Resolution: 8-bit (0-255)
+- **Note**: Higher frequency + resolution combinations (e.g., 25 kHz @ 12-bit) are unstable or non-functional
+
+#### Button LED Behavior
+- **Hardware Controlled**: Button LEDs automatically mirror LED strip state (firmware has no direct control)
+- **Implication**: All `setBtnLed()` calls in code are **ineffective** (hardware ignores GPIO 25, 26, 32, 33)
+- **Visual Feedback**: Button LEDs provide automatic feedback when:
+  - LED strips light during sequence display
+  - Wing LEDs flash on button press (if pattern includes wing LED)
+  - Any visual pattern activates corresponding LED strip
+
+**Reference**: See `hardware-baseline.md` for complete as-built hardware documentation.
 
 ### Game Logic
 The core game runs on a finite state machine (FSM) with these states:

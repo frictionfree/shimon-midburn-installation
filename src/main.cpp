@@ -435,6 +435,16 @@ bool isAudioComplete(unsigned long startTime, unsigned long timeoutMs) {
 static inline void setLed(Color c, bool on) {
   // Normal logic for current-sourcing LEDs: HIGH = ON, LOW = OFF
   digitalWrite(ledPins[c], on ? HIGH : LOW);
+
+  // **HARDWARE NOTE**: Button LEDs automatically mirror LED strip state (hardwired).
+  // When LED strip turns on/off, corresponding button LED does the same.
+  // See hardware-baseline.md Section 6 for details.
+
+  // **PWM NOTE**: If implementing PWM/fading in future (analogWrite):
+  // - MOSFETs require minimum ~70/255 duty to conduct at 3.3V gate voltage
+  // - Must jump to PWM_MIN_EFFECTIVE_DUTY immediately, do NOT ramp from 0
+  // - See hardware-baseline.md Section 10.1 and shimon.h for details
+
   // Debug output for LED state changes
   //Serial.printf("LED %s (pin %d) -> %s\n",
   //              c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
@@ -442,6 +452,12 @@ static inline void setLed(Color c, bool on) {
 }
 
 static inline void setBtnLed(Color c, bool on) {
+  // **HARDWARE NOTE**: Button LEDs are HARDWARE-CONTROLLED (hardwired to mirror LED strips).
+  // This function is INEFFECTIVE - button LEDs automatically turn on/off with LED strips.
+  // GPIOs 25, 26, 32, 33 are unused/reserved. This function is kept for code compatibility
+  // and potential future use, but has no effect on button LED behavior.
+  // See hardware-baseline.md Section 6 for details.
+
   // Control illuminated button LEDs: HIGH = ON, LOW = OFF
   static bool lastBtnLedStates[4] = {false, false, false, false};
 

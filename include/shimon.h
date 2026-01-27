@@ -23,24 +23,28 @@ constexpr uint8_t BTN_RED    = 13;  // Red   button input (GPIO13)
 constexpr uint8_t BTN_GREEN  = 14;  // Green button input (GPIO14)
 constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 
-// Button LEDs (left-side pins where possible, with 220–470Ω to LED+)
-constexpr uint8_t BTN_LED_BLUE   = 25;  // Blue  button LED (GPIO25)
-constexpr uint8_t BTN_LED_RED    = 26;  // Red   button LED (GPIO26)
-constexpr uint8_t BTN_LED_GREEN  = 32;  // Green button LED (GPIO32)
-constexpr uint8_t BTN_LED_YELLOW = 33;  // Yellow button LED (GPIO33)
+// Button LEDs - HARDWARE-CONTROLLED (GPIOs UNUSED/RESERVED)
+// NOTE: Button LEDs are hardwired to mirror LED strips via MOSFET channels.
+// These GPIO assignments are RESERVED but not actively used by firmware.
+// Button LEDs automatically turn on/off when LED strips do (hardware-controlled).
+constexpr uint8_t BTN_LED_BLUE   = 25;  // RESERVED (was: Blue  button LED)
+constexpr uint8_t BTN_LED_RED    = 26;  // RESERVED (was: Red   button LED)
+constexpr uint8_t BTN_LED_GREEN  = 32;  // RESERVED (was: Green button LED)
+constexpr uint8_t BTN_LED_YELLOW = 33;  // RESERVED (was: Yellow button LED)
 
 // DFPlayer (Serial2)
 constexpr uint8_t DFP_RX2 = 16;   // ESP32 RX2  (optional)
 constexpr uint8_t DFP_TX2 = 17;   // ESP32 TX2 → DF RX (via 1k resistor)
 
 // --- Notes ---
-// - Button switches: connect to GND (use INPUT_PULLUP).
-// - Button LEDs: connect GPIO → 220–470Ω → LED+; LED– → GND.
+// - Button switches: connect to GND (use INPUT_PULLUP with 10kΩ pull-up + 100nF cap to GND).
+// - Button LEDs: HARDWARE-CONTROLLED (12V LEDs hardwired to mirror LED strips via MOSFET).
 // - MOSFET gates: GPIO → 330Ω → Gate; 10k Gate→GND.
-//   Drain → LED strip “–”; strip “+” → +5V rail.
+//   Drain → LED strip "–"; strip "+" → +12V rail.
 // - Common ground shared between ESP32, PSU, and DFPlayer.
 // - Keep TVS diode (SA5.0A) across +5V/GND after main fuse.
 // - Add per-channel PTC fuses on LED + lines after tests.
+// - See hardware-baseline.md for complete as-built hardware documentation.
 
 constexpr uint8_t LED_SERVICE = 2;  // Service/heartbeat LED pin (onboard LED)
 
@@ -49,6 +53,25 @@ constexpr uint8_t LED_SERVICE = 2;  // Service/heartbeat LED pin (onboard LED)
 constexpr uint8_t DFPLAYER_RX = 16;  // ESP32 pin connected to DFPlayer TX
 constexpr uint8_t DFPLAYER_TX = 17;  // ESP32 pin connected to DFPlayer RX
 #endif
+
+// --- Hardware Constraints (FROM AS-BUILT BASELINE - DO NOT MODIFY) ---
+// These values are validated in hardware and must be respected by all firmware.
+
+// PWM Minimum Duty (MOSFET Conduction Threshold)
+// IRF540N MOSFETs driven at 3.3V do not conduct linearly below this duty value.
+// Firmware MUST jump to this minimum on LED activation for instant visual feedback.
+constexpr uint8_t PWM_MIN_EFFECTIVE_DUTY = 70;  // Minimum duty for visible LED output (70/255)
+
+// Power Budget Constraint
+// LED PSU: 12V / 100W (~8.3A max). Each wing uses ~3A at full brightness.
+// Patterns must limit simultaneous wing activation to avoid PSU overload.
+constexpr uint8_t MAX_SIMULTANEOUS_WINGS_FULL_BRIGHTNESS = 2;  // Conservative limit
+constexpr uint8_t POWER_BUDGET_SAFETY_MARGIN = 20;  // Percent headroom
+
+// PWM Configuration (Stable Operating Envelope)
+// Higher frequency/resolution combinations are unstable or non-functional.
+constexpr unsigned long PWM_FREQUENCY_HZ = 12000;  // 12 kHz (stable, silent)
+constexpr uint8_t PWM_RESOLUTION_BITS = 8;         // 8-bit (0-255)
 
 // --- Game Timing Configuration ---
 // Adjust these values to change game difficulty and pacing
