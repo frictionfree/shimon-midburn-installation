@@ -1,4 +1,4 @@
-# Party Mode Proof of Concept - Design Document
+2020# Party Mode Proof of Concept - Design Document
 
 **Status:** Active Development
 **Purpose:** Validate feasibility of real-time beat detection and LED synchronization for electronic music
