@@ -1,608 +1,1449 @@
 /*
- * Party Mode Proof of Concept
- *
- * Purpose: Validate beat detection feasibility for electronic music
- * Approach: I2S audio input → Dual envelope detection → Beat detection → LED feedback
- *
- * Hardware:
- * - I2S Input: BCLK=26, LRCK=25, DATA=22 (44.1 kHz SPDIF)
- * - LED Output: Blue=23, Red=19, Green=18, Yellow=5
- *
- * Success Criteria:
- * - >80% beat detection accuracy on kick loops
- * - <100ms visual latency (feels synchronized)
- * - Stable operation for >5 minutes
- *
- * See PARTY_MODE_POC_DESIGN.md for complete documentation
- */
+  Shimon – Party Mode (I2S) + Ableton MIDI Clock (bar.beat logs) – Debug v8.1 + VISUALS v1
+  + Failure/MusicStop classifier (Clock-only loss / Audio-only loss / Simultaneous stop)
+
+  v8.1 focus: eliminate "short burst" false DROP positives.
+
+  DROP Detection = Return-Impact model (BREAK-only)
+  - DROP is detected ONLY in BREAK_CONFIRMED via:
+      Phase A: detect "Return Start" when kick returns vs BREAK floor (window-level)
+      Phase B: track peaks for a short window and classify:
+        DROP = high-impact return (kick strong + lift vs break floor)
+        otherwise: no DROP (return expires)
+
+  Sanity / anti-burst mechanism (SINGLE mechanism)
+  - REMOVED bar-level sanity check (RESTORE_RR_MIN) entirely.
+  - Added post-DROP kick verification (window-level, 75ms):
+      After DROP entry, require kick to stay present often enough within a short budget.
+      If verification fails -> cancel DROP back to BREAK (not STD).
+
+  Other policy behavior preserved:
+  - Baseline learns ONLY in STANDARD and only on qualified bars; frozen in CAND/BREAK/DROP.
+  - STANDARD -> CAND: kick absence mandatory (bar-level) + window persistence protection.
+  - CAND -> BREAK: after CAND_MIN_BARS, 2 consecutive deep bars.
+  - CAND -> STANDARD recovery: bar-level 1 bar meeting thresholds.
+  - BREAK -> STANDARD recovery: bar-level 1 bar meeting thresholds,
+      but blocked while returnActive==true to avoid stealing the return moment.
+  - BREAK floor updates only while in BREAK, and is FROZEN while returnActive==true.
+  - DROP duration: fixed DROP_BARS from onset, exit at bar boundary.
+*/
+
 
 #include <Arduino.h>
-#include <driver/i2s.h>
+#include "driver/i2s.h"
 
-// =============================================================================
-// CONFIGURATION
-// =============================================================================
+// ---------- VISUAL TYPES MUST BE ABOVE ANY FUNCTIONS ----------
+enum Wing : uint8_t { W_BLUE=0, W_RED=1, W_GREEN=2, W_YELLOW=3 };
+enum VisualMode : uint8_t { VIS_STD=0, VIS_BREAK=1, VIS_DROP=2, VIS_DEBUG=3 };
 
-// I2S Configuration (44.1 kHz SPDIF input)
-#define I2S_PORT          I2S_NUM_0
-#define I2S_SAMPLE_RATE   44100
-#define I2S_BCLK_PIN      26
-#define I2S_LRCK_PIN      25
-#define I2S_DATA_PIN      22
+// ---------- FAILURE TYPES (MUST BE ABOVE ANY FUNCTIONS) ----------
+enum SystemMode : uint8_t { SYS_OK=0, SYS_FAIL=1 };
+enum FailReason : uint8_t { FAIL_NONE=0, FAIL_CLOCK_LOST=1, FAIL_AUDIO_LOST=2 };
 
-// Audio Buffer Configuration
-#define SAMPLE_BUFFER_SIZE 512        // Smaller buffer for faster response (~11.6ms at 44.1kHz)
+static bool clockLostLatched = false;
+static bool audioLostLatched = false;
+static uint32_t clockLostAtUs = 0;
+static uint32_t audioLostAtUs = 0;
+static bool prevBothPresent = false;
 
-// Dual Envelope Detection Configuration (inspired by working sketch)
-#define FAST_ENVELOPE_ALPHA   0.35    // Fast follower - tracks transients
-#define SLOW_ENVELOPE_ALPHA   0.02    // Slow baseline - tracks average level
-#define PEAK_DECAY_FACTOR     0.9992  // Peak decay per update (~0.08% decay)
-#define TRANSIENT_THRESHOLD   0.26    // Schmitt trigger ON (normalized 0-1) - RAISED to reduce sensitivity
-#define TRANSIENT_OFF         0.10    // Schmitt trigger OFF (normalized 0-1) - LOWERED further to hold longer
-
-// Frequency Discrimination (kick vs hi-hat)
-#define KICK_WEIGHT           0.7     // Weight for low-frequency content
-#define HIHAT_REJECTION       1.5     // Kick energy must be this much higher than hi-hat
-
-// Tempo Tracking Configuration
-#define MIN_BEAT_INTERVAL     370     // ms - absolute minimum time between beats (~162 BPM max) - blocks 354ms doubles
-#define MIN_GAP_PERCENT       0.60    // Minimum gap as % of locked period (60% = 300ms for 500ms period)
-#define PHASE_GATE_PERCENT    0.30    // ±30% phase window when locked
-#define REFRACTORY_MS         280     // Minimum refractory period (anti-chatter)
-
-// LED Configuration (using existing hardware pins)
-#define LED_BLUE          23
-#define LED_RED           19
-#define LED_GREEN         18
-#define LED_YELLOW        5
-
-// Debug Configuration
-#define ENABLE_SERIAL_DEBUG   true
-#define SERIAL_BAUD_RATE      115200
-
-// =============================================================================
-// FORWARD DECLARATIONS
-// =============================================================================
-
-void onBeatDetected(unsigned long beatTime);
-void triggerLEDPattern();
-void updateTempoTracking(unsigned long beatTime);
-float calculateTempoFromHistory();
-bool isWithinPhaseWindow(unsigned long now);
-
-// =============================================================================
-// GLOBAL VARIABLES
-// =============================================================================
-
-// I2S buffer
-int32_t i2s_read_buffer[SAMPLE_BUFFER_SIZE];
-
-// Dual envelope detection state
-float fastEnvelope = 0.0f;       // Fast follower (tracks transients)
-float slowEnvelope = 0.0f;       // Slow baseline (tracks average level)
-float peakValue = 1e-6f;         // Peak tracking for normalization
-float transientValue = 0.0f;     // Normalized transient (0-1 range)
-
-// Frequency discrimination state
-float kickEnergy = 0.0f;         // Low-frequency energy
-float hihatEnergy = 0.0f;        // High-frequency energy
-
-// Beat detection state (Schmitt trigger)
-bool schmittState = false;       // Schmitt trigger state (ON/OFF)
-unsigned long lastBeatTime = 0;  // Timestamp of last detected beat
-unsigned long refractoryUntil = 0; // Refractory period end time
-
-// Tempo tracking state machine
-enum TempoState {
-  TEMPO_SEARCHING,    // No tempo established, detecting any onset
-  TEMPO_ACQUIRING,    // Collecting beats to establish tempo
-  TEMPO_LOCKED,       // Tempo locked, using prediction + phase gating
-  TEMPO_LOST          // Lost lock, re-acquiring
+// ---------------- STATE (place FIRST to avoid Arduino prototype issues) ----------------
+enum ContextState : uint8_t {
+  STANDARD = 0,
+  BREAK_CANDIDATE = 1,
+  BREAK_CONFIRMED = 2,
+  DROP = 3
 };
 
-TempoState tempoState = TEMPO_SEARCHING;
-unsigned long beatHistory[8];       // Timestamps of last 8 beats
-uint8_t beatHistoryCount = 0;       // Number of beats collected
-unsigned long nextBeatPrediction = 0; // Predicted time of next beat
-float lockedBPM = 120.0;            // Locked tempo (BPM)
-float lockedInterval = 500.0;       // Locked beat interval (ms)
-uint8_t missedBeatsCount = 0;      // Consecutive missed beats counter
-float phaseError = 0.0f;            // Phase error for debug
+static const char* ctxName(ContextState s) {
+  switch (s) {
+    case STANDARD: return "STD";
+    case BREAK_CANDIDATE: return "CAND";
+    case BREAK_CONFIRMED: return "BREAK";
+    case DROP: return "DROP";
+    default: return "?";
+  }
+}
 
-// Statistics
-unsigned long totalBeatsDetected = 0;
-unsigned long lastStatsTime = 0;
+// ---------------- BASELINE-LOCKED LED / BUTTON PINS ----------------
+// PWM pins (locked)
+static constexpr int PIN_LED_BLUE   = 23;
+static constexpr int PIN_LED_RED    = 19;
+static constexpr int PIN_LED_GREEN  = 18;
+static constexpr int PIN_LED_YELLOW = 5;
 
-// LED state
-uint8_t currentLED = 0;             // For rotating pattern (Phase 2)
-const uint8_t ledPins[] = {LED_BLUE, LED_RED, LED_GREEN, LED_YELLOW};
-unsigned long ledOnTime = 0;        // When LED was turned on
-const unsigned long LED_PULSE_MS = 50; // Non-blocking LED pulse duration
+// Button input pins (locked)
+static constexpr int PIN_BTN_BLUE   = 21;
+static constexpr int PIN_BTN_RED    = 13;
+static constexpr int PIN_BTN_GREEN  = 14;
+static constexpr int PIN_BTN_YELLOW = 27;
 
-// =============================================================================
-// SETUP FUNCTIONS
-// =============================================================================
+// PWM envelope (locked/validated)
+static constexpr int PWM_FREQ_HZ = 12500;
+static constexpr int PWM_RES_BITS = 8;
 
-void setupI2S() {
-  Serial.println("Initializing I2S...");
+// MOSFET minimum visible duty behavior (empirically ~70/255)
+static constexpr uint8_t MIN_VISIBLE_DUTY = 70;
 
-  i2s_config_t i2s_config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = I2S_SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8,
-    .dma_buf_len = 256,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0
-  };
+// ---------------- VISUAL TUNABLES ----------------
+static constexpr uint8_t STD_BRIGHT   = 170;
+static constexpr uint8_t BREAK_BRIGHT = 150;
+static constexpr uint8_t DROP_BRIGHT  = 235;
+static constexpr uint8_t DEBUG_BRIGHT = 200;
 
-  i2s_pin_config_t pin_config = {
-    .bck_io_num = I2S_BCLK_PIN,
-    .ws_io_num = I2S_LRCK_PIN,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = I2S_DATA_PIN
-  };
+static constexpr float CAND_STD_DIM = 0.55f;
 
-  esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-  if (err != ESP_OK) {
-    Serial.printf("ERROR: I2S driver install failed: %d\n", err);
+// Global cap (safety net). If sum of channel duties > cap, scale down proportionally.
+static constexpr uint16_t GLOBAL_DUTY_CAP = 320;
+
+// DROP overlap: last 10% of half-beat crossfades to next
+static constexpr float DROP_OVERLAP_FRAC = 0.10f;
+
+// BREAK crossfade length: 2 beats
+static constexpr uint8_t BREAK_FADE_BEATS = 2;
+
+// STANDARD direction flip every 8 bars
+static constexpr uint8_t STD_DIR_FLIP_BARS = 8;
+
+// ---------------- I2S ----------------
+static constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
+static constexpr int PIN_I2S_BCLK = 26;
+static constexpr int PIN_I2S_LRCK = 25;
+static constexpr int PIN_I2S_DATA = 22;
+
+static constexpr int SAMPLE_RATE = 48000;
+static constexpr int I2S_READ_FRAMES = 256;
+
+// -------------- MONITOR WINDOW (policy) --------------
+static constexpr uint32_t MONITOR_WIN_MS = 75;
+static constexpr uint32_t WIN_SAMPLES = (SAMPLE_RATE * MONITOR_WIN_MS) / 1000;
+
+// -------------- FILTERS --------------
+static constexpr float LP_ENV_ALPHA = 0.010f;
+static constexpr float HP_ALPHA = 0.995f;
+
+// -------------- UTILS ----------------
+static inline float safeDiv(float a, float b) { return a / (b + 1e-9f); }
+static inline float clamp01(float x) { return (x < 0.0f) ? 0.0f : (x > 1.0f ? 1.0f : x); }
+
+// -------------- WELFORD --------------
+struct Welford {
+  double mean = 0.0, m2 = 0.0;
+  uint32_t n = 0;
+  void reset() { mean = 0.0; m2 = 0.0; n = 0; }
+  void update(double x) {
+    n++;
+    double d = x - mean;
+    mean += d / (double)n;
+    double d2 = x - mean;
+    m2 += d * d2;
+  }
+  float var() const { return (n < 2) ? 0.0f : (float)(m2 / (double)(n - 1)); }
+};
+
+// -------------- BASELINE (policy) -------------
+static constexpr float BASE_ALPHA_STD  = 0.10f; // used only on qualified STD bars
+static constexpr uint16_t BASELINE_MIN_QUALIFIED_BARS = 16;
+
+static constexpr float BASELINE_MIN_RMS = 0.020f;            // blocks near-silence baseline learning
+static constexpr float KICK_PRESENT_KVAR_ABS_MIN = 0.0010f;  // pre-baseInited kick proxy
+static constexpr float KICK_PRESENT_KR_MIN = 0.90f;          // after baseInited (ratio)
+
+// -------------- CAND / BREAK / RECOVERY (policy) --------------
+static constexpr float KICK_GONE_KR_MAX = 0.60f;    // kR < 0.60 triggers CAND
+static constexpr int   CAND_MIN_BARS    = 1;        // minimum bars in CAND before BREAK eval
+
+static constexpr float DEEP_BREAK_TR_MAX  = 0.55f;
+static constexpr float DEEP_BREAK_RMS_MAX = 0.80f;
+static constexpr float DEEP_BREAK_KR_MAX  = 0.40f;   // stricter kick absence for BREAK confirm
+
+static constexpr uint8_t KICK_GONE_CONFIRM_WINDOWS = 4; // ~300ms at 75ms windows
+
+// NOTE: keep existing tuned recovery values for now
+static constexpr float RECOVERY_RR_MIN = 0.75f;
+static constexpr float RECOVERY_TR_MIN = 0.75f;
+static constexpr float RECOVERY_KR_MIN = 0.80f;
+
+static constexpr float CAND_RECOVERY_KR_MIN = 0.82f;
+
+// -------------- BREAK FLOOR --------------
+static constexpr float BREAK_ALPHA = 0.10f;
+
+// -------------- v8 DROP (Return-Impact) --------------
+// Return start: kick returns vs BREAK floor
+static constexpr float   KICK_RETURN_BF_MIN = 1.60f;      // w_bfK >= this starts return tracking (tune)
+static constexpr uint8_t KICK_RETURN_CONFIRM_WINDOWS = 3; // ~225ms at 75ms windows
+static constexpr uint8_t KICK_RETURN_CANCEL_WINDOWS  = 4; // ~300ms at 75ms windows
+static constexpr uint8_t RETURN_EVAL_WINDOWS          = 12; // 900ms
+
+// DROP qualification using PEAKS within return window (tune)
+static constexpr float DROP_BF_KV_MIN  = 2.50f;  // mandatory kick resurgence vs break floor
+static constexpr float DROP_BF_RMS_MIN = 1.55f;  // lift vs break floor (energy)
+static constexpr float DROP_BF_TR_MIN  = 1.60f;  // lift vs break floor (transients)
+
+// v8.1: POST-DROP KICK VERIFICATION (single sanity mechanism)
+static constexpr uint8_t DROP_VERIFY_WINDOWS  = 12; // 900ms
+static constexpr uint8_t DROP_VERIFY_MIN_GOOD = 6;  // good windows required within budget
+static constexpr float   DROP_VERIFY_BF_K_MIN = 0.70f * KICK_RETURN_BF_MIN; // tolerate inter-kick gaps
+
+static constexpr int DROP_BARS = 8;
+
+// ---------------- MIDI (UART1 on GPIO34) ----------------
+HardwareSerial MidiSerial(1);
+
+static bool midiRunning = false;
+static uint8_t tickInBeat = 0;          // 0..23
+static uint32_t ticksSinceBeat = 0;
+
+static uint32_t barCount = 0;           // 1..N (display)
+static uint8_t  beatInBar = 0;          // 1..4 (display)
+static uint32_t lastBeatUs = 0;
+static uint32_t lastBeatIntervalUs = 500000; // default ~120bpm
+
+// Current position snapshot
+static volatile uint32_t curBarForEvents = 0;
+static volatile uint8_t  curBeatForEvents = 0;
+
+// ---------------- Beat index (must be above visuals use) ----------------
+static uint32_t gBeatIndex = 0;
+static inline uint32_t globalBeatIndex() { return gBeatIndex; }
+
+// ---------------- I2S accumulators ----------------
+static uint32_t barN = 0, winN = 0;
+static double barSumSq = 0.0, barTrSum = 0.0;
+static double winSumSq = 0.0, winTrSum = 0.0;
+static Welford barKickW, winKickW;
+
+// filter states
+static float envLP = 0.0f;
+static float hp_y = 0.0f;
+static float hp_x_prev = 0.0f;
+
+// ---- Latest I2S snapshots for logging ----
+static volatile float lastWinRms = 0.0f, lastWinTr = 0.0f, lastWinKVar = 0.0f;
+static volatile uint32_t lastWinUs = 0;
+
+static volatile float lastBarRms = 0.0f, lastBarTr = 0.0f, lastBarKVar = 0.0f;
+static volatile uint32_t lastBarUs = 0;
+
+// ---- Ratios / context snapshot ----
+static volatile float last_rR = 0.0f, last_tR = 0.0f, last_kR = 0.0f;
+static volatile float last_bfR = 0.0f, last_bfT = 0.0f, last_bfK = 0.0f;
+static volatile bool  last_hasBF = false;
+static volatile ContextState last_stateForBar = STANDARD;
+
+// ---------------- Party Mode globals ----------------
+static bool baseInited = false;
+static float baseRms = 0.0f, baseTr = 0.0f, baseKVar = 0.0f;
+
+// baseline readiness tracking
+static bool baselineReady = false;
+static uint16_t baselineQualifiedBars = 0;
+
+static bool breakInited = false;
+static float breakRms = 0.0f, breakTr = 0.0f, breakKVar = 0.0f;
+
+static ContextState state = STANDARD;
+
+// CAND tracking
+static uint32_t candEnterBar = 0;
+
+// Recovery tracking
+static uint8_t breakRecoveryBars = 0;        // policy wants 1
+static uint8_t candDeepStreak = 0;           // consecutive deep bars while in CAND
+static uint8_t stdKickGoneWinStreak = 0;     // only used while in STD
+
+// -------------- v8 Return-Impact tracking --------------
+static bool returnActive = false;
+static uint8_t returnWinStreak = 0;
+static uint8_t kickLostStreak = 0;
+static uint8_t returnBudget = 0;
+
+static float peak_bfR = 0.0f, peak_bfT = 0.0f, peak_bfK = 0.0f;
+
+// -------------- v8.1 Post-DROP verification --------------
+static bool dropVerifyActive = false;
+static uint8_t dropVerifyBudget = 0;
+static uint8_t dropVerifyGood = 0;
+
+// DROP timing
+static uint32_t dropOnsetBarStart = 0;
+static uint32_t dropEndBar = 0;
+
+// ---------------- FAILURE / MUSIC-STOP tracking ----------------
+static SystemMode sysMode = SYS_OK;
+static FailReason failReason = FAIL_NONE;
+
+// Presence tracking
+static bool seenAnyClock = false;
+static uint32_t lastClockUs = 0;
+
+static bool seenAnyAudio = false;
+static uint32_t lastAudioUs = 0;
+
+// Thresholds (tune later)
+static constexpr uint32_t CLOCK_LOSS_US = 600000;      // 0.6s
+static constexpr uint32_t AUDIO_LOSS_US = 1500000;     // 1.5s
+static constexpr uint32_t STOP_COINCIDE_US = 1000000;  // 1.0s window
+static constexpr float    AUDIO_PRESENT_MIN_RMS = 0.004f;
+
+// ---------------- Accumulator resets ----------------
+static void resetBarAcc() {
+  barN = 0;
+  barSumSq = 0.0;
+  barTrSum = 0.0;
+  barKickW.reset();
+}
+
+static void resetWinAcc() {
+  winN = 0;
+  winSumSq = 0.0;
+  winTrSum = 0.0;
+  winKickW.reset();
+}
+
+// ---------------- Logging helpers ----------------
+static void logTransition(ContextState from, ContextState to, const char* why) {
+  if (from == to) return;
+  Serial.printf("STATE %s->%s pos=%lu.%u why=%s\n",
+                ctxName(from), ctxName(to),
+                (unsigned long)curBarForEvents, (unsigned)curBeatForEvents, why);
+}
+
+static void logEvent(const char* e) {
+  Serial.printf("EVENT %s pos=%lu.%u\n",
+                e, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+}
+
+// ---------------- VISUALS ----------------
+
+// IMPORTANT: pin map must match Wing enum ordering above
+static const int WING_PINS[4] = { PIN_LED_BLUE, PIN_LED_RED, PIN_LED_GREEN, PIN_LED_YELLOW };
+
+// Physical rotation orders
+static const Wing STD_ORDER[4]  = { W_BLUE, W_RED, W_GREEN, W_YELLOW };      // CCW
+
+static VisualMode visMode = VIS_STD;
+
+// Per-wing current output duty
+static uint8_t outDuty[4] = {0,0,0,0};
+
+// --- STANDARD state ---
+static int8_t stdDir = +1;
+static uint8_t stdPos = 0;
+static uint8_t stdBarsSinceFlip = 0;
+
+// --- BREAK crossfade state ---
+static bool breakFading = false;
+static Wing breakFrom = W_BLUE;
+static Wing breakTo = W_GREEN;
+static uint32_t breakFadeStartUs = 0;
+static uint32_t breakFadeDurUs = 1000000;
+
+// --- DROP sequencing ---
+static uint8_t dropStep = 0;
+static const Wing DROP_STEPS[8] = {
+  W_BLUE, W_GREEN, W_RED, W_YELLOW,
+  W_BLUE, W_GREEN, W_RED, W_YELLOW
+};
+
+static uint32_t lastHalfBeatUs = 0;
+static uint32_t halfBeatUs = 250000;
+
+// Optional debug trigger
+static bool debugForced = false;
+
+static inline void writeWingDuty(Wing w, uint8_t duty) {
+  ledcWrite(WING_PINS[w], duty);
+  outDuty[w] = duty;
+}
+
+static uint8_t dutyFromLevel(float level01, uint8_t target) {
+  level01 = clamp01(level01);
+  if (level01 <= 0.0f) return 0;
+  if (target <= MIN_VISIBLE_DUTY) return target;
+  float d = (float)MIN_VISIBLE_DUTY + level01 * ((float)target - (float)MIN_VISIBLE_DUTY);
+  if (d < 0) d = 0;
+  if (d > 255) d = 255;
+  return (uint8_t)(d + 0.5f);
+}
+
+static void applyGlobalCap(uint8_t req[4]) {
+  uint16_t sum = (uint16_t)req[0] + req[1] + req[2] + req[3];
+  if (sum <= GLOBAL_DUTY_CAP || sum == 0) return;
+
+  float scale = (float)GLOBAL_DUTY_CAP / (float)sum;
+  for (int i = 0; i < 4; i++) {
+    if (req[i] == 0) continue;
+    float v = (float)req[i] * scale;
+    req[i] = (uint8_t)(v + 0.5f);
+    if (req[i] > 0 && req[i] < MIN_VISIBLE_DUTY) req[i] = MIN_VISIBLE_DUTY;
+  }
+}
+
+static void allOff() {
+  for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, 0);
+}
+
+static void onVisualModeEnter(VisualMode m) {
+  if (m == VIS_STD) {
+    stdBarsSinceFlip = 0;
+  } else if (m == VIS_BREAK) {
+    breakFading = false;
+  } else if (m == VIS_DROP) {
+    dropStep = 0;
+    lastHalfBeatUs = micros();
+  }
+}
+
+static VisualMode modeForState() {
+  if (debugForced) return VIS_DEBUG;
+  switch (state) {
+    case STANDARD: return VIS_STD;
+    case BREAK_CANDIDATE: return VIS_STD;
+    case BREAK_CONFIRMED: return VIS_BREAK;
+    case DROP: return VIS_DROP;
+    default: return VIS_STD;
+  }
+}
+
+static void refreshVisualMode() {
+  VisualMode m = modeForState();
+  if (m != visMode) {
+    visMode = m;
+    onVisualModeEnter(visMode);
+  }
+}
+
+static void visualsOnBeat(bool isBarStart) {
+  refreshVisualMode();
+
+  if (visMode == VIS_STD) {
+    stdPos = (uint8_t)((stdPos + (stdDir > 0 ? 1 : 3)) % 4);
+    Wing onWing = STD_ORDER[stdPos];
+
+    uint8_t req[4] = {0,0,0,0};
+
+    uint8_t bright = STD_BRIGHT;
+    if (state == BREAK_CANDIDATE) {
+      bright = (uint8_t)(STD_BRIGHT * CAND_STD_DIM + 0.5f);
+    }
+    req[onWing] = bright;
+
+    applyGlobalCap(req);
+    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
+
+    if (isBarStart) {
+      stdBarsSinceFlip++;
+      if (stdBarsSinceFlip >= STD_DIR_FLIP_BARS) {
+        stdBarsSinceFlip = 0;
+        stdDir = (int8_t)-stdDir;
+        stdPos = (uint8_t)((stdPos + (stdDir > 0 ? 1 : 3)) % 4);
+      }
+    }
+  }
+  else if (visMode == VIS_BREAK) {
+    if ((barCount == 0) || ((uint32_t)(millis()) == 0)) return; // harmless guard
+    if ((globalBeatIndex() % 2) == 0) {
+      Wing current = breakFading ? breakTo : breakFrom;
+      Wing next = current;
+      while (next == current) next = (Wing)(esp_random() % 4);
+
+      breakFrom = current;
+      breakTo = next;
+      breakFading = true;
+      breakFadeStartUs = micros();
+      breakFadeDurUs = (uint32_t)BREAK_FADE_BEATS * lastBeatIntervalUs;
+    }
+  }
+  else if (visMode == VIS_DEBUG) {
+    uint8_t req[4] = {0,0,0,0};
+    bool on = ((globalBeatIndex() % 2) == 0);
+    req[W_RED] = on ? DEBUG_BRIGHT : 0;
+    applyGlobalCap(req);
+    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
+  }
+}
+
+static void visualsOnHalfBeat() {
+  refreshVisualMode();
+  if (visMode != VIS_DROP) return;
+
+  dropStep = (uint8_t)((dropStep + 1) % 8);
+  lastHalfBeatUs = micros();
+}
+
+static void visualsRender() {
+  // FAILURE overlay: time-based blink, independent of MIDI/I2S
+  if (sysMode == SYS_FAIL) {
+    const uint32_t ms = millis();
+
+    static uint32_t lastFailHbMs = 0;
+    if ((uint32_t)(ms - lastFailHbMs) >= 1000) {
+      lastFailHbMs = ms;
+      const uint32_t nowUs = micros();
+      const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
+      const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
+      Serial.printf("FAIL_HEARTBEAT reason=%u pos=%lu.%u clockAge_ms=%lu audioAge_ms=%lu ctx=%s\n",
+        (unsigned)failReason,
+        (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+        (unsigned long)clockAgeMs, (unsigned long)audioAgeMs,
+        ctxName(state));
+    }
+
+    const bool on = (ms % 1000) < 150;
+    uint8_t req[4] = {0,0,0,0};
+    req[W_RED] = on ? DEBUG_BRIGHT : 0;
+    applyGlobalCap(req);
+    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
     return;
   }
 
-  err = i2s_set_pin(I2S_PORT, &pin_config);
-  if (err != ESP_OK) {
-    Serial.printf("ERROR: I2S pin config failed: %d\n", err);
-    return;
-  }
+  refreshVisualMode();
 
-  Serial.println("I2S initialized successfully");
-  Serial.printf("Sample rate: %d Hz\n", I2S_SAMPLE_RATE);
-  Serial.printf("Buffer size: %d samples (~%.1f ms)\n", SAMPLE_BUFFER_SIZE,
-                (SAMPLE_BUFFER_SIZE * 1000.0) / I2S_SAMPLE_RATE);
-}
+  const uint32_t nowUs = micros();
 
-void setupLEDs() {
-  Serial.println("Initializing LEDs...");
+  if (visMode == VIS_BREAK) {
+    if (!breakFading) return;
 
-  for (int i = 0; i < 4; i++) {
-    pinMode(ledPins[i], OUTPUT);
-    digitalWrite(ledPins[i], LOW);
-  }
+    const uint32_t dt = nowUs - breakFadeStartUs;
+    float t = (breakFadeDurUs == 0) ? 1.0f : (float)dt / (float)breakFadeDurUs;
+    t = clamp01(t);
 
-  // Test flash all LEDs
-  for (int i = 0; i < 4; i++) {
-    digitalWrite(ledPins[i], HIGH);
-    delay(100);
-    digitalWrite(ledPins[i], LOW);
-  }
+    uint8_t req[4] = {0,0,0,0};
 
-  Serial.println("LEDs initialized");
-}
+    uint8_t fromDuty = dutyFromLevel(1.0f - t, BREAK_BRIGHT);
+    uint8_t toDuty   = dutyFromLevel(t, BREAK_BRIGHT);
+    if (t >= 1.0f) fromDuty = 0;
 
-// =============================================================================
-// AUDIO CAPTURE & DUAL ENVELOPE DETECTION
-// =============================================================================
+    req[breakFrom] = fromDuty;
+    req[breakTo]   = toDuty;
 
-bool captureAndProcessAudio() {
-  size_t bytes_read = 0;
+    applyGlobalCap(req);
+    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
 
-  esp_err_t result = i2s_read(I2S_PORT,
-                               i2s_read_buffer,
-                               SAMPLE_BUFFER_SIZE * sizeof(int32_t),
-                               &bytes_read,
-                               portMAX_DELAY);
-
-  if (result != ESP_OK) {
-    Serial.printf("ERROR: I2S read failed: %d\n", result);
-    return false;
-  }
-
-  if (bytes_read < SAMPLE_BUFFER_SIZE * sizeof(int32_t)) {
-    Serial.printf("WARNING: Incomplete read, got %d bytes\n", bytes_read);
-    return false;
-  }
-
-  // Calculate mean absolute value (MAV) amplitude
-  // This is simpler and faster than RMS, works well for transient detection
-  float sum_abs = 0;
-  float sum_abs_low = 0;   // For kick detection (simple approach)
-  float sum_abs_high = 0;  // For hi-hat detection (simple approach)
-
-  for (int i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
-    // Normalize sample to -1.0 to 1.0 range
-    float sample = (float)i2s_read_buffer[i] / 2147483648.0f;
-
-    float abs_sample = fabsf(sample);
-    sum_abs += abs_sample;
-
-    // Simple frequency discrimination: alternate samples for high/low
-    // This is a crude approximation but very fast
-    // Low-frequency content changes slowly, high-frequency changes rapidly
-    if (i > 0) {
-      float diff = fabsf(sample - (float)i2s_read_buffer[i-1] / 2147483648.0f);
-      // High diff = high frequency content (hi-hat)
-      // Low diff = low frequency content (kick)
-      if (diff < 0.1f) {
-        sum_abs_low += abs_sample;  // Slowly changing = low freq
-      } else {
-        sum_abs_high += abs_sample; // Rapidly changing = high freq
+    if (t >= 1.0f) {
+      breakFading = false;
+      for (uint8_t i = 0; i < 4; i++) {
+        if (STD_ORDER[i] == breakTo) { stdPos = i; break; }
       }
     }
   }
+  else if (visMode == VIS_DROP) {
+    halfBeatUs = lastBeatIntervalUs / 2;
+    if (halfBeatUs < 20000) halfBeatUs = 20000;
 
-  // Calculate mean absolute value
-  float amplitude = sum_abs / SAMPLE_BUFFER_SIZE;
-  kickEnergy = sum_abs_low / SAMPLE_BUFFER_SIZE;
-  hihatEnergy = sum_abs_high / SAMPLE_BUFFER_SIZE;
+    uint32_t dt = nowUs - lastHalfBeatUs;
+    if (dt > (halfBeatUs * 4)) dt = halfBeatUs;
 
-  // Dual envelope detection (key algorithm from working sketch)
-  // Fast envelope tracks transients, slow envelope tracks baseline
-  fastEnvelope += FAST_ENVELOPE_ALPHA * (amplitude - fastEnvelope);
-  slowEnvelope += SLOW_ENVELOPE_ALPHA * (amplitude - slowEnvelope);
+    float phase = (float)dt / (float)halfBeatUs;
+    phase = clamp01(phase);
 
-  // Transient = difference between fast and slow
-  // Positive transient = sudden attack (kick, snare, etc.)
-  float transient = fastEnvelope - slowEnvelope;
-  if (transient < 0) transient = 0;  // Clip to 0 (no negative transients)
+    Wing cur = DROP_STEPS[dropStep];
+    Wing nxt = DROP_STEPS[(dropStep + 1) % 8];
 
-  // Peak tracking with decay for normalization
-  peakValue *= PEAK_DECAY_FACTOR;  // Decay peak slowly
-  if (transient > peakValue) {
-    peakValue = transient;  // Update peak
-  }
+    uint8_t req[4] = {0,0,0,0};
 
-  // Normalize transient to 0-1 range
-  transientValue = transient / (peakValue + 1e-6f);  // Prevent division by zero
+    float holdEnd = 1.0f - DROP_OVERLAP_FRAC;
 
-  return true;
-}
-
-// =============================================================================
-// TEMPO TRACKING
-// =============================================================================
-
-float calculateTempoFromHistory() {
-  // Calculate average interval from beat history with outlier rejection
-  if (beatHistoryCount < 2) return 120.0; // Default
-
-  // First pass: calculate rough average
-  float totalInterval = 0;
-  uint8_t intervalCount = 0;
-
-  for (int i = 1; i < beatHistoryCount; i++) {
-    unsigned long interval = beatHistory[i] - beatHistory[i-1];
-    // Reject obvious outliers (too fast or too slow for electronic music)
-    if (interval > 400 && interval < 800) {  // ~75-150 BPM range (tighter for first pass)
-      totalInterval += interval;
-      intervalCount++;
-    }
-  }
-
-  if (intervalCount == 0) {
-    // Fallback: try wider range if nothing found in tight range
-    for (int i = 1; i < beatHistoryCount; i++) {
-      unsigned long interval = beatHistory[i] - beatHistory[i-1];
-      if (interval > 350 && interval < 1000) {  // Wider range
-        totalInterval += interval;
-        intervalCount++;
-      }
-    }
-  }
-
-  if (intervalCount == 0) return 120.0;
-
-  float avgInterval = totalInterval / intervalCount;
-  return 60000.0 / avgInterval; // Convert ms interval to BPM
-}
-
-bool isWithinPhaseWindow(unsigned long now) {
-  // Phase gating: only accept beats near predicted time when locked
-
-  if (tempoState == TEMPO_SEARCHING || tempoState == TEMPO_ACQUIRING) {
-    return true; // Always accept when searching/acquiring
-  }
-
-  if (tempoState == TEMPO_LOCKED && nextBeatPrediction > 0) {
-    // Calculate phase (0.0 = exactly on time, ±0.5 = half period early/late)
-    long timeDiff = (long)now - (long)nextBeatPrediction;
-    float phase = (float)timeDiff / lockedInterval;
-
-    // Accept if within ±30% of period (like working sketch)
-    // Also accept if very late (approaching next beat cycle)
-    if (fabsf(phase) < PHASE_GATE_PERCENT || fabsf(phase) > (1.0f - PHASE_GATE_PERCENT)) {
-      phaseError = timeDiff;  // Store for debug
-      return true;
-    }
-    return false;  // Reject: outside phase window
-  }
-
-  // TEMPO_LOST: wide window for re-acquisition
-  return true;
-}
-
-void updateTempoTracking(unsigned long beatTime) {
-  // Add beat to history (circular buffer)
-  if (beatHistoryCount < 8) {
-    beatHistory[beatHistoryCount] = beatTime;
-    beatHistoryCount++;
-  } else {
-    // Shift history and add new beat
-    for (int i = 0; i < 7; i++) {
-      beatHistory[i] = beatHistory[i+1];
-    }
-    beatHistory[7] = beatTime;
-  }
-
-  // State machine transitions
-  switch (tempoState) {
-    case TEMPO_SEARCHING:
-      if (beatHistoryCount >= 4) {
-        tempoState = TEMPO_ACQUIRING;
-        Serial.println(">>> TEMPO: Acquiring...");
-      }
-      break;
-
-    case TEMPO_ACQUIRING:
-      if (beatHistoryCount >= 8) {
-        // Establish tempo from history
-        lockedBPM = calculateTempoFromHistory();
-        lockedInterval = 60000.0 / lockedBPM;
-        nextBeatPrediction = beatTime + (unsigned long)lockedInterval;
-        tempoState = TEMPO_LOCKED;
-        missedBeatsCount = 0;
-        Serial.printf(">>> TEMPO: LOCKED at %.1f BPM (interval: %.1f ms)\n", lockedBPM, lockedInterval);
-      }
-      break;
-
-    case TEMPO_LOCKED: {
-      // Update tempo with phase error correction
-      long error = (long)beatTime - (long)nextBeatPrediction;
-
-      // Gradual tempo adjustment based on phase error (like PLL)
-      if (abs(error) < 100) { // Only adjust for small errors
-        float correction = error * 0.1; // 10% correction factor
-        lockedInterval = lockedInterval + correction;
-        lockedBPM = 60000.0 / lockedInterval;
-      }
-
-      // Predict next beat
-      nextBeatPrediction = beatTime + (unsigned long)lockedInterval;
-      missedBeatsCount = 0; // Reset miss counter
-      phaseError = error;
-      break;
-    }
-
-    case TEMPO_LOST:
-      // Re-acquiring: collect new beats
-      if (beatHistoryCount >= 4) {
-        lockedBPM = calculateTempoFromHistory();
-        lockedInterval = 60000.0 / lockedBPM;
-        nextBeatPrediction = beatTime + (unsigned long)lockedInterval;
-        tempoState = TEMPO_LOCKED;
-        missedBeatsCount = 0;
-        Serial.printf(">>> TEMPO: RE-LOCKED at %.1f BPM\n", lockedBPM);
-      }
-      break;
-  }
-}
-
-// =============================================================================
-// BEAT DETECTION
-// =============================================================================
-
-void detectBeat() {
-  unsigned long now = millis();
-
-  // Check for missed beats (only when locked)
-  if (tempoState == TEMPO_LOCKED && nextBeatPrediction > 0) {
-    long timeSinceExpected = (long)now - (long)nextBeatPrediction;
-    if (timeSinceExpected > 150) { // 150ms late = missed beat
-      missedBeatsCount++;
-      nextBeatPrediction = now + (unsigned long)lockedInterval; // Predict next
-
-      if (missedBeatsCount >= 3) {
-        // Lost lock after 3 consecutive misses
-        tempoState = TEMPO_LOST;
-        beatHistoryCount = 0; // Reset history
-        Serial.println(">>> TEMPO: LOST LOCK (3 missed beats)");
-      }
-    }
-  }
-
-  // Frequency discrimination: check if kick energy dominates
-  // This helps reject hi-hats and other high-frequency transients
-  bool isKickLike = (kickEnergy > hihatEnergy * HIHAT_REJECTION) ||
-                    (tempoState == TEMPO_SEARCHING || tempoState == TEMPO_ACQUIRING);
-  // During acquisition, be less strict to establish initial tempo
-
-  // Phase gating: only look for beats within expected window
-  bool inPhaseWindow = isWithinPhaseWindow(now);
-
-  // Refractory period check
-  bool refractoryPassed = (now >= refractoryUntil);
-
-  // Adaptive minimum gap (like working sketch: 55% of locked period)
-  unsigned long minGap = MIN_BEAT_INTERVAL;  // Default absolute minimum
-  if (tempoState == TEMPO_LOCKED || tempoState == TEMPO_ACQUIRING) {
-    // Use adaptive gap based on locked tempo (55% of period)
-    unsigned long adaptiveGap = (unsigned long)(lockedInterval * MIN_GAP_PERCENT);
-    if (adaptiveGap > minGap) {
-      minGap = adaptiveGap;  // Use stricter constraint when tempo is known
-    }
-  }
-
-  // Schmitt trigger with hysteresis (prevents chattering)
-  // ON threshold: 0.24, OFF threshold: 0.12 (lowered to prevent quick re-trigger)
-  if (!schmittState) {
-    // Trigger is OFF: look for onset
-    if (transientValue > TRANSIENT_THRESHOLD &&
-        isKickLike &&
-        inPhaseWindow &&
-        refractoryPassed &&
-        (now - lastBeatTime > minGap)) {  // Use adaptive minimum gap
-
-      // Beat detected!
-      schmittState = true;
-      onBeatDetected(now);
-      updateTempoTracking(now);
-      refractoryUntil = now + REFRACTORY_MS;  // Set refractory period
-    }
-  } else {
-    // Trigger is ON: look for release (transient drops below OFF threshold)
-    if (transientValue < TRANSIENT_OFF) {
-      schmittState = false;  // Reset trigger for next beat
-    }
-  }
-
-  // Debug output (periodic, not every frame)
-  static unsigned long lastDebugTime = 0;
-  if (ENABLE_SERIAL_DEBUG && now - lastDebugTime > 2000) {
-    const char* state = schmittState ? "ON" : "OFF";
-    const char* tempoStr = "";
-    switch (tempoState) {
-      case TEMPO_SEARCHING: tempoStr = "SEARCH"; break;
-      case TEMPO_ACQUIRING: tempoStr = "ACQUIRING"; break;
-      case TEMPO_LOCKED: tempoStr = "LOCKED"; break;
-      case TEMPO_LOST: tempoStr = "LOST"; break;
-    }
-
-    if (tempoState == TEMPO_LOCKED) {
-      long timeToNext = (long)nextBeatPrediction - (long)now;
-      Serial.printf("[%lu] %s | Trans: %.3f | Kick: %.4f | HH: %.4f | Schmitt: %s | BPM: %.1f | Next: %ldms | Beats: %lu\n",
-                    now, tempoStr, transientValue, kickEnergy, hihatEnergy, state,
-                    lockedBPM, timeToNext, totalBeatsDetected);
+    if (phase <= holdEnd) {
+      req[cur] = DROP_BRIGHT;
     } else {
-      Serial.printf("[%lu] %s | Trans: %.3f | Kick: %.4f | HH: %.4f | Schmitt: %s | Hist: %d | Beats: %lu\n",
-                    now, tempoStr, transientValue, kickEnergy, hihatEnergy, state,
-                    beatHistoryCount, totalBeatsDetected);
+      float u = (phase - holdEnd) / DROP_OVERLAP_FRAC;
+      u = clamp01(u);
+
+      uint8_t curDuty = dutyFromLevel(1.0f - u, DROP_BRIGHT);
+      uint8_t nxtDuty = dutyFromLevel(u, DROP_BRIGHT);
+      if (u >= 1.0f) curDuty = 0;
+
+      req[cur] = curDuty;
+      req[nxt] = nxtDuty;
     }
-    lastDebugTime = now;
+
+    applyGlobalCap(req);
+    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
   }
 }
 
-void onBeatDetected(unsigned long beatTime) {
-  totalBeatsDetected++;
+// ---------------- Forward declarations (reset split) ----------------
+static void resetForHardReset();   // clears baseline
+static void resetForResumeLike();  // keeps baseline
 
-  // Calculate interval and BPM
-  if (lastBeatTime > 0) {
-    unsigned long interval = beatTime - lastBeatTime;
-    float instantBPM = 60000.0 / interval;
+// ---------------- Party Mode helpers ----------------
+static void autoResyncIfRecovered(bool clockPresent, bool audioPresent) {
+  const bool bothPresent = clockPresent && audioPresent;
+  if (!prevBothPresent && bothPresent) {
+    logEvent("AUTO_RESYNC_BOTH_PRESENT");
+    sysMode = SYS_OK;
+    failReason = FAIL_NONE;
 
-    if (ENABLE_SERIAL_DEBUG) {
-      if (tempoState == TEMPO_LOCKED) {
-        Serial.printf(">>> BEAT #%lu @ %lu ms | Interval: %lu ms | Instant: %.1f BPM | Phase: %+.0f ms | Locked: %.1f BPM | Trans: %.3f\n",
-                      totalBeatsDetected, beatTime, interval, instantBPM, phaseError, lockedBPM, transientValue);
-      } else {
-        Serial.printf(">>> BEAT #%lu @ %lu ms | Interval: %lu ms | Instant: %.1f BPM | Trans: %.3f\n",
-                      totalBeatsDetected, beatTime, interval, instantBPM, transientValue);
+    resetForResumeLike(); // keep baseline
+  }
+  prevBothPresent = bothPresent;
+}
+
+static void baselineInit(float rms, float tr, float kVar) {
+  baseRms = rms; baseTr = tr; baseKVar = kVar;
+  baseInited = true;
+  Serial.printf("BASE_INIT rms=%.4f tr=%.6f kVar=%.8f pos=%lu.%u\n",
+                rms, tr, kVar, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+}
+
+static void breakReset() {
+  breakInited = false;
+  breakRms = breakTr = breakKVar = 0.0f;
+}
+
+static void clearReturnTracking() {
+  returnActive = false;
+  returnWinStreak = 0;
+  kickLostStreak = 0;
+  returnBudget = 0;
+  peak_bfR = peak_bfT = peak_bfK = 0.0f;
+}
+
+static void clearDropVerify() {
+  dropVerifyActive = false;
+  dropVerifyBudget = 0;
+  dropVerifyGood = 0;
+}
+
+static void breakUpdate(float rms, float tr, float kVar) {
+  if (state != BREAK_CONFIRMED) return;
+  if (returnActive) return; // freeze break floor during return evaluation
+
+  if (!breakInited) {
+    breakRms = rms; breakTr = tr; breakKVar = kVar;
+    breakInited = true;
+    return;
+  }
+  breakRms  = (1.0f - BREAK_ALPHA) * breakRms  + BREAK_ALPHA * rms;
+  breakTr   = (1.0f - BREAK_ALPHA) * breakTr   + BREAK_ALPHA * tr;
+  breakKVar = (1.0f - BREAK_ALPHA) * breakKVar + BREAK_ALPHA * kVar;
+}
+
+static bool baselineEligibleBar(float rms, float kVar, float kR) {
+  if (rms < BASELINE_MIN_RMS) return false;
+  if (!baseInited) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN);
+  return (kR >= KICK_PRESENT_KR_MIN);
+}
+
+static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float kR) {
+  if (state != STANDARD) return; // freeze outside STD
+  if (!baselineEligibleBar(rms, kVar, kR)) return;
+
+  if (!baseInited) {
+    baselineInit(rms, tr, kVar);
+    baselineQualifiedBars = 1;
+    baselineReady = (baselineQualifiedBars >= BASELINE_MIN_QUALIFIED_BARS);
+    if (baselineReady) logEvent("BASELINE_READY");
+    return;
+  }
+
+  const float a = BASE_ALPHA_STD;
+  baseRms  = (1.0f - a) * baseRms  + a * rms;
+  baseTr   = (1.0f - a) * baseTr   + a * tr;
+  baseKVar = (1.0f - a) * baseKVar + a * kVar;
+
+  if (!baselineReady) {
+    baselineQualifiedBars++;
+    if (baselineQualifiedBars >= BASELINE_MIN_QUALIFIED_BARS) {
+      baselineReady = true;
+      logEvent("BASELINE_READY");
+    }
+  }
+}
+
+static void enterDrop(const char* whyEventName, const char* whyTransition) {
+  ContextState prev = state;
+
+  dropOnsetBarStart = curBarForEvents;
+  dropEndBar = dropOnsetBarStart + (uint32_t)DROP_BARS;
+
+  state = DROP;
+
+  // Clear return trackers
+  clearReturnTracking();
+  breakRecoveryBars = 0;
+
+  // Start post-drop verification (single sanity mechanism)
+  dropVerifyActive = true;
+  dropVerifyBudget = DROP_VERIFY_WINDOWS;
+  dropVerifyGood = 0;
+  Serial.printf("EVENT DROP_VERIFY_START pos=%lu.%u win=%u need=%u bfKmin=%.2f\n",
+                (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                (unsigned)DROP_VERIFY_WINDOWS, (unsigned)DROP_VERIFY_MIN_GOOD, DROP_VERIFY_BF_K_MIN);
+
+  logEvent(whyEventName);
+  logTransition(prev, state, whyTransition);
+}
+
+static void cancelDropBackToBreak(const char* why) {
+  if (state != DROP) return;
+  if (!breakInited) { // safety: if no floor, don't stay in BREAK
+    ContextState p = state;
+    state = STANDARD;
+    clearReturnTracking();
+    clearDropVerify();
+    dropOnsetBarStart = 0;
+    dropEndBar = 0;
+    logTransition(p, state, "DROP_CANCEL_NO_BREAKFLOOR");
+    return;
+  }
+
+  ContextState p = state;
+  state = BREAK_CONFIRMED;
+
+  // keep break floor as-is; allow updates again (returnActive already false)
+  clearReturnTracking();
+  clearDropVerify();
+
+  // keep DROP timer cleared
+  dropOnsetBarStart = 0;
+  dropEndBar = 0;
+
+  Serial.printf("EVENT DROP_VERIFY_CANCEL pos=%lu.%u why=%s good=%u/%u\n",
+                (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                why, (unsigned)dropVerifyGood, (unsigned)DROP_VERIFY_WINDOWS);
+
+  logTransition(p, state, "DROP_CANCEL_TO_BREAK");
+}
+
+// ---------------- v8 RETURN-IMPACT monitor (75ms windows) ----------------
+static void onMonitorWindow(float winRms, float winTr, float winKVar) {
+  if (!baselineReady) return;
+  if (!baseInited) return;
+  if (sysMode == SYS_FAIL) return;
+
+  // --- STD-only kick-absence persistence (prevents bar-average false CAND) ---
+  if (state == STANDARD) {
+    const float w_kR = safeDiv(winKVar, baseKVar);
+    if (w_kR < KICK_GONE_KR_MAX) stdKickGoneWinStreak++;
+    else                        stdKickGoneWinStreak = 0;
+  } else {
+    stdKickGoneWinStreak = 0;
+  }
+
+  // We need break floor for any bfK-based logic (RETURN + VERIFY)
+  if (!breakInited) {
+    clearReturnTracking();
+    clearDropVerify();
+    return;
+  }
+
+  // Break-floor window ratios
+  const float w_bfR = safeDiv(winRms,  breakRms);
+  const float w_bfT = safeDiv(winTr,   breakTr);
+  const float w_bfK = safeDiv(winKVar, breakKVar);
+
+  // ---------------- POST-DROP verification (single sanity mechanism) ----------------
+  if (state == DROP && dropVerifyActive) {
+    if (w_bfK >= DROP_VERIFY_BF_K_MIN) dropVerifyGood++;
+
+    if (dropVerifyGood >= DROP_VERIFY_MIN_GOOD) {
+      dropVerifyActive = false;
+      Serial.printf("EVENT DROP_VERIFY_PASS pos=%lu.%u good=%u/%u\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                    (unsigned)dropVerifyGood, (unsigned)DROP_VERIFY_WINDOWS);
+      return; // done verifying
+    }
+
+    if (dropVerifyBudget > 0) dropVerifyBudget--;
+    if (dropVerifyBudget == 0) {
+      cancelDropBackToBreak("KICK_NOT_SUSTAINED");
+      return;
+    }
+
+    // While verifying, do NOT run Return-Impact (we're already in DROP)
+    return;
+  }
+
+  // v8 DROP monitor active ONLY in BREAK_CONFIRMED when break floor exists
+  if (state != BREAK_CONFIRMED) {
+    clearReturnTracking();
+    return;
+  }
+
+  // ---- Phase A: detect Return Start (kick back) ----
+  if (!returnActive) {
+    if (w_bfK >= KICK_RETURN_BF_MIN) returnWinStreak++;
+    else                            returnWinStreak = 0;
+
+    if (returnWinStreak >= KICK_RETURN_CONFIRM_WINDOWS) {
+      returnActive = true;
+      returnBudget = RETURN_EVAL_WINDOWS;
+      kickLostStreak = 0;
+      peak_bfR = peak_bfT = peak_bfK = 0.0f;
+      returnWinStreak = 0;
+
+      Serial.printf("EVENT RETURN_START pos=%lu.%u w_bfK=%.2f\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents, w_bfK);
+    }
+    return;
+  }
+
+  // ---- returnActive: cancellation on sustained kick loss ----
+  if (w_bfK < KICK_RETURN_BF_MIN) kickLostStreak++;
+  else                            kickLostStreak = 0;
+
+  if (kickLostStreak >= KICK_RETURN_CANCEL_WINDOWS) {
+    Serial.printf("EVENT RETURN_CANCEL pos=%lu.%u\n",
+                  (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+    clearReturnTracking();
+    return;
+  }
+
+  // ---- Phase B: track peaks + decide DROP ----
+  if (w_bfR > peak_bfR) peak_bfR = w_bfR;
+  if (w_bfT > peak_bfT) peak_bfT = w_bfT;
+  if (w_bfK > peak_bfK) peak_bfK = w_bfK;
+
+  const bool okKick = (peak_bfK >= DROP_BF_KV_MIN);
+  const bool okLift = (peak_bfR >= DROP_BF_RMS_MIN) || (peak_bfT >= DROP_BF_TR_MIN);
+
+  if (okKick && okLift) {
+    Serial.printf("EVENT DROP_CONFIRMED_RETURN pos=%lu.%u pk_bfK=%.2f pk_bfR=%.2f pk_bfT=%.2f\n",
+                  (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                  peak_bfK, peak_bfR, peak_bfT);
+    enterDrop("DROP_CONFIRMED", "RETURN_IMPACT_PEAKS");
+    return;
+  }
+
+  if (returnBudget > 0) returnBudget--;
+  if (returnBudget == 0) {
+    Serial.printf("EVENT RETURN_EXPIRE_NO_DROP pos=%lu.%u pk_bfK=%.2f pk_bfR=%.2f pk_bfT=%.2f\n",
+                  (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                  peak_bfK, peak_bfR, peak_bfT);
+    clearReturnTracking();
+    return;
+  }
+}
+
+// ---------------- Bar finalization (policy transitions) ----------------
+static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, float kVar) {
+  const float rR = baseInited ? safeDiv(rms,  baseRms)  : 0.0f;
+  const float tR = baseInited ? safeDiv(tr,   baseTr)   : 0.0f;
+  const float kR = baseInited ? safeDiv(kVar, baseKVar) : 0.0f;
+
+  baselineMaybeInitAndUpdate(rms, tr, kVar, kR);
+
+  if (!baselineReady) {
+    state = STANDARD;
+    candEnterBar = 0;
+    breakRecoveryBars = 0;
+    candDeepStreak = 0;
+    breakReset();
+    clearReturnTracking();
+    clearDropVerify();
+
+    last_rR = rR; last_tR = tR; last_kR = kR;
+    last_bfR = last_bfT = last_bfK = 0.0f;
+    last_hasBF = false;
+    last_stateForBar = state;
+    return;
+  }
+
+  ContextState prev = state;
+  if (state != BREAK_CANDIDATE) candDeepStreak = 0;
+
+  // ----- BREAK -> STANDARD recovery (bar-level) -----
+  // Priority: if returnActive is true, do not allow recovery to steal the moment
+  if (state == BREAK_CONFIRMED && !returnActive) {
+    const bool ok = (kR >= RECOVERY_KR_MIN) &&
+                    ((rR >= RECOVERY_RR_MIN) || (tR >= RECOVERY_TR_MIN));
+    breakRecoveryBars = ok ? 1 : 0;
+    if (breakRecoveryBars >= 1) {
+      state = STANDARD;
+      candEnterBar = 0;
+      breakRecoveryBars = 0;
+      candDeepStreak = 0;
+      breakReset();
+      clearReturnTracking();
+      clearDropVerify();
+      logTransition(prev, state, "BREAK_RECOVER_BAR");
+      prev = state;
+    }
+  }
+
+  // ----- STANDARD -> CAND -----
+  if (state == STANDARD) {
+    if ((kR < KICK_GONE_KR_MAX) && (stdKickGoneWinStreak >= KICK_GONE_CONFIRM_WINDOWS)) {
+      state = BREAK_CANDIDATE;
+      candEnterBar = finalizedBarNumber;
+      breakRecoveryBars = 0;
+      candDeepStreak = 0;
+      breakReset();
+      clearReturnTracking();
+      clearDropVerify();
+      logTransition(prev, state, "CAND_ENTER_KICK_ABSENCE");
+      prev = state;
+    }
+  }
+
+  // ----- CAND -> BREAK OR recover to STD -----
+  if (state == BREAK_CANDIDATE) {
+    const bool canEvalDeep = (finalizedBarNumber >= (candEnterBar + (uint32_t)CAND_MIN_BARS));
+    const bool deep = (kR < DEEP_BREAK_KR_MAX) &&
+                      ((rR < DEEP_BREAK_RMS_MAX) || (tR < DEEP_BREAK_TR_MAX));
+
+    if (canEvalDeep && deep) candDeepStreak++;
+    else                     candDeepStreak = 0;
+
+    if (candDeepStreak >= 2) {
+      state = BREAK_CONFIRMED;
+      candDeepStreak = 0;
+      breakReset();           // break floor will init on first BREAK bar update below
+      clearReturnTracking();
+      clearDropVerify();
+      logTransition(prev, state, "BREAK_CONFIRM_DEEP_2B");
+      prev = state;
+    } else {
+      const bool okRecover = (rR >= RECOVERY_RR_MIN) && (tR >= RECOVERY_TR_MIN) && (kR >= CAND_RECOVERY_KR_MIN);
+      if (okRecover) {
+        state = STANDARD;
+        candEnterBar = 0;
+        candDeepStreak = 0;
+        breakRecoveryBars = 0;
+        breakReset();
+        clearReturnTracking();
+        clearDropVerify();
+        logTransition(prev, state, "CAND_RECOVER_BAR");
+        prev = state;
       }
     }
-  } else {
-    // First beat
-    Serial.printf(">>> FIRST BEAT #%lu @ %lu ms | Trans: %.3f\n", totalBeatsDetected, beatTime, transientValue);
   }
 
-  lastBeatTime = beatTime;
+  // ----- Update BREAK floor (only in BREAK, frozen during returnActive) -----
+  breakUpdate(rms, tr, kVar);
 
-  // Trigger LED pattern (non-blocking)
-  triggerLEDPattern();
+  // ----- bf ratios for logging -----
+  float bfR = 0, bfT = 0, bfK = 0;
+  bool hasBF = false;
+  if (breakInited && (state == BREAK_CONFIRMED || state == DROP)) {
+    bfR = safeDiv(rms,  breakRms);
+    bfT = safeDiv(tr,   breakTr);
+    bfK = safeDiv(kVar, breakKVar);
+    hasBF = true;
+  }
+
+  last_rR = rR; last_tR = tR; last_kR = kR;
+  last_bfR = bfR; last_bfT = bfT; last_bfK = bfK;
+  last_hasBF = hasBF;
+  last_stateForBar = state;
 }
 
-// =============================================================================
-// LED PATTERNS
-// =============================================================================
+// ---------------- Bar finalize (MIDI-synchronous) ----------------
+static void finalizeBarNow(uint32_t stampUs, uint32_t finalizedBarNumber) {
+  float rms = 0.0f, tr = 0.0f, kVar = 0.0f;
+  if (barN > 0) {
+    rms = sqrtf((float)(barSumSq / (double)barN));
+    tr  = (float)(barTrSum / (double)barN);
+    kVar = barKickW.var();
+  }
 
-void triggerLEDPattern() {
-  // PHASE 1: Simple single LED blink (Blue) - NON-BLOCKING
-  // Turn on LED immediately when beat detected
-  digitalWrite(LED_BLUE, HIGH);
-  ledOnTime = millis();  // Record when we turned it on
+  lastBarRms = rms;
+  lastBarTr  = tr;
+  lastBarKVar = kVar;
+  lastBarUs = stampUs;
 
-  // PHASE 2: Rotating pattern (uncomment to enable)
-  // // Turn on current LED
-  // digitalWrite(ledPins[currentLED], HIGH);
-  // ledOnTime = millis();
-  //
-  // // Rotate to next LED for next beat
-  // currentLED = (currentLED + 1) % 4;
+  resetBarAcc();
+  onBarFinalized(finalizedBarNumber, rms, tr, kVar);
 }
 
-void updateLEDState() {
-  // Non-blocking LED pulse: turn off after LED_PULSE_MS
-  if (ledOnTime > 0 && (millis() - ledOnTime >= LED_PULSE_MS)) {
-    digitalWrite(LED_BLUE, LOW);
-    // PHASE 2: Uncomment for rotating pattern
-    // for (int i = 0; i < 4; i++) {
-    //   digitalWrite(ledPins[i], LOW);
-    // }
-    ledOnTime = 0;  // Mark as handled
+// ---------------- Beat log ----------------
+static void logBeatLine(uint32_t nowUs, bool isBarStart) {
+  const uint32_t dtUs  = (lastBeatUs == 0) ? 0 : (nowUs - lastBeatUs);
+  if (dtUs > 0) {
+    lastBeatIntervalUs = (uint32_t)(0.85f * (float)lastBeatIntervalUs + 0.15f * (float)dtUs);
+  }
+  lastBeatUs = nowUs;
+
+  const uint32_t wAgeMs = (lastWinUs == 0) ? 999999 : (uint32_t)((nowUs - lastWinUs) / 1000);
+  const uint32_t bAgeMs = (lastBarUs == 0) ? 999999 : (uint32_t)((nowUs - lastBarUs) / 1000);
+
+  char pos[16];
+  snprintf(pos, sizeof(pos), "%lu.%u", (unsigned long)barCount, (unsigned)beatInBar);
+
+  Serial.printf(
+    "pos=%s t_us=%lu dt_us=%lu ticks=%lu "
+    "wAge_ms=%lu wRms=%.4f wTr=%.5f wKVar=%.6f "
+    "bAge_ms=%lu bRms=%.4f bTr=%.5f bKVar=%.6f",
+    pos,
+    (unsigned long)nowUs,
+    (unsigned long)dtUs,
+    (unsigned long)ticksSinceBeat,
+    (unsigned long)wAgeMs, lastWinRms, lastWinTr, lastWinKVar,
+    (unsigned long)bAgeMs, lastBarRms, lastBarTr, lastBarKVar
+  );
+
+  if (isBarStart) {
+    Serial.printf(" | ctx=%s rR=%.2f tR=%.2f kR=%.2f",
+                  ctxName(last_stateForBar), last_rR, last_tR, last_kR);
+
+    if (last_hasBF) {
+      Serial.printf(" bfR=%.2f bfT=%.2f bfK=%.2f", last_bfR, last_bfT, last_bfK);
+    }
+
+    Serial.printf(" base=%s(%u/%u)",
+                  (baselineReady ? "READY" : (baseInited ? "LEARN" : "OFF")),
+                  (unsigned)baselineQualifiedBars,
+                  (unsigned)BASELINE_MIN_QUALIFIED_BARS);
+
+    if (state == BREAK_CONFIRMED && returnActive) {
+      Serial.printf(" ret=ON(budg=%u pkK=%.2f pkR=%.2f pkT=%.2f)",
+                    (unsigned)returnBudget, peak_bfK, peak_bfR, peak_bfT);
+    }
+
+    if (state == DROP && dropVerifyActive) {
+      Serial.printf(" vfy=ON(budg=%u good=%u/%u)",
+                    (unsigned)dropVerifyBudget, (unsigned)dropVerifyGood, (unsigned)DROP_VERIFY_WINDOWS);
+    }
+  }
+
+  Serial.print("\n");
+  ticksSinceBeat = 0;
+}
+
+// ---------------- MIDI processing ----------------
+static void resetForHardReset() {
+  tickInBeat = 0;
+  ticksSinceBeat = 0;
+  barCount = 1;
+  beatInBar = 0;
+  lastBeatUs = 0;
+
+  curBarForEvents = 1;
+  curBeatForEvents = 0;
+
+  stdKickGoneWinStreak = 0;
+
+  resetBarAcc();
+  resetWinAcc();
+  envLP = 0.0f;
+  hp_y = 0.0f;
+  hp_x_prev = 0.0f;
+
+  baseInited = false;
+  baseRms = baseTr = baseKVar = 0.0f;
+  baselineReady = false;
+  baselineQualifiedBars = 0;
+
+  breakReset();
+  clearReturnTracking();
+  clearDropVerify();
+
+  state = STANDARD;
+  candEnterBar = 0;
+  breakRecoveryBars = 0;
+  candDeepStreak = 0;
+
+  lastWinUs = 0;
+  lastBarUs = 0;
+  lastWinRms = lastWinTr = lastWinKVar = 0.0f;
+  lastBarRms = lastBarTr = lastBarKVar = 0.0f;
+  last_rR = last_tR = last_kR = 0.0f;
+  last_bfR = last_bfT = last_bfK = 0.0f;
+  last_hasBF = false;
+  last_stateForBar = STANDARD;
+
+  dropOnsetBarStart = 0;
+  dropEndBar = 0;
+
+  debugForced = false;
+  visMode = VIS_STD;
+  stdDir = +1;
+  stdPos = 0;
+  stdBarsSinceFlip = 0;
+  breakFading = false;
+  dropStep = 0;
+  lastHalfBeatUs = micros();
+  allOff();
+
+  gBeatIndex = 0;
+}
+
+static void resetForResumeLike() {
+  tickInBeat = 0;
+  ticksSinceBeat = 0;
+  barCount = 1;
+  beatInBar = 0;
+  lastBeatUs = 0;
+
+  stdKickGoneWinStreak = 0;
+
+  curBarForEvents = 1;
+  curBeatForEvents = 0;
+
+  resetBarAcc();
+  resetWinAcc();
+  envLP = 0.0f;
+  hp_y = 0.0f;
+  hp_x_prev = 0.0f;
+
+  breakReset();
+  clearReturnTracking();
+  clearDropVerify();
+
+  state = STANDARD;
+  candEnterBar = 0;
+  breakRecoveryBars = 0;
+  candDeepStreak = 0;
+
+  lastWinUs = 0;
+  lastBarUs = 0;
+  lastWinRms = lastWinTr = lastWinKVar = 0.0f;
+  lastBarRms = lastBarTr = lastBarKVar = 0.0f;
+  last_rR = last_tR = last_kR = 0.0f;
+  last_bfR = last_bfT = last_bfK = 0.0f;
+  last_hasBF = false;
+  last_stateForBar = STANDARD;
+
+  dropOnsetBarStart = 0;
+  dropEndBar = 0;
+
+  debugForced = false;
+  visMode = VIS_STD;
+  stdDir = +1;
+  stdPos = 0;
+  stdBarsSinceFlip = 0;
+  breakFading = false;
+  dropStep = 0;
+  lastHalfBeatUs = micros();
+  allOff();
+
+  gBeatIndex = 0;
+}
+
+static void doManualResync() {
+  Serial.printf("EVENT MANUAL_RESYNC pos=%lu.%u\n",
+                (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+  resetForHardReset();
+  Serial.printf("===SYNC_LOG_START===\n[MANUAL_RESYNC] t_us=%lu\n", (unsigned long)micros());
+}
+
+static void enterFailure(FailReason r) {
+  if (sysMode == SYS_FAIL) return;
+
+  sysMode = SYS_FAIL;
+  failReason = r;
+
+  state = STANDARD;
+  breakReset();
+  clearReturnTracking();
+  clearDropVerify();
+  candEnterBar = 0;
+  breakRecoveryBars = 0;
+  candDeepStreak = 0;
+
+  if (r == FAIL_CLOCK_LOST) logEvent("FAIL_CLOCK_LOST");
+  else if (r == FAIL_AUDIO_LOST) logEvent("FAIL_AUDIO_LOST");
+  else logEvent("FAIL");
+}
+
+static void enterMusicStop() {
+  logEvent("MUSIC_STOP");
+
+  sysMode = SYS_OK;
+  failReason = FAIL_NONE;
+
+  midiRunning = false;
+
+  resetForResumeLike();
+
+  seenAnyClock = false;
+  seenAnyAudio = false;
+  lastClockUs = 0;
+  lastAudioUs = 0;
+}
+
+static void clearStopLatches() {
+  clockLostLatched = false;
+  audioLostLatched = false;
+  clockLostAtUs = 0;
+  audioLostAtUs = 0;
+}
+
+static void processFailureWatchdog() {
+  const uint32_t nowUs = micros();
+
+  const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
+  const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
+
+  const bool clockLostNow = seenAnyClock && ((uint32_t)(nowUs - lastClockUs) > CLOCK_LOSS_US);
+  const bool audioLostNow = seenAnyAudio && ((uint32_t)(nowUs - lastAudioUs) > AUDIO_LOSS_US);
+
+  const bool clockPresent = seenAnyClock && ((uint32_t)(nowUs - lastClockUs) <= CLOCK_LOSS_US);
+  const bool audioPresent = seenAnyAudio && ((uint32_t)(nowUs - lastAudioUs) <= AUDIO_LOSS_US);
+
+  const bool bothPresent = clockPresent && audioPresent;
+  if (!prevBothPresent && bothPresent) {
+    logEvent("AUTO_RESYNC_BOTH_PRESENT");
+    sysMode = SYS_OK;
+    failReason = FAIL_NONE;
+    resetForResumeLike();
+  }
+  prevBothPresent = bothPresent;
+
+  if (clockLostNow && !clockLostLatched) {
+    clockLostLatched = true;
+    clockLostAtUs = nowUs;
+    Serial.printf("EVENT CLOCK_LOST_LATCH pos=%lu.%u age_ms=%lu ctx=%s\n",
+      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+      (unsigned long)clockAgeMs, ctxName(state));
+  }
+
+  if (audioLostNow && !audioLostLatched) {
+    audioLostLatched = true;
+    audioLostAtUs = nowUs;
+    Serial.printf("EVENT AUDIO_LOST_LATCH pos=%lu.%u age_ms=%lu ctx=%s\n",
+      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+      (unsigned long)audioAgeMs, ctxName(state));
+  }
+
+  if (!clockLostLatched && !audioLostLatched) return;
+
+  if (clockLostLatched && audioLostLatched) {
+    const uint32_t diff = (clockLostAtUs > audioLostAtUs) ? (clockLostAtUs - audioLostAtUs)
+                                                          : (audioLostAtUs - clockLostAtUs);
+    if (diff <= STOP_COINCIDE_US) {
+      enterMusicStop();
+      clearStopLatches();
+      return;
+    }
+
+    if (clockLostAtUs < audioLostAtUs) enterFailure(FAIL_CLOCK_LOST);
+    else                               enterFailure(FAIL_AUDIO_LOST);
+    clearStopLatches();
+    return;
+  }
+
+  const uint32_t latchedAt = clockLostLatched ? clockLostAtUs : audioLostAtUs;
+  if ((uint32_t)(nowUs - latchedAt) < STOP_COINCIDE_US) {
+    return;
+  }
+
+  if (clockLostLatched) enterFailure(FAIL_CLOCK_LOST);
+  else                  enterFailure(FAIL_AUDIO_LOST);
+
+  clearStopLatches();
+}
+
+static void onMidiBeat() {
+  const uint32_t nowUs = micros();
+
+  bool isBarStart = false;
+  if (beatInBar == 0) { beatInBar = 1; isBarStart = true; }
+  else if (beatInBar < 4) beatInBar++;
+  else { beatInBar = 1; barCount++; isBarStart = true; }
+
+  curBarForEvents = barCount;
+  curBeatForEvents = beatInBar;
+
+  gBeatIndex++;
+
+  // DROP timeout exit at bar boundary (fixed DROP_BARS)
+  if (isBarStart && state == DROP && dropEndBar > 0 && barCount >= dropEndBar) {
+    ContextState prev = state;
+    state = STANDARD;
+    breakReset();
+    clearReturnTracking();
+    clearDropVerify();
+    candEnterBar = 0;
+    breakRecoveryBars = 0;
+    candDeepStreak = 0;
+    dropOnsetBarStart = 0;
+    dropEndBar = 0;
+    logTransition(prev, state, "DROP_TIMEOUT_FROM_ONSET");
+  }
+
+  // finalize previous bar at start of current bar (barCount >= 2)
+  if (isBarStart && barCount >= 2) {
+    finalizeBarNow(nowUs, barCount - 1);
+  }
+
+  visualsOnBeat(isBarStart);
+  logBeatLine(nowUs, isBarStart);
+
+  ticksSinceBeat = 0;
+}
+
+static void onMidiHalfBeat() { visualsOnHalfBeat(); }
+
+static void processMidi() {
+  while (MidiSerial.available() > 0) {
+    const uint8_t b = (uint8_t)MidiSerial.read();
+
+    if (b == 0xFA) { Serial.printf("[MIDI_START] t_us=%lu\n", (unsigned long)micros()); }
+    else if (b == 0xFB) { Serial.printf("[MIDI_CONTINUE] t_us=%lu\n", (unsigned long)micros()); }
+    else if (b == 0xFC) { Serial.printf("[MIDI_STOP] t_us=%lu\n", (unsigned long)micros()); }
+    else if (b == 0xF8) { // CLOCK
+      const uint32_t nowUs = micros();
+      lastClockUs = nowUs;
+      seenAnyClock = true;
+
+      if (!midiRunning) {
+        midiRunning = true;
+        if (barCount == 0) { barCount = 1; beatInBar = 0; }
+      }
+
+      if (tickInBeat == 0) { onMidiBeat(); onMidiHalfBeat(); }
+      if (tickInBeat == 12) { onMidiHalfBeat(); }
+
+      tickInBeat = (uint8_t)((tickInBeat + 1) % 24);
+      ticksSinceBeat++;
+    }
   }
 }
 
-// =============================================================================
-// MAIN PROGRAM
-// =============================================================================
+// ---------------- I2S INIT ----------------
+static void i2sInit() {
+  i2s_config_t cfg = {};
+  cfg.mode = (i2s_mode_t)(I2S_MODE_SLAVE | I2S_MODE_RX);
+  cfg.sample_rate = SAMPLE_RATE;
+  cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
+  cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  cfg.communication_format = I2S_COMM_FORMAT_I2S;
+  cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  cfg.dma_buf_count = 6;
+  cfg.dma_buf_len = 256;
+  cfg.use_apll = false;
 
+  i2s_pin_config_t pins = {};
+  pins.bck_io_num = PIN_I2S_BCLK;
+  pins.ws_io_num = PIN_I2S_LRCK;
+  pins.data_out_num = I2S_PIN_NO_CHANGE;
+  pins.data_in_num = PIN_I2S_DATA;
+
+  ESP_ERROR_CHECK(i2s_driver_install(I2S_PORT, &cfg, 0, nullptr));
+  ESP_ERROR_CHECK(i2s_set_pin(I2S_PORT, &pins));
+  ESP_ERROR_CHECK(i2s_zero_dma_buffer(I2S_PORT));
+}
+
+// ---------------- AUDIO PROCESS ----------------
+static void processAudio() {
+  static int32_t buf[I2S_READ_FRAMES * 2];
+  size_t bytesRead = 0;
+
+  if (i2s_read(I2S_PORT, buf, sizeof(buf), &bytesRead, 5 / portTICK_PERIOD_MS) != ESP_OK || bytesRead == 0)
+    return;
+
+  const int frames = (bytesRead / 4) / 2;
+
+  for (int i = 0; i < frames; i++) {
+    const int32_t vL = buf[i * 2 + 0] >> 8;
+    const int32_t vR = buf[i * 2 + 1] >> 8;
+    const float x = 0.5f * ((float)vL + (float)vR) * (1.0f / 8388608.0f);
+
+    const float ax = fabsf(x);
+
+    const float hp = HP_ALPHA * (hp_y + x - hp_x_prev);
+    hp_x_prev = x;
+    hp_y = hp;
+    const float trAx = fabsf(hp);
+
+    envLP += LP_ENV_ALPHA * (ax - envLP);
+
+    barSumSq += (double)(x * x);
+    barTrSum += (double)trAx;
+    barKickW.update((double)envLP);
+    barN++;
+
+    winSumSq += (double)(x * x);
+    winTrSum += (double)trAx;
+    winKickW.update((double)envLP);
+    winN++;
+
+    if (winN >= WIN_SAMPLES) {
+      const float winRms  = sqrtf((float)(winSumSq / (double)winN));
+      const float winTr   = (float)(winTrSum / (double)winN);
+      const float winKVar = winKickW.var();
+
+      lastWinRms = winRms;
+      lastWinTr  = winTr;
+      lastWinKVar = winKVar;
+      lastWinUs = micros();
+
+      if (winRms >= AUDIO_PRESENT_MIN_RMS) {
+        lastAudioUs = lastWinUs;
+        seenAnyAudio = true;
+      }
+
+      onMonitorWindow(winRms, winTr, winKVar);
+
+      resetWinAcc();
+    }
+  }
+}
+
+// ---------------- BUTTONS (RED universal reset) ----------------
+static bool lastRedBtn = true;
+
+static void processButtons() {
+  bool redNow = (digitalRead(PIN_BTN_RED) != LOW); // true=not pressed
+  if (lastRedBtn == true && redNow == false) {
+    Serial.printf("BTN RED_PRESS pos=%lu.%u sys=%s action=%s\n",
+      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+      (sysMode == SYS_FAIL ? "FAIL" : "OK"),
+      "HARD_RESET(BASELINE_CLEARED)");
+
+    if (sysMode == SYS_FAIL) {
+      sysMode = SYS_OK;
+      failReason = FAIL_NONE;
+      logEvent("FAIL_EXIT_BY_RESET");
+      clearStopLatches();
+    }
+
+    seenAnyClock = false;
+    seenAnyAudio = false;
+    lastClockUs = 0;
+    lastAudioUs = 0;
+
+    doManualResync();
+  }
+  lastRedBtn = redNow;
+}
+
+// ---------------- LED PWM INIT ----------------
+static void pwmInit() {
+  ledcAttach(PIN_LED_BLUE,   PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcAttach(PIN_LED_GREEN,  PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcAttach(PIN_LED_RED,    PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcAttach(PIN_LED_YELLOW, PWM_FREQ_HZ, PWM_RES_BITS);
+  allOff();
+}
+
+// ---------------- ARDUINO ----------------
 void setup() {
-  // Initialize serial
-  Serial.begin(SERIAL_BAUD_RATE);
-  delay(1000);  // Wait for serial to stabilize
+  Serial.begin(115200);
+  delay(200);
 
-  Serial.println("\n\n========================================");
-  Serial.println("Party Mode POC v5.3 - Tightened Double-Trigger Protection");
-  Serial.println("========================================");
-  Serial.printf("Detection Method: Dual Envelope (Fast=%.2f, Slow=%.2f)\n",
-                FAST_ENVELOPE_ALPHA, SLOW_ENVELOPE_ALPHA);
-  Serial.printf("Schmitt Trigger: ON=%.2f, OFF=%.2f\n", TRANSIENT_THRESHOLD, TRANSIENT_OFF);
-  Serial.printf("Refractory Period: %d ms\n", REFRACTORY_MS);
-  Serial.printf("Minimum Gap: %d ms (adaptive: %.0f%% of period when locked)\n",
-                MIN_BEAT_INTERVAL, MIN_GAP_PERCENT * 100);
-  Serial.printf("Phase Gate: ±%.0f%% when locked\n", PHASE_GATE_PERCENT * 100);
-  Serial.printf("Frequency Discrimination: Kick/HiHat ratio > %.1fx\n", HIHAT_REJECTION);
-  Serial.printf("Buffer: %d samples (~%.1f ms)\n", SAMPLE_BUFFER_SIZE,
-                (SAMPLE_BUFFER_SIZE * 1000.0) / I2S_SAMPLE_RATE);
-  Serial.printf("Tempo Tracking: Enabled (4-state PLL)\n");
-  Serial.println("========================================\n");
+  Serial.println("\nShimon – Party Mode + MIDI Clock (Debug v8.1) + Visuals v1 + Failure/MusicStop\n");
 
-  // Initialize hardware
-  setupI2S();
-  setupLEDs();
+  pinMode(PIN_BTN_BLUE,   INPUT_PULLUP);
+  pinMode(PIN_BTN_RED,    INPUT_PULLUP);
+  pinMode(PIN_BTN_GREEN,  INPUT_PULLUP);
+  pinMode(PIN_BTN_YELLOW, INPUT_PULLUP);
+  lastRedBtn = (digitalRead(PIN_BTN_RED) != LOW);
 
-  Serial.println("\nStarting beat detection...");
-  Serial.println("Play music with strong kick drums (techno/house/trance)\n");
+  pwmInit();
 
-  lastStatsTime = millis();
+  MidiSerial.begin(31250, SERIAL_8N1, 34, -1);
+
+  i2sInit();
+  resetBarAcc();
+  resetWinAcc();
+
+  curBarForEvents = 0;
+  curBeatForEvents = 0;
+
+  Serial.println("Ready. Baseline learns only on qualified STD bars; transitions only after BASELINE_READY.");
+  Serial.println("Policy v8.1: DROP=Return-Impact; sanity=post-DROP kick verification (window-level); cancel returns to BREAK.");
 }
 
 void loop() {
-  unsigned long loopStart = micros();
-
-  // Update LED state (non-blocking pulse control)
-  updateLEDState();
-
-  // Capture and process audio (dual envelope detection)
-  if (!captureAndProcessAudio()) {
-    delay(10);  // Wait before retry
-    return;
-  }
-
-  // Detect beats using dual envelope + Schmitt trigger
-  detectBeat();
-
-  // Performance monitoring (every 10 seconds)
-  unsigned long now = millis();
-  static unsigned long lastPerfTime = 0;
-  if (now - lastPerfTime > 10000) {
-    unsigned long loopTime = micros() - loopStart;
-    Serial.printf("\n=== PERFORMANCE ===\n");
-    Serial.printf("Loop time: %lu us (%.2f ms)\n", loopTime, loopTime / 1000.0);
-    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
-    Serial.printf("Total beats: %lu\n", totalBeatsDetected);
-    Serial.printf("Uptime: %lu seconds\n\n", now / 1000);
-    lastPerfTime = now;
-  }
+  processMidi();
+  processAudio();
+  processFailureWatchdog();
+  processButtons();
+  visualsRender();
+  delay(1);
 }
