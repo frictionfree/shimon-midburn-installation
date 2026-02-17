@@ -81,6 +81,12 @@ static constexpr int PIN_BTN_YELLOW = 27;
 static constexpr int PWM_FREQ_HZ = 12500;
 static constexpr int PWM_RES_BITS = 8;
 
+// LEDC channels (one per wing)
+static constexpr uint8_t LEDC_CH_BLUE   = 0;
+static constexpr uint8_t LEDC_CH_RED    = 1;
+static constexpr uint8_t LEDC_CH_GREEN  = 2;
+static constexpr uint8_t LEDC_CH_YELLOW = 3;
+
 // MOSFET minimum visible duty behavior (empirically ~70/255)
 static constexpr uint8_t MIN_VISIBLE_DUTY = 70;
 
@@ -318,6 +324,7 @@ static void logEvent(const char* e) {
 
 // IMPORTANT: pin map must match Wing enum ordering above
 static const int WING_PINS[4] = { PIN_LED_BLUE, PIN_LED_RED, PIN_LED_GREEN, PIN_LED_YELLOW };
+static const uint8_t WING_CHANNELS[4] = { LEDC_CH_BLUE, LEDC_CH_RED, LEDC_CH_GREEN, LEDC_CH_YELLOW };
 
 // Physical rotation orders
 static const Wing STD_ORDER[4]  = { W_BLUE, W_RED, W_GREEN, W_YELLOW };      // CCW
@@ -353,7 +360,7 @@ static uint32_t halfBeatUs = 250000;
 static bool debugForced = false;
 
 static inline void writeWingDuty(Wing w, uint8_t duty) {
-  ledcWrite(WING_PINS[w], duty);
+  ledcWrite(WING_CHANNELS[w], duty);
   outDuty[w] = duty;
 }
 
@@ -1301,7 +1308,7 @@ static void i2sInit() {
   cfg.sample_rate = SAMPLE_RATE;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
-  cfg.communication_format = I2S_COMM_FORMAT_I2S;
+  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_buf_count = 6;
   cfg.dma_buf_len = 256;
@@ -1404,10 +1411,18 @@ static void processButtons() {
 
 // ---------------- LED PWM INIT ----------------
 static void pwmInit() {
-  ledcAttach(PIN_LED_BLUE,   PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcAttach(PIN_LED_GREEN,  PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcAttach(PIN_LED_RED,    PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcAttach(PIN_LED_YELLOW, PWM_FREQ_HZ, PWM_RES_BITS);
+  // Setup LEDC channels (older ESP32 Arduino API)
+  ledcSetup(LEDC_CH_BLUE,   PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcSetup(LEDC_CH_RED,    PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcSetup(LEDC_CH_GREEN,  PWM_FREQ_HZ, PWM_RES_BITS);
+  ledcSetup(LEDC_CH_YELLOW, PWM_FREQ_HZ, PWM_RES_BITS);
+
+  // Attach pins to channels
+  ledcAttachPin(PIN_LED_BLUE,   LEDC_CH_BLUE);
+  ledcAttachPin(PIN_LED_RED,    LEDC_CH_RED);
+  ledcAttachPin(PIN_LED_GREEN,  LEDC_CH_GREEN);
+  ledcAttachPin(PIN_LED_YELLOW, LEDC_CH_YELLOW);
+
   allOff();
 }
 
