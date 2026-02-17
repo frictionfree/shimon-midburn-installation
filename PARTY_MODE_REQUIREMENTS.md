@@ -1,529 +1,664 @@
-# Party Mode Requirements
+# Shimon – Party Mode Requirements
 
-**Status:** DRAFT - Requirements Gathering Phase
-**Target:** Shimon Installation - Audio-Reactive Lighting System
-**Created:** 2026-01-27
+**Status:** Validated (Audio/Timing/State Machine), In Development (Visual System)
+**Scope:** Party Mode specific requirements
 
----
-
-## 1. Overview
-
-Party Mode transforms the Shimon installation from an interactive game into a music-reactive light show synchronized to DJ-mixed electronic music. The system will detect beats, track tempo changes, and adapt lighting patterns to match the energy and structure of techno/house/trance music.
+This document defines requirements specific to Party Mode operation. System-level requirements (mode selection, boot sequence, failure handling) are defined in `SYSTEM_REQUIREMENTS.md`. Hardware constraints are defined in `hardware-baseline.md`.
 
 ---
 
-## 2. Hardware Configuration
+## 1. Purpose of Party Mode
 
-### 2.1 Audio Input Chain
+Party Mode introduces a second operating mode for Shimon, alongside Game Mode, with the goal of using the installation in live music and party environments.
 
-**Production Setup:**
-- **Source:** Pioneer JDM900 NX2 mixer
-- **Interface:** Mixer coax SPDIF output → SPDIF-to-I2S converter → ESP32
-- **I2S Pin Assignments** (from hardware baseline):
-  - BCLK → GPIO 26
-  - LRCK → GPIO 25
-  - DATA → GPIO 22
-- **Audio Format:** 48 kHz sample rate, 32-bit word width (validated)
+In Party Mode, Shimon's LED infrastructure presents **predefined, beat-synchronous visual patterns** that respond to the structure and energy of the music being played by a DJ.
 
-**Development/Testing Setup:**
-- **Source:** Computer (Ableton Live)
-- **Interface:** Focusrite Scarlett 16i16 SPDIF output → SPDIF-to-I2S converter → ESP32
-- Same I2S configuration as production
+### Core Philosophy
 
-**Status:** Hardware connection validated, basic beat detection tested with Ableton kick pattern
+The focus is **musical relevance**, not free-form audio reactivity:
+- Visual patterns align with meaningful musical moments (breaks, drops, phrase transitions)
+- Patterns feel intentional and synchronized rather than arbitrary or overly sensitive
+- No per-track profiles or real-time adjustments required
 
-### 2.2 LED Output
+### Design Bias: Robustness Over Tuning
 
-- **Reuses existing hardware:**
-  - 4× 12V COB LED strips (Blue, Red, Green, Yellow)
-  - MOSFET switching via GPIO 23, 19, 18, 5
-  - Button LEDs (hardwired to mirror LED strips automatically)
-- **Power Constraint:** 100W PSU / ~8.3A max
-  - Maximum ~2 wings at full brightness simultaneously
-  - All patterns must respect global brightness cap
+The system is intentionally biased toward detecting only **clear and musically obvious events**, even at the cost of missing marginal cases.
 
----
+| Priority | Approach |
+|----------|----------|
+| **False positives** | Unacceptable (especially incorrect DROP detection) |
+| **Missed detections** | Acceptable within reason |
+| **Uncertainty** | Safe fallback to STANDARD state |
 
-## 3. Operating Mode Architecture
+### Safe Fallback
 
-### 3.1 Boot Sequence
-
-**On power-up or reset:**
-1. ESP32 initialization
-2. Hardware setup (pins, audio, peripherals)
-3. Boot LED sequence (existing: rainbow wave + 4 LED flashes)
-4. **Enter MODE_SELECTION state** (new)
-
-### 3.2 Mode Selection State
-
-**Visual Feedback:**
-- Slow ambient breathing pattern on all LEDs (indicates waiting for input)
-- Pattern continues indefinitely until user makes selection
-
-**User Input:**
-- **Blue + Red buttons pressed simultaneously** → Enter **Game Mode**
-- **Green + Yellow buttons pressed simultaneously** → Enter **Party Mode**
-- **No timeout** - system waits indefinitely for user choice
-
-**Confirmation Sequence:**
-After button press:
-1. Stop breathing pattern
-2. Quick clockwise LED circle (visual confirmation)
-3. Enter selected mode
-4. *(Future enhancement: mode-specific audio confirmation)*
-
-### 3.3 Mode Transition - Universal Reboot
-
-**Trigger:** Red + Yellow buttons pressed simultaneously (works in any mode/state)
-
-**Action:**
-- Immediate system reboot
-- Return to boot sequence → MODE_SELECTION state
-- User must select mode again
-
-**Purpose:**
-- Simple "panic button" / mode switcher
-- No complex state transitions between modes
-- Clean slate on every mode change
+When musical context cannot be determined with sufficient confidence:
+- System reverts to `STANDARD` state
+- Neutral, beat-synchronous visuals continue
+- Visual confidence never exceeds musical confidence
 
 ---
 
-## 4. Game Mode (Existing - Reference Only)
+## 2. Signal Architecture
 
-Game Mode functionality remains unchanged from current implementation:
-- Interactive Simon Says gameplay
-- 4 difficulty levels
-- DFPlayer audio feedback
-- All existing FSM states and logic
+### Two Signal Domains
 
-**Note:** No modifications needed to Game Mode logic, except:
-- Entry point now from MODE_SELECTION state (not directly from boot)
-- Red+Yellow combination triggers reboot to MODE_SELECTION
+Party Mode relies on two distinct signal sources:
 
----
+| Domain | Source | Role |
+|--------|--------|------|
+| **Musical Time** | MIDI Clock | Beat/bar/phrase timing (authoritative) |
+| **Musical Meaning** | I2S Audio | Context detection (BREAK/DROP) |
 
-## 5. Party Mode Functional Requirements
+### Role Separation (Architectural Invariant)
 
-### 5.1 Party Mode Overview
+This separation is **frozen** and must be maintained:
 
-Party Mode suspends all game logic and runs music-reactive lighting patterns synchronized to incoming audio from the DJ mixer.
+**MIDI Clock Responsibilities:**
+- Beat counting (24 PPQN)
+- Bar counting (4 beats per bar)
+- Phrase counting
+- Deterministic timing reference for visuals and state transitions
 
-### 5.2 Audio Analysis Requirements
+**I2S Audio Responsibilities:**
+- Detect BREAK and DROP conditions
+- Provide evidence of structural changes
+- Validate musical context
 
-#### 5.2.1 Beat Detection
-- **Primary goal:** Detect kick drum beats in real-time
-- **Target genres:** Techno, House, Trance
-- **Expected BPM range:** TBD (typical: 120-150 BPM?)
-- **Latency target:** TBD (acceptable delay between beat and light response?)
-- **Detection method:** TBD
-  - Onset detection (time-domain energy analysis)?
-  - FFT + low-frequency peak detection?
-  - Hybrid approach?
-  - Evaluate existing ESP32 libraries vs. custom implementation
+**Key Rule:** MIDI defines **when** events are evaluated. I2S provides **what** is happening musically.
 
-#### 5.2.2 Tempo Tracking
-- **Requirement:** Adapt to gradual BPM changes in real-time
-- **Use cases:**
-  - DJ beatmatching during transitions
-  - Gradual tempo builds/drops
-- **Tracking method:** TBD
-  - Running average of inter-beat intervals?
-  - Phase-locked loop?
-  - Exponential moving average?
-- **Update rate:** TBD (how often to recalculate tempo?)
+### Timing Model
 
-#### 5.2.3 Musical Structure Detection
-- **Requirement:** Detect breaks, buildups, and drops to trigger pattern changes
-- **Detection method:** TBD
-  - Energy level tracking (RMS/peak analysis)?
-  - Beat density analysis (sparse = break, dense = drop)?
-  - Simple threshold-based classification?
-- **States to detect:**
-  - **Normal/Rhythm:** Steady beat sections with consistent energy
-  - **Break/Breakdown:** Reduced energy, sparse or no beats
-  - **Buildup:** Increasing energy leading to drop
-  - **Drop:** High energy, strong beats
-
-### 5.3 Lighting Pattern Requirements
-
-#### 5.3.1 Pattern Categories
-
-Patterns should vary based on detected musical structure:
-
-**Normal/Rhythm Patterns:**
-- Beat-synchronized patterns during main sections
-- Examples: single-wing pulse, alternating pulse, chase sequences
-
-**Break/Breakdown Patterns:**
-- Calmer, ambient effects during breakdown sections
-- Examples: slow breathing, gentle fade cycles
-
-**Buildup Patterns:**
-- Intensifying effects that build tension
-- Examples: accelerating chase, brightening pulse, expanding pattern
-
-**Drop Patterns:**
-- Explosive, high-energy patterns at drops
-- Examples: all-wing flash, rapid strobe burst, energetic chase
-
-#### 5.3.2 Pattern Design Constraints
-
-- **Beat Synchronization:** Patterns trigger/update on detected beats
-- **Power Budget Compliance:** Maximum ~2 wings at full brightness (100W PSU constraint)
-- **MOSFET Constraint:** Fast pulses must jump to minimum effective duty (~70/255) for instant visibility
-- **Smooth Transitions:** Pattern changes should feel musical, not jarring
-- **Variety:** Multiple patterns per category to prevent repetition
-- **Reuse Existing Code:** Leverage existing `setLed()`, PWM functions, and visual patterns where possible
-
-#### 5.3.3 Specific Pattern Ideas (Initial Brainstorm - TBD)
-
-**Normal/Rhythm:**
-- Beat pulse: Single wing flashes on each beat, rotating through colors
-- Alternating pulse: Two wings alternate on beats
-- Quarter-note chase: Clockwise rotation every 4 beats
-- Dual intensity: Two wings pulse together, intensity varies with energy
-
-**Break:**
-- Ambient breathe: All wings slowly fade in/out
-- Gentle twinkle: Random sparse wing activations
-- Slow rotation: Single dim wing slowly rotates
-
-**Buildup:**
-- Accelerating chase: Rotation speed increases
-- Brightening pulse: Same wing pulses with increasing brightness
-- Expanding activation: More wings activate as buildup progresses
-
-**Drop:**
-- All-wing flash burst: All wings flash rapidly (short duration, power-limited)
-- Explosive chase: Very fast rotation
-- Strobe effect: Rapid on/off cycling (power-safe pattern)
-
-### 5.4 User Interaction During Party Mode
-
-**Button Inputs:**
-- **Red + Yellow combination:** Triggers reboot to MODE_SELECTION
-- **All other buttons:** Ignored (no game logic active)
-
-**Visual Feedback:**
-- LED patterns driven entirely by music analysis
-- Button LEDs mirror LED strips (hardware-wired, automatic)
-
-**Audio System:**
-- DFPlayer not used during Party Mode (no voice prompts needed)
-- Only mixer audio input active
-
-### 5.5 Fallback Behavior (Silence / No Signal)
-
-**Scenario:** No beats detected or audio signal lost
-
-**Behavior Options (decision TBD):**
-- **Option A:** Continue last pattern at last known tempo (ghost beats)
-- **Option B:** Fade to slow ambient pattern (gentle breathing)
-- **Option C:** Auto-exit to MODE_SELECTION after timeout
-- **Option D:** Display error pattern, wait for Red+Yellow reboot
-
-**Recommendation:** Start with Option B (fade to ambient), add timeout option later if needed
+- Bar-level aggregates finalized at bar start
+- State transitions (STANDARD, CAND, BREAK) occur at bar boundaries
+- DROP may be declared mid-bar via Return-Impact detection
+- Visual transitions may align to next beat or occur immediately (DROP)
 
 ---
 
-## 6. Technical Implementation Considerations
+## 3. MIDI Clock Handling
 
-### 6.1 FSM State Structure
+### Validated Semantics
 
-**New States Required:**
-- `MODE_SELECTION` - Boot state waiting for mode choice
-- `PARTY_MODE_ACTIVE` - Running music-reactive patterns
-- *(Possibly sub-states for different pattern categories)*
+| Parameter | Value |
+|-----------|-------|
+| Beat | 24 MIDI ticks |
+| Bar | 4 beats |
+| Detection | Explicit bar-start detection |
+| Finalization | Bar-level metrics finalized at bar start |
 
-**Modified States:**
-- `IDLE` - Entry point changes from boot to mode selection
-- All game states - Check for Red+Yellow reboot trigger
+### Real-World Behavior
 
-### 6.2 Audio Processing Architecture
+Some mixers emit continuous clock without reliable START/STOP messages.
 
-**I2S Audio Input:**
-- Continuous sampling at 48 kHz
-- Circular buffer for incoming samples (size TBD)
-- Real-time processing (beat detection + analysis)
+**Policy:**
+- Continuous clock presence is treated as timing authority
+- START/STOP messages are advisory only
+- Clock presence detection and timeout handling required
 
-**Processing Strategy (TBD):**
-- **Single-core:** All processing on main core (simpler, may limit performance)
-- **Dual-core:** Audio analysis on second core via FreeRTOS task (better performance, more complex)
-- **Buffer management:** Double-buffering or ring buffer
-- **Downsampling:** Process at lower rate to save CPU (e.g., 12 kHz for beat detection)?
+### Hardware Reference
 
-### 6.3 Beat Detection Algorithm (TBD - Research Phase)
-
-**Options to evaluate:**
-1. **Simple energy-based onset detection:**
-   - Track RMS energy over sliding window
-   - Detect rapid increases (onset = beat)
-   - Pros: Low CPU, simple to implement
-   - Cons: Sensitive to noise, may need tuning
-
-2. **FFT-based low-frequency detection:**
-   - FFT to extract bass/kick frequencies (20-100 Hz)
-   - Peak detection in frequency domain
-   - Pros: More accurate for kick drums
-   - Cons: Higher CPU cost, requires FFT library
-
-3. **Hybrid approach:**
-   - Bandpass filter → energy detection → adaptive threshold
-   - Pros: Balance of accuracy and performance
-   - Cons: More complex implementation
-
-4. **Existing libraries:**
-   - Evaluate ESP32-compatible beat detection libraries
-   - Trade-off: convenience vs. control/optimization
-
-**Decision criteria:**
-- Accuracy on test tracks (techno/house/trance)
-- CPU usage / real-time performance
-- Latency (beat detection → light response)
-- Tuning effort required
-
-### 6.4 Integration with Existing Codebase
-
-**Code Organization:**
-- Create new module: `party_mode.cpp` / `party_mode.h`?
-- Audio analysis module: `audio_analysis.cpp` / `audio_analysis.h`?
-- Keep mode selection logic in `main.cpp` FSM
-- Add Party Mode settings to `shimon.h` (thresholds, pattern timing, etc.)
-
-**Reuse Existing Functions:**
-- `setLed()` for LED control
-- Existing visual patterns (clockwise rotation, sparkle, etc.) where applicable
-- PWM infrastructure (analogWrite, duty scaling)
-
-**Modifications Required:**
-- Add Red+Yellow reboot detection to all states
-- Modify boot sequence to enter MODE_SELECTION
-- Add mode selection button detection logic
-
-### 6.5 Memory & Performance Constraints
-
-**ESP32-WROOM-32E Resources:**
-- RAM: Limited (~520 KB total, ~200 KB usable after system overhead)
-- CPU: Dual-core Xtensa @ 240 MHz
-- Flash: Program storage
-
-**Memory Allocation:**
-- Audio buffer: TBD size (balance latency vs. memory usage)
-- FFT buffer (if used): Typically 512-2048 samples
-- Pattern state: Minimal (current pattern ID, timing variables)
-
-**Performance Targets (TBD):**
-- CPU usage: <70% to leave headroom?
-- Audio buffer: Never overrun (real-time constraint)
-- LED update rate: Match PWM frequency (12-12.5 kHz)
-
-### 6.6 PWM & Hardware Constraints
-
-**From Hardware Baseline:**
-- **Minimum effective duty:** ~70/255 for MOSFET conduction
-  - **Implication:** Beat-sync pulses must jump to minimum visible brightness instantly
-- **PWM frequency:** 12-12.5 kHz @ 8-bit resolution (stable envelope)
-- **Power budget:** Max ~8.3A total, ~2 wings at full brightness
-
-**Pattern Design Rules:**
-- Never ramp from 0 - always start at minimum effective duty
-- Limit simultaneous wing activation (power constraint)
-- Test all patterns under power budget
+See `hardware-baseline.md` Section 10 for MIDI input configuration (GPIO 34, 31250 bps, optocoupler circuit).
 
 ---
 
-## 7. Development Plan & Milestones
+## 4. Audio Analysis
 
-### 7.1 Phase 1: Mode Selection Implementation
-- [ ] Add MODE_SELECTION state to FSM
-- [ ] Implement boot sequence → mode selection flow
-- [ ] Add Blue+Red and Green+Yellow detection logic
-- [ ] Add visual feedback (breathing pattern, confirmation circle)
-- [ ] Implement Red+Yellow reboot trigger
-- [ ] Test mode selection and transitions
+### Hardware Reference
 
-### 7.2 Phase 2: I2S Audio Infrastructure
-- [ ] Set up I2S driver and DMA
-- [ ] Implement audio buffer management
-- [ ] Verify continuous audio sampling (no overruns)
-- [ ] Add debug output (audio level monitoring)
-- [ ] Test with development setup (Ableton + soundcard)
+See `hardware-baseline.md` Section 9 for I2S configuration:
+- 48 kHz sample rate
+- 24-bit right-justified in 32-bit words
+- Critical decode: `int32_t sample = raw >> 8; float x = sample / 8388608.0f;`
 
-### 7.3 Phase 3: Beat Detection Development
-- [ ] Research and select beat detection algorithm
-- [ ] Implement basic beat detection (prototype)
-- [ ] Tune detection parameters with test tracks
-- [ ] Measure detection accuracy and latency
-- [ ] Optimize for performance (CPU usage)
+### Audio Metrics
 
-### 7.4 Phase 4: Tempo Tracking
-- [ ] Implement inter-beat interval measurement
-- [ ] Add tempo averaging/smoothing logic
-- [ ] Test with variable-tempo tracks
-- [ ] Validate real-time BPM adaptation
+| Metric | Description |
+|--------|-------------|
+| **RMS** | Average signal energy (overall loudness) |
+| **TR** | Transient Response - high-pass filtered magnitude (percussive sharpness) |
+| **kVar** | Kick Variance Proxy - variance of low-pass envelope (kick presence/stability) |
 
-### 7.5 Phase 5: Basic Pattern Implementation
-- [ ] Design initial pattern set (1-2 per category)
-- [ ] Implement beat-sync pattern engine
-- [ ] Test patterns with detected beats
-- [ ] Validate power budget compliance
-- [ ] Tune visual timing and brightness
+### Signal Ratios
 
-### 7.6 Phase 6: Musical Structure Detection
-- [ ] Implement energy level tracking
-- [ ] Add break/buildup/drop detection logic
-- [ ] Test with real tracks (manual validation)
-- [ ] Tune thresholds and sensitivity
+**Baseline Ratios (vs STANDARD baseline):**
+- `rR = barRms / baseRms` → Energy level
+- `tR = barTr / baseTr` → Transient density
+- `kR = barKVar / baseKVar` → Kick presence
 
-### 7.7 Phase 7: Pattern Library Expansion
-- [ ] Design and implement additional patterns
-- [ ] Add pattern variation/randomization
-- [ ] Implement smooth pattern transitions
-- [ ] Test pattern variety and flow
+**Break-Floor Ratios (vs BREAK floor):**
+- `bfR = barRms / breakRms`
+- `bfT = barTr / breakTr`
+- `bfK = barKVar / breakKVar`
 
-### 7.8 Phase 8: Integration & Testing
-- [ ] Full system integration (all phases combined)
-- [ ] Test complete mode selection → Party Mode → reboot flow
-- [ ] Stability testing (extended runtime)
-- [ ] Test with DJ mixer (production hardware)
-- [ ] Field testing with real music sets
-
-### 7.9 Phase 9: Optimization & Polish
-- [ ] Performance optimization (CPU, memory)
-- [ ] Fine-tune detection parameters
-- [ ] Refine pattern timing and transitions
-- [ ] Add configuration options to shimon.h
-- [ ] Final testing and validation
+**Window Ratios (75ms windows):**
+- `w_rR`, `w_tR`, `w_kR` (vs baseline)
+- `w_bfR`, `w_bfT`, `w_bfK` (vs break floor)
 
 ---
 
-## 8. Open Questions & Decisions
+## 5. Musical Context State Machine
 
-### 8.1 Mode Selection & Transitions
-- [x] Button combination for Game Mode: **Blue + Red**
-- [x] Button combination for Party Mode: **Green + Yellow**
-- [x] Visual feedback during selection: **Slow breathing pattern**
-- [x] Confirmation after selection: **Quick clockwise LED circle**
-- [x] Reboot trigger: **Red + Yellow (any mode)**
-- [ ] Future: Add audio confirmation for mode selection?
+### States
 
-### 8.2 Beat Detection
-- [ ] Which beat detection algorithm/library to use?
-- [ ] What BPM range to optimize for? (Typical: 120-150 BPM?)
-- [ ] Acceptable detection latency? (<50ms? <100ms?)
-- [ ] False positive/negative tolerance?
-- [ ] How to handle double-time or half-time beats?
+| State | Purpose | Visual Behavior |
+|-------|---------|-----------------|
+| **STANDARD** | Stable full-groove | Groove-oriented, beat-aligned, CAP=0.7 |
+| **CAND** | Kick-absent tension | STANDARD dimmed (~55%) |
+| **BREAK** | Confirmed breakdown | Low-energy patterns, CAP=0.5 |
+| **DROP** | High-impact return | Maximum intensity, CAP=1.0, 8 bars |
 
-### 8.3 Tempo Tracking
-- [ ] Averaging window size for tempo calculation?
-- [ ] How aggressively to adapt to tempo changes?
-- [ ] Minimum/maximum BPM limits?
+### State Lifecycle
 
-### 8.4 Pattern Design
-- [ ] How many patterns per category (initial implementation)?
-- [ ] Pattern selection strategy (random? sequential? energy-based)?
-- [ ] Transition timing (immediate? fade? beat-aligned?)
-- [ ] Should buildups/drops have fixed-duration special patterns?
+```
+STANDARD → CAND (kick disappears)
+         → BREAK (deep sustained collapse)
+         → DROP (groove restored with impact)
+         → STANDARD
+```
 
-### 8.5 Musical Structure Detection
-- [ ] Energy thresholds for break/buildup/drop classification?
-- [ ] Minimum duration to confirm structure change (avoid false triggers)?
-- [ ] Should beat density be tracked separately from energy?
+### Baseline Behavior
 
-### 8.6 Fallback & Error Handling
-- [x] No signal behavior: **Start with Option B (fade to ambient)**
-- [ ] Timeout duration before fallback (if implemented)?
-- [ ] Should system indicate "no signal" state visually?
+**Purpose:** Baseline represents stable STANDARD groove reference.
 
-### 8.7 Performance & Architecture
-- [ ] Single-core or dual-core audio processing?
-- [ ] Buffer sizes (latency vs. stability trade-off)?
-- [ ] Target CPU usage threshold?
-- [ ] Should audio processing yield periodically to avoid blocking?
+**Readiness Gate:**
+- Must accumulate `BASELINE_MIN_QUALIFIED_BARS` (16) qualified bars
+- Until ready: forced to STANDARD, all transitions suppressed
 
-### 8.8 Testing & Validation
-- [ ] What constitutes "accurate" beat detection? (% threshold?)
-- [ ] How to measure latency in production (without dev tools)?
-- [ ] Minimum runtime duration for stability validation?
+**Update Policy:**
+- Updates only on qualified STANDARD bars
+- Qualified = RMS above floor AND kick present
+- Frozen during CAND, BREAK, DROP
+
+**Persistence:**
+- Persists across MIDI stop/start, automatic resync
+- Resets only on system reset or manual resync
 
 ---
 
-## 9. Success Criteria
+### 5.1 STANDARD
 
-### 9.1 Functional Requirements
-- [ ] Mode selection works reliably (no false button detections)
-- [ ] Red+Yellow reboot trigger works from any mode/state
-- [ ] Beat detection accuracy: TBD (e.g., >90% of beats detected?)
-- [ ] Tempo tracking adapts smoothly to ±5% BPM changes
-- [ ] Patterns synchronize visibly with music (subjective evaluation)
-- [ ] Pattern transitions feel musical and appropriate to song structure
+**Entry from CAND (Recovery):**
+- 1 finalized bar meeting:
+  - `kR ≥ 0.82`
+  - AND (`rR ≥ 0.75` OR `tR ≥ 0.75`)
 
-### 9.2 Performance Requirements
-- [ ] System runs continuously for >2 hours without crash or desync
-- [ ] CPU usage stays below TBD threshold
-- [ ] No audio buffer overruns or underruns
-- [ ] LED PWM remains stable (no flicker or artifacts)
-
-### 9.3 User Experience
-- [ ] Mode selection is intuitive and responsive
-- [ ] Party Mode lighting is engaging and musical (field testing validation)
-- [ ] Power budget constraint not noticeable (patterns feel "full")
-- [ ] Fallback behavior (silence) is graceful, not confusing
+**Entry from BREAK (Recovery):**
+- 1 finalized bar meeting:
+  - `kR ≥ 0.80`
+  - AND (`rR ≥ 0.75` OR `tR ≥ 0.75`)
+- Suppressed while `returnActive = true`
 
 ---
 
-## 10. Future Enhancements (Out of Scope for Initial Implementation)
+### 5.2 BREAK_CANDIDATE (CAND)
 
-- Audio confirmation messages for mode selection (DFPlayer voice prompts)
-- Advanced frequency analysis (bass/mids/highs controlling different wings)
-- User-adjustable sensitivity during Party Mode (button inputs)
-- Multiple pattern "themes" selectable at mode selection
-- Persistent mode memory (remember last mode after power cycle)
-- MIDI control integration for external pattern triggering
-- Recording/playback of lighting sequences
-- Multi-wing coordination patterns (complex choreography)
-- Brightness/energy level display (wings as VU meters)
+**Entry from STANDARD:**
+- `kR < KICK_GONE_KR_MAX` (0.60)
+- Plus 4 consecutive low-kick windows (~300ms)
 
----
+**CAND → BREAK (Deep Confirmation):**
+- After `CAND_MIN_BARS` (1)
+- Two consecutive bars with:
+  - `kR < 0.40`
+  - AND (`rR < 0.80` OR `tR < 0.55`)
 
-## 11. References
-
-- **Hardware Baseline:** `hardware-baseline.md` - Frozen as-built hardware documentation
-- **Game Mode Documentation:** `CLAUDE.md` - Existing game implementation
-- **I2S Hardware Validation:** Section 13.1 of `hardware-baseline.md`
-- **Power Constraints:** Section 10.3 of `hardware-baseline.md`
-- **PWM Constraints:** Section 10.1 of `hardware-baseline.md`
-- **DJ Mixer Specs:** Pioneer DJM-900NXS2 (coax SPDIF output)
-- **SPDIF-to-I2S Converter:** (Model/specs TBD - add when documented)
+**CAND → STANDARD (Recovery):**
+- 1 bar with:
+  - `kR ≥ 0.82`
+  - AND (`rR ≥ 0.75` OR `tR ≥ 0.75`)
 
 ---
 
-## 12. Document History
+### 5.3 BREAK_CONFIRMED (BREAK)
 
-| Date       | Version | Changes                                      | Author       |
-|------------|---------|----------------------------------------------|--------------|
-| 2026-01-27 | 0.1     | Initial draft - requirements gathering complete | Claude + User |
+**Entry:** Only from CAND after deep confirmation.
+
+**Break Floor:**
+- Initialized on BREAK entry
+- Updates only while in BREAK
+- Frozen during DROP and while `returnActive = true`
+
+**BREAK → STANDARD (Recovery):**
+- 1 bar with:
+  - `kR ≥ 0.80`
+  - AND (`rR ≥ 0.75` OR `tR ≥ 0.75`)
+- Suppressed while `returnActive = true`
 
 ---
 
-## Next Steps
+### 5.4 DROP (Return-Impact Model)
 
-1. **Review this requirements document:**
-   - Confirm all requirements are captured correctly
-   - Make decisions on open questions (Section 8)
-   - Prioritize features if needed
+**Entry:** Only from BREAK via Return-Impact detection.
 
-2. **Research phase:**
-   - Evaluate ESP32 beat detection libraries/algorithms
-   - Prototype basic I2S audio capture
-   - Test beat detection accuracy with sample tracks
+**Phase A — Return Start:**
+- `w_bfK ≥ 1.60` for 3 consecutive windows (~225ms)
+- Sets `returnActive = true`, freezes break floor
 
-3. **Create implementation plan:**
-   - Break down Phase 1 (Mode Selection) into detailed tasks
-   - Set up development environment for audio testing
-   - Prepare test tracks and validation methodology
+**Phase B — Impact Qualification:**
+- Within evaluation window (12 windows, ~900ms):
+  - `peak_bfK ≥ 2.50` (mandatory)
+  - AND (`peak_bfR ≥ 1.55` OR `peak_bfT ≥ 1.60`)
 
-4. **Begin development:**
-   - Start with Phase 1 (Mode Selection) as foundation
-   - Iterate on I2S + beat detection in parallel
-   - Build up pattern library incrementally
+**Short-Burst Protection:**
+- If `w_bfK < 1.60` for 4 consecutive windows → cancel return tracking
+- If evaluation window expires without qualification → remain in BREAK
+
+**Duration:**
+- Fixed at `DROP_BARS` (8 bars)
+- Then → STANDARD at bar boundary
+
+---
+
+## 6. Threshold Summary (v8)
+
+### Baseline Learning
+
+| Parameter | Value |
+|-----------|-------|
+| `BASELINE_MIN_QUALIFIED_BARS` | 16 |
+| `BASELINE_MIN_RMS` | 0.020 |
+| `KICK_PRESENT_KVAR_ABS_MIN` | 0.0010 |
+| `KICK_PRESENT_KR_MIN` | 0.90 |
+
+### CAND Entry
+
+| Parameter | Value |
+|-----------|-------|
+| `KICK_GONE_KR_MAX` | 0.60 |
+| `KICK_GONE_CONFIRM_WINDOWS` | 4 (~300ms) |
+| `CAND_MIN_BARS` | 1 |
+
+### BREAK Confirmation
+
+| Parameter | Value |
+|-----------|-------|
+| `DEEP_BREAK_KR_MAX` | 0.40 |
+| `DEEP_BREAK_RMS_MAX` | 0.80 |
+| `DEEP_BREAK_TR_MAX` | 0.55 |
+
+### Recovery
+
+| Parameter | Value |
+|-----------|-------|
+| `RECOVERY_RR_MIN` | 0.75 |
+| `RECOVERY_TR_MIN` | 0.75 |
+| `RECOVERY_KR_MIN` | 0.80 |
+| `CAND_RECOVERY_KR_MIN` | 0.82 |
+
+### Return-Impact DROP
+
+| Parameter | Value |
+|-----------|-------|
+| `MONITOR_WIN_MS` | 75 |
+| `KICK_RETURN_BF_MIN` | 1.60 |
+| `KICK_RETURN_CONFIRM_WINDOWS` | 3 (~225ms) |
+| `KICK_RETURN_CANCEL_WINDOWS` | 4 (~300ms) |
+| `RETURN_EVAL_WINDOWS` | 12 (~900ms) |
+| `DROP_BF_KV_MIN` | 2.50 |
+| `DROP_BF_RMS_MIN` | 1.55 |
+| `DROP_BF_TR_MIN` | 1.60 |
+| `DROP_BARS` | 8 |
+
+---
+
+## 7. Signal Presence & Failure Handling
+
+| Condition | Classification | Action |
+|-----------|----------------|--------|
+| Clock lost, audio continues | FAILURE | Suspend state machine, visual fail indicator |
+| Audio lost, clock continues | FAILURE | Suspend state machine, visual fail indicator |
+| Both cease within ~1s | MUSIC_STOP | Safe STANDARD, preserve baseline |
+
+**MUSIC_STOP** is not a failure - it represents coordinated stop of timing and audio.
+
+---
+
+## 8. Visual System
+
+### 8.1 Purpose
+
+The visual layer produces music-synchronized visual behavior suitable for live DJ environments.
+
+**Design goals:**
+- React to musical structure, not raw audio
+- Align visuals with beat- and phrase-level context
+- Clearly communicate BREAK and DROP states
+- Operate safely within validated power envelope
+
+**Key principle:** The visual system **consumes** musical state, not audio directly.
+
+### 8.2 State-to-Visual Mapping
+
+| State | Visual Character | Brightness Cap |
+|-------|------------------|----------------|
+| **STANDARD** | Groove-oriented, beat-aligned, moderate | 0.7 |
+| **CAND** | STANDARD dimmed | 0.7 × DIM_FACTOR |
+| **BREAK** | Reduced motion, low-energy | 0.5 |
+| **DROP** | High-impact, maximum intensity | 1.0 |
+
+### 8.3 Transition Alignment
+
+- STANDARD ↔ BREAK transitions: Next bar boundary (Beat 1)
+- DROP entry: May begin mid-bar (preempts scheduled transitions)
+- DROP exit: Bar boundary after 8 bars
+
+---
+
+## 9. Pattern Model
+
+### 9.1 Pattern Definition
+
+A pattern is a predefined, beat-synchronized visual behavior with:
+- Active LED strips
+- Motion/animation logic
+- Internal beat/bar structure
+- Expected peak power scenario
+- Allowed musical state
+- Brightness request (normalized 0..1)
+
+### 9.2 Execution Window
+
+| Parameter | Value |
+|-----------|-------|
+| `PATTERN_LEN_BARS` | 8 |
+| Window start | Bar 1 Beat 1 |
+| Window end | Beat 4 of Bar 8 |
+| Reset | On state entry |
+
+### 9.3 Internal Phases
+
+Patterns may define internal phases:
+- Phase boundaries align to bar boundaries
+- Phase durations sum to 8 bars
+- Example: Bars 1-4 Phase A, Bars 5-8 Phase B
+
+### 9.4 Temporal Quantization
+
+**Allowed step resolutions:**
+- 0.5 beat (DROP only)
+- 1 beat
+- 2 beats
+
+No free-running time-based animation permitted.
+
+---
+
+## 10. Pattern Switching
+
+### 10.1 Switch Rules
+
+**STANDARD and BREAK:**
+- Patterns run for full 8-bar window
+- If state remains active, Pattern Switch at Beat 1 of next bar
+- Switch mode: **HARD CUT** (no crossfade)
+
+**DROP:**
+- One pattern selected on entry (round-robin)
+- No switch during DROP window
+- May begin mid-bar
+
+### 10.2 State Entry Behavior
+
+| Transition | Timing | Pattern Reset |
+|------------|--------|---------------|
+| STANDARD ↔ BREAK | Next bar boundary | Yes, to Bar 1.1 |
+| → DROP | Immediate | Yes, bar count from entry |
+
+### 10.3 No Pattern Persistence
+
+On every state entry:
+- Pattern window restarts from Bar 1
+- Internal pattern state resets
+- No history preserved across states
+
+### 10.4 Selection Policy (Round-Robin)
+
+Each state maintains independent:
+- Pattern catalog
+- Index pointer (persists while powered)
+
+On each switch:
+1. Select pattern at current index
+2. Increment index (wrap at end)
+
+On boot: All indices initialize to first catalog entry.
+
+---
+
+## 11. Power Budgeting
+
+### 11.1 Hardware Constants
+
+| Parameter | Value |
+|-----------|-------|
+| `PSU_V` | 12V |
+| `PSU_W` | 100W |
+| `PSU_MAX_A` | ~8.33A |
+| `HEADROOM_FACTOR` | 0.8 |
+| `I_BUDGET_A` | ~6.66A |
+| `STRIP_W_PER_M` | 11.52 W/m |
+| `I_PER_M` | ~0.96 A/m |
+| `I_WING_FULL` (2m) | ~1.92A |
+
+### 11.2 Budgeting Model
+
+At any visual update:
+```
+I_EST_A = Σ ( I_WING_FULL × duty )
+```
+
+**Rule:** `I_EST_A ≤ I_BUDGET_A`
+
+### 11.3 Pattern Power Declaration
+
+Each pattern declares peak overlap scenario.
+
+```
+patternPowerScale = min(1.0, I_BUDGET_A / I_PATTERN_PEAK_A)
+effectiveDuty = requestedDuty × patternPowerScale × CAP_STATE
+```
+
+### 11.4 Runtime Clamp (Safety Backstop)
+
+If `I_EST_A > I_BUDGET_A`: proportionally scale all duties.
+
+Guarantees: No PSU overload, no brownouts.
+
+---
+
+## 12. Creative Philosophy
+
+### 12.1 BREAK — Smooth / Sparse / Organic
+
+| Aspect | Behavior |
+|--------|----------|
+| **Goal** | Represent structural collapse and tension |
+| **Motion** | Slow, fluid, less directional |
+| **Timing** | 1-beat and 2-beat transitions |
+| **Overlap** | Heavy, 2-wing overlaps common |
+| **Rules** | No immediate same-wing repeat, emphasize decay |
+
+### 12.2 STANDARD — Beat / Direction / Groove
+
+| Aspect | Behavior |
+|--------|----------|
+| **Goal** | Stable long-running groove engine |
+| **Motion** | Predictable, structured, recognizable in 1-2 bars |
+| **Timing** | Strictly 1-beat transitions |
+| **Overlap** | Minimal |
+| **Rules** | Directional consistency, may reverse mid-window |
+
+### 12.3 DROP — Intense / Sharp / Impactful
+
+| Aspect | Behavior |
+|--------|----------|
+| **Goal** | Clear, unmistakable structural return |
+| **Motion** | High energy, fast, punchy |
+| **Timing** | Half-beats allowed, higher density |
+| **Overlap** | Allowed, may approach power limits |
+| **Rules** | Must feel distinct from STANDARD |
+
+---
+
+## 13. Pattern Catalog (PoC Phase 1)
+
+### 13.1 STANDARD Patterns
+
+All STANDARD patterns: 8-bar window, 1-beat resolution, deterministic, minimal overlap.
+
+#### STD-01 — Groove Rotation
+
+**Identity:** Classic directional motion with mid-window reversal.
+
+| Phase | Bars | Motion |
+|-------|------|--------|
+| A | 1-4 | Counterclockwise: W1 → W2 → W3 → W4 |
+| B | 5-8 | Clockwise: W4 → W3 → W2 → W1 |
+
+#### STD-02 — Alternating Axis
+
+**Identity:** Structured symmetry using opposite wings.
+
+| Bars | Motion |
+|------|--------|
+| Odd (1,3,5,7) | W1 → W3 → W1 → W3 |
+| Even (2,4,6,8) | W2 → W4 → W2 → W4 |
+
+#### STD-03 — Directional Sweep Ladder
+
+**Identity:** Structured spatial travel with mirrored second half.
+
+| Phase | Bars | Motion |
+|-------|------|--------|
+| A | 1-4 | Progressive sweep forward |
+| B | 5-8 | Mirrored sweep back |
+
+---
+
+### 13.2 BREAK Patterns
+
+All BREAK patterns: 8-bar window, 1-2 beat transitions, smooth fades, visible overlap.
+
+#### BRK-01 — Slow Drift Relay
+
+**Identity:** Calm, flowing wing-to-wing relay with soft overlap.
+
+- Each transition: 2 beats
+- Wing A fades out, Wing B fades in (overlap maintained)
+- Pseudo-random sequence (no immediate same-wing repeat)
+
+#### BRK-02 — Breathing Anchor
+
+**Identity:** Single-wing breathing pulses with slow cross transitions.
+
+- Each wing holds 1 full bar
+- Fade in over first 2 beats
+- Fade out over last 2 beats
+
+#### BRK-03 — Dual Flow Weave
+
+**Identity:** Soft dual-wing weave with continuous overlap.
+
+- Two wings partially active at any time
+- One fading out, one fading in
+- Transition every 2 beats
+
+---
+
+### 13.3 DROP Patterns
+
+All DROP patterns: 8-bar window, immediate start, half-beat allowed, fast transitions.
+
+#### DRP-01 — Impact Chase
+
+**Identity:** High-speed rotational drive.
+
+| Phase | Bars | Motion |
+|-------|------|--------|
+| A | 1-4 | Half-beat rotational sweep forward |
+| B | 5-8 | Reverse half-beat sweep |
+
+Strong Beat-1 emphasis each bar.
+
+#### DRP-02 — Alternating Burst Drive
+
+**Identity:** Aggressive axis-based burst with 2-bar switching.
+
+| Bars | Primary Axis |
+|------|--------------|
+| 1-2 | W1 + W3 |
+| 3-4 | W2 + W4 |
+| 5-6 | W1 + W3 |
+| 7-8 | W2 + W4 |
+
+Within each bar: Strong dual-wing hit on beats 1,3; half-beat pulses on 2,4.
+
+#### DRP-03 — Expanding Impact Wave
+
+**Identity:** Spatial expansion and contraction.
+
+| Phase | Bars | Motion |
+|-------|------|--------|
+| Expansion | 1-4 | 1 wing → 2 → 3 → 4 wings |
+| Contraction | 5-8 | 4 wings → 3 → 2 → 1 wing |
+
+Half-beat shimmer allowed during multi-wing phases.
+
+---
+
+## 14. Visual Constants
+
+### Timing
+
+| Parameter | Value |
+|-----------|-------|
+| `PATTERN_LEN_BARS` | 8 |
+| `BEATS_PER_BAR` | 4 |
+| `SWITCH_MODE` | HARD_CUT |
+
+### State Brightness Caps
+
+| Parameter | Value |
+|-----------|-------|
+| `CAP_STANDARD` | 0.7 |
+| `CAP_BREAK` | 0.5 |
+| `CAP_DROP` | 1.0 |
+| `CAND_DIM_FACTOR` | (tunable) |
+
+---
+
+## 15. Implementation Status
+
+### Validated (POC Complete)
+
+- ✅ SPDIF → I2S → ESP32 audio pipeline
+- ✅ 24-bit right-justified decoding
+- ✅ Musical context state machine (STANDARD, CAND, BREAK, DROP)
+- ✅ MIDI clock integration (USB-MIDI and DIN-MIDI)
+- ✅ Basic visual pattern per state (1 each)
+- ✅ Power-aware PWM brightness control
+
+### In Development (Current Focus)
+
+- ⏳ Full pattern catalog (9 patterns)
+- ⏳ Pattern switching logic (round-robin)
+- ⏳ Pattern execution framework (8-bar windows)
+- ⏳ Power budgeting model (pattern declarations)
+
+### Open Issues
+
+- Detection confidence during long buildups, sparse breaks
+- DROP sensitivity tuning
+- Automatic recovery validation
+- Manual resync control
+
+---
+
+## 16. References
+
+| Document | Content |
+|----------|---------|
+| `hardware-baseline.md` | I2S config (Section 9), MIDI config (Section 10) |
+| `SYSTEM_REQUIREMENTS.md` | Mode selection, boot sequence, failure handling |
+| `GAME_MODE_REQUIREMENTS.md` | Game Mode specific requirements |

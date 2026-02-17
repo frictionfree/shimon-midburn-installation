@@ -1,12 +1,19 @@
 # Party Mode Proof of Concept
 
-This directory contains the standalone Party Mode POC code for validating beat detection and LED synchronization.
+This directory contains the Party Mode POC code demonstrating the working audio-visual system.
 
 ## Purpose
 
-Validate whether ESP32 + I2S + ArduinoFFT can achieve reliable beat detection for electronic music before investing in full Party Mode implementation.
+Validate the Party Mode architecture using:
+- **MIDI Clock** as timing authority (beat/bar alignment)
+- **I2S Audio** for musical context detection (STANDARD/BREAK/DROP states)
+- **Correct 24-bit right-justified decoding** for reliable audio analysis
 
-See `../PARTY_MODE_POC_DESIGN.md` for complete design documentation.
+## Documentation
+
+- **Requirements:** `../PARTY_MODE_REQUIREMENTS.md` - Complete Party Mode specification
+- **Hardware:** `../hardware-baseline.md` - I2S and MIDI configuration (Sections 9-10)
+- **System:** `../SYSTEM_REQUIREMENTS.md` - Mode selection, boot sequence
 
 ---
 

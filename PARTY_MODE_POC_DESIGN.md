@@ -1,7 +1,20 @@
-2020# Party Mode Proof of Concept - Design Document
+# Party Mode Proof of Concept - Design Document
 
-**Status:** Active Development
-**Purpose:** Validate feasibility of real-time beat detection and LED synchronization for electronic music
+> **⚠️ DEPRECATED**
+>
+> This document describes the **failed initial POC approach** (FFT-based beat detection without MIDI).
+>
+> **Superseded by:** `PARTY_MODE_REQUIREMENTS.md` which documents the working architecture using:
+> - MIDI Clock as timing authority
+> - I2S audio for context detection (BREAK/DROP)
+> - Correct 24-bit right-justified I2S decoding
+>
+> This file is retained for historical reference only.
+
+---
+
+**Status:** ~~Active Development~~ **DEPRECATED**
+**Purpose:** ~~Validate feasibility of real-time beat detection~~ Historical reference only
 **Created:** 2026-01-27
 
 ---
