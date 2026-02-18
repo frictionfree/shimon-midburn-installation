@@ -93,7 +93,7 @@ static constexpr uint8_t MIN_VISIBLE_DUTY = 70;
 // ---------------- DEBUG CONTROL ----------------
 // Set to true for verbose beat-by-beat logging (beats 2,3,4 within bars)
 // Bar-level logs (beat 1) and state transitions always print
-static constexpr bool DEBUG_BEAT_LOG = true;
+static constexpr bool DEBUG_BEAT_LOG = false;
 
 // Set to true to log baseline updates and skips at every bar boundary.
 // Logs BASE_UPDATE (qualified bar + new baseline values + ratios)
@@ -255,7 +255,7 @@ static float hp_x_prev = 0.0f;
 static volatile float lastWinRms = 0.0f, lastWinTr = 0.0f, lastWinKVar = 0.0f;
 static volatile uint32_t lastWinUs = 0;
 
-static volatile float lastBarRms = 0.0f, lastBarTr = 0.0f, lastBarKVar = 0.0f;
+static volatile float lastBarRms = 0.0f, lastBarTr = 0.0f, lastBarKVar = 0.0f, lastBarKMean = 0.0f;
 static volatile uint32_t lastBarUs = 0;
 
 // ---- Ratios / context snapshot ----
@@ -486,11 +486,21 @@ static void clearRequests() {
 
 // Set a wing's brightness request (0.0-1.0)
 static void setWing(Wing w, float brightness) {
+  if (w >= 4) {
+    Serial.printf("WING_OOB setWing w=%u pos=%lu.%u\n",
+                  (unsigned)w, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+    return;
+  }
   wingRequest[w] = clamp01(brightness);
 }
 
 // Add to a wing's brightness (for overlaps)
 static void addWing(Wing w, float brightness) {
+  if (w >= 4) {
+    Serial.printf("WING_OOB addWing w=%u pos=%lu.%u\n",
+                  (unsigned)w, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+    return;
+  }
   wingRequest[w] = clamp01(wingRequest[w] + brightness);
 }
 
@@ -892,8 +902,8 @@ static void visualsOnBeat(bool isBarStart) {
     patWindowBar++;
     // Check if 8-bar window completed
     if (patWindowBar > PATTERN_LEN_BARS) {
-      patWindowBar = 1;  // Reset to bar 1 of new pattern (not 0, we already incremented)
       selectPatternForState(state);
+      patWindowBar = 1;  // Override internal reset: start at bar 1 of new pattern
       Serial.printf("PATTERN_SWITCH pat=%s bpm=%.1f\n", patternName(activePattern), currentBPM());
     }
     patWindowBeat = 1;
@@ -1127,7 +1137,10 @@ static bool baselineEligibleBar(float rms, float kVar, float rR, float tR, float
   // Before baseline initialized: just check kick presence
   if (!baseInited) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN);
 
-  // After initialized: use representative bands to prevent drift
+  // After initialized but before ready: upper cap only - reject upward outliers, allow downward correction
+  if (!baselineReady) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN && kR <= BASELINE_UPDATE_KR_MAX);
+
+  // After ready: use representative bands to protect stable baseline from drift
   // kR must be in band (mandatory)
   if (kR < BASELINE_UPDATE_KR_MIN || kR > BASELINE_UPDATE_KR_MAX) return false;
 
@@ -1145,9 +1158,9 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
     if (DEBUG_BASELINE_LOG) {
       const char* why;
       if (rms < BASELINE_MIN_RMS)                                             why = "SILENCE";
-      else if (!baseInited && kVar < KICK_PRESENT_KVAR_ABS_MIN)              why = "NO_KICK";
-      else if (baseInited && (kR < BASELINE_UPDATE_KR_MIN ||
-                              kR > BASELINE_UPDATE_KR_MAX))                   why = "KR_OOB";
+      else if (kVar < KICK_PRESENT_KVAR_ABS_MIN)                             why = "NO_KICK";
+      else if (baselineReady && (kR < BASELINE_UPDATE_KR_MIN ||
+                                 kR > BASELINE_UPDATE_KR_MAX))                why = "KR_OOB";
       else                                                                     why = "ENERGY_OOB";
       Serial.printf("BASE_SKIP pos=%lu.%u why=%s rms=%.4f kVar=%.6f kR=%.2f rR=%.2f tR=%.2f\n",
                     (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
@@ -1164,6 +1177,13 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
     return;
   }
 
+  const float prevBlKVar = baseKVar;
+  if (DEBUG_BASELINE_LOG && prevBlKVar > 0.5f) {
+    Serial.printf("BASE_ANOMALY pos=%lu.%u prevBlKVar=%.8f baseInited=%d baselineReady=%d qual=%u\n",
+                  (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                  prevBlKVar, (int)baseInited, (int)baselineReady,
+                  (unsigned)baselineQualifiedBars);
+  }
   const float a = BASE_ALPHA_STD;
   baseRms  = (1.0f - a) * baseRms  + a * rms;
   baseTr   = (1.0f - a) * baseTr   + a * tr;
@@ -1178,9 +1198,9 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
   }
 
   if (DEBUG_BASELINE_LOG) {
-    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f barKVar=%.8f -> bRms=%.4f bTr=%.6f bKVar=%.8f qual=%u/%u\n",
+    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f kVar=%.8f -> blRms=%.4f blTr=%.6f blKVar=%.8f->%.8f qual=%u/%u\n",
                   (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-                  kR, rR, tR, kVar, baseRms, baseTr, baseKVar,
+                  kR, rR, tR, kVar, baseRms, baseTr, prevBlKVar, baseKVar,
                   (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
   }
 }
@@ -1484,16 +1504,18 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
 
 // ---------------- Bar finalize (MIDI-synchronous) ----------------
 static void finalizeBarNow(uint32_t stampUs, uint32_t finalizedBarNumber) {
-  float rms = 0.0f, tr = 0.0f, kVar = 0.0f;
+  float rms = 0.0f, tr = 0.0f, kVar = 0.0f, kMean = 0.0f;
   if (barN > 0) {
     rms = sqrtf((float)(barSumSq / (double)barN));
     tr  = (float)(barTrSum / (double)barN);
     kVar = barKickW.var();
+    kMean = (float)barKickW.mean;
   }
 
   lastBarRms = rms;
   lastBarTr  = tr;
   lastBarKVar = kVar;
+  lastBarKMean = kMean;
   lastBarUs = stampUs;
 
   resetBarAcc();
@@ -1516,12 +1538,16 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
 
   // Compact bar-level format (when DEBUG_BEAT_LOG is off)
   if (isBarStart && !DEBUG_BEAT_LOG) {
-    Serial.printf("bar=%lu ctx=%s rR=%.2f tR=%.2f kR=%.2f",
+    Serial.printf("bar=%lu state=%s rR=%.2f tR=%.2f kR=%.2f",
                   (unsigned long)barCount, ctxName(last_stateForBar),
                   last_rR, last_tR, last_kR);
 
     if (baseInited) {
-      Serial.printf(" bKV=%.6f wStr=%u", baseKVar, (unsigned)stdKickGoneWinStreak);
+      Serial.printf(" wStr=%u", (unsigned)stdKickGoneWinStreak);
+    }
+
+    if (baseInited) {
+      Serial.printf(" kVar=%.6f kMean=%.6f blKV=%.6f", lastBarKVar, lastBarKMean, baseKVar);
     }
 
     if (last_hasBF) {
@@ -1529,7 +1555,7 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
     }
 
     if (!baselineReady) {
-      Serial.printf(" base=%u/%u", (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
+      Serial.printf(" qual=%u/%u", (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
     }
 
     if (state == BREAK_CONFIRMED && returnActive) {
@@ -1565,11 +1591,11 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
   );
 
   if (isBarStart) {
-    Serial.printf(" | ctx=%s rR=%.2f tR=%.2f kR=%.2f",
+    Serial.printf(" | state=%s rR=%.2f tR=%.2f kR=%.2f",
                   ctxName(last_stateForBar), last_rR, last_tR, last_kR);
 
     if (baseInited) {
-      Serial.printf(" bKV=%.6f wStr=%u", baseKVar, (unsigned)stdKickGoneWinStreak);
+      Serial.printf(" wStr=%u", (unsigned)stdKickGoneWinStreak);
     }
 
     if (last_hasBF) {
@@ -1577,7 +1603,7 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
     }
 
     if (!baselineReady) {
-      Serial.printf(" base=%s(%u/%u)",
+      Serial.printf(" qual=%s(%u/%u)",
                     (baseInited ? "LEARN" : "OFF"),
                     (unsigned)baselineQualifiedBars,
                     (unsigned)BASELINE_MIN_QUALIFIED_BARS);
@@ -2036,6 +2062,10 @@ void setup() {
   delay(200);
 
   Serial.println("\nShimon – Party Mode + MIDI Clock (Debug v8.1) + Visuals v1 + Failure/MusicStop\n");
+  Serial.printf("MEM baseKVar=0x%08X wingReq[0]=0x%08X [1]=0x%08X [2]=0x%08X [3]=0x%08X\n",
+                (uint32_t)&baseKVar,
+                (uint32_t)&wingRequest[0], (uint32_t)&wingRequest[1],
+                (uint32_t)&wingRequest[2], (uint32_t)&wingRequest[3]);
 
   pinMode(PIN_BTN_BLUE,   INPUT_PULLUP);
   pinMode(PIN_BTN_RED,    INPUT_PULLUP);
