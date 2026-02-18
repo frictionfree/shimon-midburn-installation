@@ -95,6 +95,11 @@ static constexpr uint8_t MIN_VISIBLE_DUTY = 70;
 // Bar-level logs (beat 1) and state transitions always print
 static constexpr bool DEBUG_BEAT_LOG = true;
 
+// Set to true to log baseline updates and skips at every bar boundary.
+// Logs BASE_UPDATE (qualified bar + new baseline values + ratios)
+// and BASE_SKIP (rejected bar + skip reason) to track baseline development.
+static constexpr bool DEBUG_BASELINE_LOG = true;
+
 // ---------------- VISUAL TUNABLES ----------------
 static constexpr uint8_t DEBUG_BRIGHT = 200;
 
@@ -1129,10 +1134,24 @@ static bool baselineEligibleBar(float rms, float kVar, float rR, float tR, float
 
 static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR, float tR, float kR) {
   if (state != STANDARD) return; // freeze outside STD
-  if (!baselineEligibleBar(rms, kVar, rR, tR, kR)) return;
+
+  if (!baselineEligibleBar(rms, kVar, rR, tR, kR)) {
+    if (DEBUG_BASELINE_LOG) {
+      const char* why;
+      if (rms < BASELINE_MIN_RMS)                                             why = "SILENCE";
+      else if (!baseInited && kVar < KICK_PRESENT_KVAR_ABS_MIN)              why = "NO_KICK";
+      else if (baseInited && (kR < BASELINE_UPDATE_KR_MIN ||
+                              kR > BASELINE_UPDATE_KR_MAX))                   why = "KR_OOB";
+      else                                                                     why = "ENERGY_OOB";
+      Serial.printf("BASE_SKIP pos=%lu.%u why=%s rms=%.4f kVar=%.6f kR=%.2f rR=%.2f tR=%.2f\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                    why, rms, kVar, kR, rR, tR);
+    }
+    return;
+  }
 
   if (!baseInited) {
-    baselineInit(rms, tr, kVar);
+    baselineInit(rms, tr, kVar); // logs BASE_INIT
     baselineQualifiedBars = 1;
     baselineReady = (baselineQualifiedBars >= BASELINE_MIN_QUALIFIED_BARS);
     if (baselineReady) logEvent("BASELINE_READY");
@@ -1150,6 +1169,13 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
       baselineReady = true;
       logEvent("BASELINE_READY");
     }
+  }
+
+  if (DEBUG_BASELINE_LOG) {
+    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f -> bRms=%.4f bTr=%.6f bKVar=%.8f qual=%u/%u\n",
+                  (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                  kR, rR, tR, baseRms, baseTr, baseKVar,
+                  (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
   }
 }
 
