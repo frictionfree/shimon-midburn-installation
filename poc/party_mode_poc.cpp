@@ -90,25 +90,38 @@ static constexpr uint8_t LEDC_CH_YELLOW = 3;
 // MOSFET minimum visible duty behavior (empirically ~70/255)
 static constexpr uint8_t MIN_VISIBLE_DUTY = 70;
 
+// ---------------- DEBUG CONTROL ----------------
+// Set to true for verbose beat-by-beat logging (beats 2,3,4 within bars)
+// Bar-level logs (beat 1) and state transitions always print
+static constexpr bool DEBUG_BEAT_LOG = true;
+
 // ---------------- VISUAL TUNABLES ----------------
-static constexpr uint8_t STD_BRIGHT   = 170;
-static constexpr uint8_t BREAK_BRIGHT = 150;
-static constexpr uint8_t DROP_BRIGHT  = 235;
 static constexpr uint8_t DEBUG_BRIGHT = 200;
 
-static constexpr float CAND_STD_DIM = 0.55f;
+// State brightness caps (0-255 scale, will be normalized)
+static constexpr float CAP_STANDARD = 0.70f;
+static constexpr float CAP_BREAK    = 0.50f;
+static constexpr float CAP_DROP     = 1.00f;
+static constexpr float CAND_DIM     = 0.55f;  // Multiplier on STANDARD during CAND
 
-// Global cap (safety net). If sum of channel duties > cap, scale down proportionally.
+// Base brightness before state cap (max duty request)
+static constexpr uint8_t BASE_BRIGHT = 235;
+
+// Global power cap (safety net). If sum of channel duties > cap, scale down.
 static constexpr uint16_t GLOBAL_DUTY_CAP = 320;
 
-// DROP overlap: last 10% of half-beat crossfades to next
+// Pattern window length
+static constexpr uint8_t PATTERN_LEN_BARS = 8;
+
+// Retrigger dip for accented beats (STD-02)
+static constexpr float RETRIGGER_DIP = 0.15f;       // Brief dip at beat boundary
+static constexpr float ACCENT_BOOST = 1.12f;        // Slight brightness boost on accent
+
+// BREAK fade parameters
+static constexpr uint8_t BREAK_FADE_BEATS = 2;      // Crossfade duration in beats
+
+// DROP overlap for smooth half-beat transitions
 static constexpr float DROP_OVERLAP_FRAC = 0.10f;
-
-// BREAK crossfade length: 2 beats
-static constexpr uint8_t BREAK_FADE_BEATS = 2;
-
-// STANDARD direction flip every 8 bars
-static constexpr uint8_t STD_DIR_FLIP_BARS = 8;
 
 // ---------------- I2S ----------------
 static constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
@@ -152,7 +165,16 @@ static constexpr uint16_t BASELINE_MIN_QUALIFIED_BARS = 16;
 
 static constexpr float BASELINE_MIN_RMS = 0.020f;            // blocks near-silence baseline learning
 static constexpr float KICK_PRESENT_KVAR_ABS_MIN = 0.0010f;  // pre-baseInited kick proxy
-static constexpr float KICK_PRESENT_KR_MIN = 0.90f;          // after baseInited (ratio)
+static constexpr float KICK_PRESENT_KR_MIN = 0.90f;          // for CAND detection (kick gone check)
+
+// Representative bands for baseline updates - prevents drift from outliers
+// Bar qualifies for update if: kR in band (mandatory) AND (rR in band OR tR in band)
+static constexpr float BASELINE_UPDATE_KR_MIN = 0.90f;
+static constexpr float BASELINE_UPDATE_KR_MAX = 1.10f;
+static constexpr float BASELINE_UPDATE_RR_MIN = 0.90f;
+static constexpr float BASELINE_UPDATE_RR_MAX = 1.10f;
+static constexpr float BASELINE_UPDATE_TR_MIN = 0.90f;
+static constexpr float BASELINE_UPDATE_TR_MAX = 1.10f;
 
 // -------------- CAND / BREAK / RECOVERY (policy) --------------
 static constexpr float KICK_GONE_KR_MAX = 0.60f;    // kR < 0.60 triggers CAND
@@ -326,38 +348,93 @@ static void logEvent(const char* e) {
 static const int WING_PINS[4] = { PIN_LED_BLUE, PIN_LED_RED, PIN_LED_GREEN, PIN_LED_YELLOW };
 static const uint8_t WING_CHANNELS[4] = { LEDC_CH_BLUE, LEDC_CH_RED, LEDC_CH_GREEN, LEDC_CH_YELLOW };
 
-// Physical rotation orders
-static const Wing STD_ORDER[4]  = { W_BLUE, W_RED, W_GREEN, W_YELLOW };      // CCW
+// Physical rotation order (clockwise from top-left): W1=BLUE, W2=RED, W3=GREEN, W4=YELLOW
+static const Wing CW_ORDER[4]  = { W_BLUE, W_RED, W_GREEN, W_YELLOW };
+static const Wing CCW_ORDER[4] = { W_BLUE, W_YELLOW, W_GREEN, W_RED };
 
 static VisualMode visMode = VIS_STD;
 
 // Per-wing current output duty
 static uint8_t outDuty[4] = {0,0,0,0};
 
-// --- STANDARD state ---
-static int8_t stdDir = +1;
-static uint8_t stdPos = 0;
-static uint8_t stdBarsSinceFlip = 0;
+// Per-wing brightness request (0.0-1.0, before caps)
+static float wingRequest[4] = {0,0,0,0};
 
-// --- BREAK crossfade state ---
+// Optional debug trigger
+static bool debugForced = false;
+
+// ---------------- PATTERN FRAMEWORK ----------------
+
+// Pattern IDs
+enum PatternID : uint8_t {
+  PAT_STD_01 = 0,   // Groove Rotation
+  PAT_STD_02 = 1,   // Edge Oscillation Walk
+  PAT_STD_03 = 2,   // Diagonal Pairs
+  PAT_BRK_01 = 3,   // Slow Drift Relay
+  PAT_BRK_02 = 4,   // Breathing Anchor
+  PAT_BRK_03 = 5,   // Dual Flow Weave
+  PAT_DRP_01 = 6,   // Impact Chase
+  PAT_DRP_02 = 7,   // Alternating Burst Drive
+  PAT_DRP_03 = 8,   // Expanding Impact Wave
+  PAT_COUNT  = 9
+};
+
+// Pattern catalogs per state
+static const PatternID STD_PATTERNS[3] = { PAT_STD_01, PAT_STD_02, PAT_STD_03 };
+static const PatternID BRK_PATTERNS[3] = { PAT_BRK_01, PAT_BRK_02, PAT_BRK_03 };
+static const PatternID DRP_PATTERNS[3] = { PAT_DRP_01, PAT_DRP_02, PAT_DRP_03 };
+
+// Short pattern names for logging
+static const char* patternName(PatternID p) {
+  switch (p) {
+    case PAT_STD_01: return "S-1";
+    case PAT_STD_02: return "S-2";
+    case PAT_STD_03: return "S-3";
+    case PAT_BRK_01: return "B-1";
+    case PAT_BRK_02: return "B-2";
+    case PAT_BRK_03: return "B-3";
+    case PAT_DRP_01: return "D-1";
+    case PAT_DRP_02: return "D-2";
+    case PAT_DRP_03: return "D-3";
+    default: return "?";
+  }
+}
+
+// Calculate current BPM from beat interval
+static float currentBPM() {
+  if (lastBeatIntervalUs == 0) return 0.0f;
+  return 60000000.0f / (float)lastBeatIntervalUs;
+}
+
+// Round-robin indices (persist while powered)
+static uint8_t stdPatternIdx = 0;
+static uint8_t brkPatternIdx = 0;
+static uint8_t drpPatternIdx = 0;
+
+// Current active pattern
+static PatternID activePattern = PAT_STD_01;
+
+// Pattern execution context
+static uint8_t patWindowBar = 0;      // 1-8 within 8-bar window
+static uint8_t patWindowBeat = 1;     // 1-4 within bar
+static uint32_t patWindowStartBeat = 0;  // Global beat at window start
+
+// BREAK crossfade state
 static bool breakFading = false;
 static Wing breakFrom = W_BLUE;
 static Wing breakTo = W_GREEN;
 static uint32_t breakFadeStartUs = 0;
 static uint32_t breakFadeDurUs = 1000000;
+static Wing brkLastWing = W_BLUE;     // For no-repeat rule
 
-// --- DROP sequencing ---
+// DROP timing state
 static uint8_t dropStep = 0;
-static const Wing DROP_STEPS[8] = {
-  W_BLUE, W_GREEN, W_RED, W_YELLOW,
-  W_BLUE, W_GREEN, W_RED, W_YELLOW
-};
-
 static uint32_t lastHalfBeatUs = 0;
 static uint32_t halfBeatUs = 250000;
 
-// Optional debug trigger
-static bool debugForced = false;
+// STD-02 retrigger state
+static bool std02IsAccent = false;
+static uint32_t std02RetriggerUs = 0;
 
 static inline void writeWingDuty(Wing w, uint8_t duty) {
   ledcWrite(WING_CHANNELS[w], duty);
@@ -391,9 +468,358 @@ static void allOff() {
   for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, 0);
 }
 
+// Clear all wing requests
+static void clearRequests() {
+  for (int i = 0; i < 4; i++) wingRequest[i] = 0.0f;
+}
+
+// Set a wing's brightness request (0.0-1.0)
+static void setWing(Wing w, float brightness) {
+  wingRequest[w] = clamp01(brightness);
+}
+
+// Add to a wing's brightness (for overlaps)
+static void addWing(Wing w, float brightness) {
+  wingRequest[w] = clamp01(wingRequest[w] + brightness);
+}
+
+// Get state brightness cap
+static float getStateCap() {
+  switch (state) {
+    case STANDARD: return CAP_STANDARD;
+    case BREAK_CANDIDATE: return CAP_STANDARD * CAND_DIM;
+    case BREAK_CONFIRMED: return CAP_BREAK;
+    case DROP: return CAP_DROP;
+    default: return CAP_STANDARD;
+  }
+}
+
+// Apply state cap and write to LEDs
+static void commitRequests() {
+  float cap = getStateCap();
+  uint8_t duties[4];
+
+  for (int i = 0; i < 4; i++) {
+    float level = wingRequest[i] * cap;
+    duties[i] = dutyFromLevel(level, BASE_BRIGHT);
+  }
+
+  applyGlobalCap(duties);
+
+  for (int i = 0; i < 4; i++) {
+    writeWingDuty((Wing)i, duties[i]);
+  }
+}
+
+// Cosine ease for smooth fades (0.0-1.0 input, 0.0-1.0 output)
+static float easeInOut(float t) {
+  t = clamp01(t);
+  return 0.5f * (1.0f - cosf(t * 3.14159265f));
+}
+
+// ---------------- PATTERN IMPLEMENTATIONS ----------------
+
+// --- STD-01: Groove Rotation ---
+// CCW bars 1-4, CW bars 5-8, one wing per beat
+static void patStd01OnBeat(uint8_t bar, uint8_t beat) {
+  clearRequests();
+
+  // Determine direction based on phase
+  bool forward = (bar <= 4);
+
+  // Calculate position in rotation (0-3)
+  // Total beats from window start
+  uint8_t totalBeats = ((bar - 1) * 4) + (beat - 1);
+  uint8_t pos;
+
+  if (forward) {
+    pos = totalBeats % 4;  // CCW: 0,1,2,3
+  } else {
+    pos = (4 - (totalBeats % 4)) % 4;  // CW: 0,3,2,1
+  }
+
+  setWing(CW_ORDER[pos], 1.0f);
+  commitRequests();
+}
+
+// --- STD-02: Edge Oscillation Walk ---
+// Adjacent-wing oscillation that walks clockwise around the frame.
+// Bar 1 (Top Edge):    W2 → W1 → W2 → W1
+// Bar 2 (Right Edge):  W3 → W2 → W3 → W2
+// Bar 3 (Bottom Edge): W4 → W3 → W4 → W3
+// Bar 4 (Left Edge):   W1 → W4 → W1 → W4
+// Bars 5-8: repeat Bars 1-4
+static void patStd02OnBeat(uint8_t bar, uint8_t beat) {
+  clearRequests();
+
+  // Edge patterns: [beat1, beat2, beat3, beat4] for each bar
+  // Oscillates between two adjacent wings per bar
+  static const Wing EDGE_PATTERN[4][4] = {
+    { W_RED, W_BLUE, W_RED, W_BLUE },       // Bar 1: Top edge (W2↔W1)
+    { W_GREEN, W_RED, W_GREEN, W_RED },     // Bar 2: Right edge (W3↔W2)
+    { W_YELLOW, W_GREEN, W_YELLOW, W_GREEN }, // Bar 3: Bottom edge (W4↔W3)
+    { W_BLUE, W_YELLOW, W_BLUE, W_YELLOW }  // Bar 4: Left edge (W1↔W4)
+  };
+
+  // Bars 5-8 repeat bars 1-4
+  uint8_t barIdx = ((bar - 1) % 4);
+  uint8_t beatIdx = beat - 1;  // 0-3
+
+  Wing w = EDGE_PATTERN[barIdx][beatIdx];
+  setWing(w, 1.0f);
+
+  commitRequests();
+}
+
+// --- STD-03: Diagonal Pairs ---
+// Odd bars: W1↔W3, Even bars: W2↔W4, one wing per beat
+static void patStd03OnBeat(uint8_t bar, uint8_t beat) {
+  clearRequests();
+
+  bool oddBar = (bar % 2) == 1;
+  Wing pair[2];
+
+  if (oddBar) {
+    pair[0] = W_BLUE;   // W1
+    pair[1] = W_GREEN;  // W3
+  } else {
+    pair[0] = W_RED;    // W2
+    pair[1] = W_YELLOW; // W4
+  }
+
+  // Alternate within pair: beat 1,3 = pair[0]; beat 2,4 = pair[1]
+  Wing w = ((beat % 2) == 1) ? pair[0] : pair[1];
+
+  setWing(w, 1.0f);
+  commitRequests();
+}
+
+// --- BRK-01: Slow Drift Relay ---
+// 2-beat crossfades, pseudo-random sequence (no immediate repeat)
+static void patBrk01OnBeat(uint8_t bar, uint8_t beat) {
+  // Trigger new crossfade every 2 beats
+  if ((beat == 1) || (beat == 3)) {
+    Wing next = brkLastWing;
+    // Pick random different wing
+    while (next == brkLastWing) {
+      next = (Wing)(esp_random() % 4);
+    }
+
+    breakFrom = brkLastWing;
+    breakTo = next;
+    brkLastWing = next;
+    breakFading = true;
+    breakFadeStartUs = micros();
+    breakFadeDurUs = (uint32_t)BREAK_FADE_BEATS * lastBeatIntervalUs;
+  }
+  // Actual rendering happens in visualsRender() for smooth fades
+}
+
+// --- BRK-02: Breathing Anchor ---
+// Single wing holds 1 bar, fade in first 2 beats, fade out last 2 beats
+static void patBrk02OnBeat(uint8_t bar, uint8_t beat) {
+  // Select wing for this bar (cycle through)
+  Wing w = CW_ORDER[(bar - 1) % 4];
+
+  // Store for render
+  breakFrom = w;
+  breakTo = w;  // Same wing, we'll handle fade in render
+
+  if (beat == 1) {
+    breakFading = true;
+    breakFadeStartUs = micros();
+    // Full bar duration
+    breakFadeDurUs = 4 * lastBeatIntervalUs;
+  }
+}
+
+// --- BRK-03: Dual Flow Weave ---
+// Two wings active, one fading out, one fading in, transition every 2 beats
+static void patBrk03OnBeat(uint8_t bar, uint8_t beat) {
+  if ((beat == 1) || (beat == 3)) {
+    // Advance to next wing
+    Wing next = brkLastWing;
+    next = CW_ORDER[((uint8_t)next + 1) % 4];  // Sequential, not random
+
+    breakFrom = brkLastWing;
+    breakTo = next;
+    brkLastWing = next;
+    breakFading = true;
+    breakFadeStartUs = micros();
+    breakFadeDurUs = (uint32_t)BREAK_FADE_BEATS * lastBeatIntervalUs;
+  }
+}
+
+// --- DRP-01: Impact Chase ---
+// Half-beat rotation, reverse at bar 5
+static void patDrp01OnBeat(uint8_t bar, uint8_t beat) {
+  // Reset step on beat for alignment
+  bool forward = (bar <= 4);
+  uint8_t totalHalfBeats = ((bar - 1) * 8) + ((beat - 1) * 2);
+
+  if (forward) {
+    dropStep = totalHalfBeats % 8;
+  } else {
+    dropStep = (8 - (totalHalfBeats % 8)) % 8;
+  }
+
+  lastHalfBeatUs = micros();
+}
+
+static void patDrp01OnHalfBeat() {
+  dropStep = (dropStep + 1) % 8;
+  lastHalfBeatUs = micros();
+}
+
+// --- DRP-02: Alternating Burst Drive ---
+// Dual-axis 2-bar switching: W1+W3 bars 1-2,5-6; W2+W4 bars 3-4,7-8
+// Half-beat pulses alternate between axes for energy
+static bool drp02Axis13 = true;  // Track current axis for half-beat render
+
+static void patDrp02OnBeat(uint8_t bar, uint8_t beat) {
+  clearRequests();
+
+  // Determine which axis based on bar
+  drp02Axis13 = (bar == 1 || bar == 2 || bar == 5 || bar == 6);
+
+  // Strong hit on beat
+  if (drp02Axis13) {
+    setWing(W_BLUE, 1.0f);
+    setWing(W_GREEN, 1.0f);
+  } else {
+    setWing(W_RED, 1.0f);
+    setWing(W_YELLOW, 1.0f);
+  }
+
+  dropStep = 0;  // Reset for half-beat tracking
+  lastHalfBeatUs = micros();
+  commitRequests();
+}
+
+static void patDrp02OnHalfBeat() {
+  clearRequests();
+
+  // Alternate: half-beat shows opposite axis briefly
+  dropStep = (dropStep + 1) % 2;
+
+  if (dropStep == 1) {
+    // Off-beat: flash opposite axis
+    if (!drp02Axis13) {
+      setWing(W_BLUE, 0.6f);
+      setWing(W_GREEN, 0.6f);
+    } else {
+      setWing(W_RED, 0.6f);
+      setWing(W_YELLOW, 0.6f);
+    }
+  } else {
+    // Main beat: primary axis
+    if (drp02Axis13) {
+      setWing(W_BLUE, 1.0f);
+      setWing(W_GREEN, 1.0f);
+    } else {
+      setWing(W_RED, 1.0f);
+      setWing(W_YELLOW, 1.0f);
+    }
+  }
+
+  lastHalfBeatUs = micros();
+  commitRequests();
+}
+
+// --- DRP-03: Expanding Impact Wave ---
+// Bars 1-4: 1→2→3→4 wings; Bars 5-8: 4→3→2→1 wings
+static void patDrp03OnBeat(uint8_t bar, uint8_t beat) {
+  clearRequests();
+
+  uint8_t numWings;
+  if (bar <= 4) {
+    numWings = bar;  // 1,2,3,4 wings
+  } else {
+    numWings = 9 - bar;  // 4,3,2,1 wings
+  }
+
+  // Light the first N wings in CW order, with beat-based emphasis
+  for (uint8_t i = 0; i < numWings; i++) {
+    float brightness = 1.0f;
+    // Emphasize beat 1
+    if (beat == 1) brightness = 1.0f;
+    else brightness = 0.85f;
+
+    setWing(CW_ORDER[i], brightness);
+  }
+
+  lastHalfBeatUs = micros();
+  commitRequests();
+}
+
+static void patDrp03OnHalfBeat() {
+  // Half-beat shimmer during multi-wing phases
+  lastHalfBeatUs = micros();
+}
+
+// ---------------- PATTERN DISPATCH ----------------
+
+static void patternOnBeat(uint8_t bar, uint8_t beat) {
+  switch (activePattern) {
+    case PAT_STD_01: patStd01OnBeat(bar, beat); break;
+    case PAT_STD_02: patStd02OnBeat(bar, beat); break;
+    case PAT_STD_03: patStd03OnBeat(bar, beat); break;
+    case PAT_BRK_01: patBrk01OnBeat(bar, beat); break;
+    case PAT_BRK_02: patBrk02OnBeat(bar, beat); break;
+    case PAT_BRK_03: patBrk03OnBeat(bar, beat); break;
+    case PAT_DRP_01: patDrp01OnBeat(bar, beat); break;
+    case PAT_DRP_02: patDrp02OnBeat(bar, beat); break;
+    case PAT_DRP_03: patDrp03OnBeat(bar, beat); break;
+    default: break;
+  }
+}
+
+static void patternOnHalfBeat() {
+  switch (activePattern) {
+    case PAT_DRP_01: patDrp01OnHalfBeat(); break;
+    case PAT_DRP_02: patDrp02OnHalfBeat(); break;
+    case PAT_DRP_03: patDrp03OnHalfBeat(); break;
+    default: break;
+  }
+}
+
+// Select next pattern for state (round-robin)
+static void selectPatternForState(ContextState s) {
+  switch (s) {
+    case STANDARD:
+    case BREAK_CANDIDATE:
+      activePattern = STD_PATTERNS[stdPatternIdx];
+      stdPatternIdx = (stdPatternIdx + 1) % 3;
+      break;
+    case BREAK_CONFIRMED:
+      activePattern = BRK_PATTERNS[brkPatternIdx];
+      brkPatternIdx = (brkPatternIdx + 1) % 3;
+      break;
+    case DROP:
+      activePattern = DRP_PATTERNS[drpPatternIdx];
+      drpPatternIdx = (drpPatternIdx + 1) % 3;
+      break;
+    default:
+      activePattern = PAT_STD_01;
+      break;
+  }
+
+  // Reset pattern window
+  patWindowBar = 0;
+  patWindowBeat = 1;
+  patWindowStartBeat = gBeatIndex;
+
+  // Reset pattern-specific state
+  breakFading = false;
+  dropStep = 0;
+  lastHalfBeatUs = micros();
+}
+
+// ---------------- VISUAL MODE MANAGEMENT ----------------
+
 static void onVisualModeEnter(VisualMode m) {
   if (m == VIS_STD) {
-    stdBarsSinceFlip = 0;
+    // Select STANDARD pattern
   } else if (m == VIS_BREAK) {
     breakFading = false;
   } else if (m == VIS_DROP) {
@@ -421,62 +847,70 @@ static void refreshVisualMode() {
   }
 }
 
+// Track previous state for pattern switching
+static ContextState prevStateForPattern = STANDARD;
+
 static void visualsOnBeat(bool isBarStart) {
+  VisualMode prevMode = visMode;
   refreshVisualMode();
 
-  if (visMode == VIS_STD) {
-    stdPos = (uint8_t)((stdPos + (stdDir > 0 ? 1 : 3)) % 4);
-    Wing onWing = STD_ORDER[stdPos];
-
-    uint8_t req[4] = {0,0,0,0};
-
-    uint8_t bright = STD_BRIGHT;
-    if (state == BREAK_CANDIDATE) {
-      bright = (uint8_t)(STD_BRIGHT * CAND_STD_DIM + 0.5f);
+  // Check for state change -> select new pattern
+  // CAND continues current STD pattern (just dimmed), no pattern change
+  bool shouldSelectNewPattern = false;
+  if (state != prevStateForPattern) {
+    if (state == BREAK_CONFIRMED || state == DROP) {
+      // Entering BREAK or DROP: select new pattern for that state
+      shouldSelectNewPattern = true;
+    } else if (state == STANDARD && (prevStateForPattern == BREAK_CONFIRMED || prevStateForPattern == DROP)) {
+      // Returning to STD from BREAK or DROP: select new STD pattern
+      shouldSelectNewPattern = true;
     }
-    req[onWing] = bright;
-
-    applyGlobalCap(req);
-    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
-
-    if (isBarStart) {
-      stdBarsSinceFlip++;
-      if (stdBarsSinceFlip >= STD_DIR_FLIP_BARS) {
-        stdBarsSinceFlip = 0;
-        stdDir = (int8_t)-stdDir;
-        stdPos = (uint8_t)((stdPos + (stdDir > 0 ? 1 : 3)) % 4);
-      }
-    }
+    // STD->CAND or CAND->STD: no pattern change, continue current pattern
+    prevStateForPattern = state;
   }
-  else if (visMode == VIS_BREAK) {
-    if ((barCount == 0) || ((uint32_t)(millis()) == 0)) return; // harmless guard
-    if ((globalBeatIndex() % 2) == 0) {
-      Wing current = breakFading ? breakTo : breakFrom;
-      Wing next = current;
-      while (next == current) next = (Wing)(esp_random() % 4);
-
-      breakFrom = current;
-      breakTo = next;
-      breakFading = true;
-      breakFadeStartUs = micros();
-      breakFadeDurUs = (uint32_t)BREAK_FADE_BEATS * lastBeatIntervalUs;
-    }
+  if (shouldSelectNewPattern) {
+    selectPatternForState(state);
+    patWindowBar = 0;  // Reset window for new pattern
+    Serial.printf("PATTERN_SELECT pat=%s state=%s bpm=%.1f\n",
+                  patternName(activePattern), ctxName(state), currentBPM());
   }
-  else if (visMode == VIS_DEBUG) {
-    uint8_t req[4] = {0,0,0,0};
+
+  // Update pattern window position
+  // patWindowBar starts at 0, increments at bar start BEFORE use
+  if (isBarStart) {
+    patWindowBar++;
+    // Check if 8-bar window completed
+    if (patWindowBar > PATTERN_LEN_BARS) {
+      patWindowBar = 1;  // Reset to bar 1 of new pattern (not 0, we already incremented)
+      selectPatternForState(state);
+      Serial.printf("PATTERN_SWITCH pat=%s bpm=%.1f\n", patternName(activePattern), currentBPM());
+    }
+    patWindowBeat = 1;
+  } else {
+    patWindowBeat++;
+    if (patWindowBeat > 4) patWindowBeat = 1;  // Safety
+  }
+
+  // Debug mode override
+  if (visMode == VIS_DEBUG) {
+    clearRequests();
     bool on = ((globalBeatIndex() % 2) == 0);
-    req[W_RED] = on ? DEBUG_BRIGHT : 0;
-    applyGlobalCap(req);
-    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
+    setWing(W_RED, on ? 1.0f : 0.0f);
+    commitRequests();
+    return;
   }
+
+  // Dispatch to active pattern
+  patternOnBeat(patWindowBar, patWindowBeat);
 }
 
 static void visualsOnHalfBeat() {
   refreshVisualMode();
-  if (visMode != VIS_DROP) return;
 
-  dropStep = (uint8_t)((dropStep + 1) % 8);
-  lastHalfBeatUs = micros();
+  // Only DROP patterns use half-beats
+  if (visMode == VIS_DROP) {
+    patternOnHalfBeat();
+  }
 }
 
 static void visualsRender() {
@@ -509,6 +943,7 @@ static void visualsRender() {
 
   const uint32_t nowUs = micros();
 
+  // BREAK patterns: smooth crossfade rendering
   if (visMode == VIS_BREAK) {
     if (!breakFading) return;
 
@@ -516,25 +951,34 @@ static void visualsRender() {
     float t = (breakFadeDurUs == 0) ? 1.0f : (float)dt / (float)breakFadeDurUs;
     t = clamp01(t);
 
-    uint8_t req[4] = {0,0,0,0};
+    // Apply easing for smooth transitions
+    float eased = easeInOut(t);
 
-    uint8_t fromDuty = dutyFromLevel(1.0f - t, BREAK_BRIGHT);
-    uint8_t toDuty   = dutyFromLevel(t, BREAK_BRIGHT);
-    if (t >= 1.0f) fromDuty = 0;
+    clearRequests();
 
-    req[breakFrom] = fromDuty;
-    req[breakTo]   = toDuty;
+    // BRK-02 (Breathing Anchor) uses single wing with breath envelope
+    if (activePattern == PAT_BRK_02) {
+      // Fade in for first half, fade out for second half
+      float breath;
+      if (t < 0.5f) {
+        breath = easeInOut(t * 2.0f);  // 0→1 over first half
+      } else {
+        breath = easeInOut((1.0f - t) * 2.0f);  // 1→0 over second half
+      }
+      setWing(breakFrom, breath);
+    } else {
+      // BRK-01 and BRK-03: crossfade between two wings
+      setWing(breakFrom, 1.0f - eased);
+      setWing(breakTo, eased);
+    }
 
-    applyGlobalCap(req);
-    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
+    commitRequests();
 
     if (t >= 1.0f) {
       breakFading = false;
-      for (uint8_t i = 0; i < 4; i++) {
-        if (STD_ORDER[i] == breakTo) { stdPos = i; break; }
-      }
     }
   }
+  // DROP patterns: half-beat rotation with overlapping transitions
   else if (visMode == VIS_DROP) {
     halfBeatUs = lastBeatIntervalUs / 2;
     if (halfBeatUs < 20000) halfBeatUs = 20000;
@@ -545,29 +989,67 @@ static void visualsRender() {
     float phase = (float)dt / (float)halfBeatUs;
     phase = clamp01(phase);
 
-    Wing cur = DROP_STEPS[dropStep];
-    Wing nxt = DROP_STEPS[(dropStep + 1) % 8];
+    clearRequests();
 
-    uint8_t req[4] = {0,0,0,0};
+    // Pattern-specific DROP rendering
+    if (activePattern == PAT_DRP_01) {
+      // Impact Chase: half-beat rotation through all wings
+      Wing cur = CW_ORDER[dropStep % 4];
+      Wing nxt = CW_ORDER[(dropStep + 1) % 4];
 
-    float holdEnd = 1.0f - DROP_OVERLAP_FRAC;
+      float holdEnd = 1.0f - DROP_OVERLAP_FRAC;
 
-    if (phase <= holdEnd) {
-      req[cur] = DROP_BRIGHT;
-    } else {
-      float u = (phase - holdEnd) / DROP_OVERLAP_FRAC;
-      u = clamp01(u);
+      if (phase <= holdEnd) {
+        setWing(cur, 1.0f);
+      } else {
+        float u = (phase - holdEnd) / DROP_OVERLAP_FRAC;
+        u = clamp01(u);
+        setWing(cur, 1.0f - u);
+        setWing(nxt, u);
+      }
+    }
+    else if (activePattern == PAT_DRP_02) {
+      // Alternating Burst Drive: smooth pulse decay between half-beats
+      float pulse = 0.7f + 0.3f * (1.0f - phase);  // Decay from 1.0 to 0.7
 
-      uint8_t curDuty = dutyFromLevel(1.0f - u, DROP_BRIGHT);
-      uint8_t nxtDuty = dutyFromLevel(u, DROP_BRIGHT);
-      if (u >= 1.0f) curDuty = 0;
+      // Apply decay to current state (onBeat/onHalfBeat sets base)
+      if (dropStep == 0) {
+        // Primary axis
+        if (drp02Axis13) {
+          setWing(W_BLUE, pulse);
+          setWing(W_GREEN, pulse);
+        } else {
+          setWing(W_RED, pulse);
+          setWing(W_YELLOW, pulse);
+        }
+      } else {
+        // Alternate axis (lower intensity)
+        float altPulse = 0.4f + 0.2f * (1.0f - phase);
+        if (!drp02Axis13) {
+          setWing(W_BLUE, altPulse);
+          setWing(W_GREEN, altPulse);
+        } else {
+          setWing(W_RED, altPulse);
+          setWing(W_YELLOW, altPulse);
+        }
+      }
+    }
+    else if (activePattern == PAT_DRP_03) {
+      // Expanding Impact Wave: shimmer on multi-wing lighting
+      uint8_t numWings;
+      if (patWindowBar <= 4) {
+        numWings = patWindowBar;
+      } else {
+        numWings = 9 - patWindowBar;
+      }
 
-      req[cur] = curDuty;
-      req[nxt] = nxtDuty;
+      float pulse = 0.85f + 0.15f * (1.0f - phase);  // Subtle shimmer
+      for (uint8_t i = 0; i < numWings; i++) {
+        setWing(CW_ORDER[i], pulse);
+      }
     }
 
-    applyGlobalCap(req);
-    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
+    commitRequests();
   }
 }
 
@@ -628,15 +1110,26 @@ static void breakUpdate(float rms, float tr, float kVar) {
   breakKVar = (1.0f - BREAK_ALPHA) * breakKVar + BREAK_ALPHA * kVar;
 }
 
-static bool baselineEligibleBar(float rms, float kVar, float kR) {
+static bool baselineEligibleBar(float rms, float kVar, float rR, float tR, float kR) {
   if (rms < BASELINE_MIN_RMS) return false;
+
+  // Before baseline initialized: just check kick presence
   if (!baseInited) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN);
-  return (kR >= KICK_PRESENT_KR_MIN);
+
+  // After initialized: use representative bands to prevent drift
+  // kR must be in band (mandatory)
+  if (kR < BASELINE_UPDATE_KR_MIN || kR > BASELINE_UPDATE_KR_MAX) return false;
+
+  // At least one of rR or tR must also be in band
+  bool rRinBand = (rR >= BASELINE_UPDATE_RR_MIN && rR <= BASELINE_UPDATE_RR_MAX);
+  bool tRinBand = (tR >= BASELINE_UPDATE_TR_MIN && tR <= BASELINE_UPDATE_TR_MAX);
+
+  return (rRinBand || tRinBand);
 }
 
-static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float kR) {
+static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR, float tR, float kR) {
   if (state != STANDARD) return; // freeze outside STD
-  if (!baselineEligibleBar(rms, kVar, kR)) return;
+  if (!baselineEligibleBar(rms, kVar, rR, tR, kR)) return;
 
   if (!baseInited) {
     baselineInit(rms, tr, kVar);
@@ -831,7 +1324,7 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
   const float tR = baseInited ? safeDiv(tr,   baseTr)   : 0.0f;
   const float kR = baseInited ? safeDiv(kVar, baseKVar) : 0.0f;
 
-  baselineMaybeInitAndUpdate(rms, tr, kVar, kR);
+  baselineMaybeInitAndUpdate(rms, tr, kVar, rR, tR, kR);
 
   if (!baselineReady) {
     state = STANDARD;
@@ -964,6 +1457,40 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
   }
   lastBeatUs = nowUs;
 
+  // Skip mid-bar beats (2,3,4) unless DEBUG_BEAT_LOG enabled
+  if (!isBarStart && !DEBUG_BEAT_LOG) {
+    ticksSinceBeat = 0;
+    return;
+  }
+
+  // Compact bar-level format (when DEBUG_BEAT_LOG is off)
+  if (isBarStart && !DEBUG_BEAT_LOG) {
+    Serial.printf("bar=%lu ctx=%s rR=%.2f tR=%.2f kR=%.2f",
+                  (unsigned long)barCount, ctxName(last_stateForBar),
+                  last_rR, last_tR, last_kR);
+
+    if (last_hasBF) {
+      Serial.printf(" bfK=%.2f", last_bfK);
+    }
+
+    if (!baselineReady) {
+      Serial.printf(" base=%u/%u", (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
+    }
+
+    if (state == BREAK_CONFIRMED && returnActive) {
+      Serial.printf(" RET(pkK=%.2f)", peak_bfK);
+    }
+
+    if (state == DROP && dropVerifyActive) {
+      Serial.printf(" VFY(%u/%u)", (unsigned)dropVerifyGood, (unsigned)DROP_VERIFY_MIN_GOOD);
+    }
+
+    Serial.print("\n");
+    ticksSinceBeat = 0;
+    return;
+  }
+
+  // Verbose format (DEBUG_BEAT_LOG enabled)
   const uint32_t wAgeMs = (lastWinUs == 0) ? 999999 : (uint32_t)((nowUs - lastWinUs) / 1000);
   const uint32_t bAgeMs = (lastBarUs == 0) ? 999999 : (uint32_t)((nowUs - lastBarUs) / 1000);
 
@@ -990,10 +1517,12 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
       Serial.printf(" bfR=%.2f bfT=%.2f bfK=%.2f", last_bfR, last_bfT, last_bfK);
     }
 
-    Serial.printf(" base=%s(%u/%u)",
-                  (baselineReady ? "READY" : (baseInited ? "LEARN" : "OFF")),
-                  (unsigned)baselineQualifiedBars,
-                  (unsigned)BASELINE_MIN_QUALIFIED_BARS);
+    if (!baselineReady) {
+      Serial.printf(" base=%s(%u/%u)",
+                    (baseInited ? "LEARN" : "OFF"),
+                    (unsigned)baselineQualifiedBars,
+                    (unsigned)BASELINE_MIN_QUALIFIED_BARS);
+    }
 
     if (state == BREAK_CONFIRMED && returnActive) {
       Serial.printf(" ret=ON(budg=%u pkK=%.2f pkR=%.2f pkT=%.2f)",
@@ -1057,12 +1586,20 @@ static void resetForHardReset() {
 
   debugForced = false;
   visMode = VIS_STD;
-  stdDir = +1;
-  stdPos = 0;
-  stdBarsSinceFlip = 0;
+  activePattern = PAT_STD_01;
+  stdPatternIdx = 1;  // Next switch will get S-2
+  brkPatternIdx = 0;
+  drpPatternIdx = 0;
+  patWindowBar = 0;
+  patWindowBeat = 1;
+  patWindowStartBeat = 0;
+  prevStateForPattern = STANDARD;
   breakFading = false;
+  brkLastWing = W_BLUE;
   dropStep = 0;
   lastHalfBeatUs = micros();
+  std02IsAccent = false;
+  std02RetriggerUs = 0;
   allOff();
 
   gBeatIndex = 0;
@@ -1109,12 +1646,20 @@ static void resetForResumeLike() {
 
   debugForced = false;
   visMode = VIS_STD;
-  stdDir = +1;
-  stdPos = 0;
-  stdBarsSinceFlip = 0;
+  activePattern = PAT_STD_01;
+  stdPatternIdx = 1;  // Next switch will get S-2
+  brkPatternIdx = 0;
+  drpPatternIdx = 0;
+  patWindowBar = 0;
+  patWindowBeat = 1;
+  patWindowStartBeat = 0;
+  prevStateForPattern = STANDARD;
   breakFading = false;
+  brkLastWing = W_BLUE;
   dropStep = 0;
   lastHalfBeatUs = micros();
+  std02IsAccent = false;
+  std02RetriggerUs = 0;
   allOff();
 
   gBeatIndex = 0;

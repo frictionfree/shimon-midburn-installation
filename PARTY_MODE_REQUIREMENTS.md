@@ -167,8 +167,14 @@ STANDARD → CAND (kick disappears)
 
 **Update Policy:**
 - Updates only on qualified STANDARD bars
-- Qualified = RMS above floor AND kick present
 - Frozen during CAND, BREAK, DROP
+- **Qualification criteria (after initialized):**
+  1. `barRms ≥ BASELINE_MIN_RMS` (absolute floor)
+  2. `BASELINE_UPDATE_KR_MIN ≤ kR ≤ BASELINE_UPDATE_KR_MAX` (mandatory)
+  3. AND at least one of:
+     - `BASELINE_UPDATE_RR_MIN ≤ rR ≤ BASELINE_UPDATE_RR_MAX`
+     - `BASELINE_UPDATE_TR_MIN ≤ tR ≤ BASELINE_UPDATE_TR_MAX`
+- **Representative bands (0.90 to 1.10):** Prevents baseline drift from outlier bars
 
 **Persistence:**
 - Persists across MIDI stop/start, automatic resync
@@ -260,6 +266,17 @@ STANDARD → CAND (kick disappears)
 | `BASELINE_MIN_RMS` | 0.020 |
 | `KICK_PRESENT_KVAR_ABS_MIN` | 0.0010 |
 | `KICK_PRESENT_KR_MIN` | 0.90 |
+
+### Baseline Update Bands (prevents drift)
+
+| Parameter | Value |
+|-----------|-------|
+| `BASELINE_UPDATE_KR_MIN` | 0.90 |
+| `BASELINE_UPDATE_KR_MAX` | 1.10 |
+| `BASELINE_UPDATE_RR_MIN` | 0.90 |
+| `BASELINE_UPDATE_RR_MAX` | 1.10 |
+| `BASELINE_UPDATE_TR_MIN` | 0.90 |
+| `BASELINE_UPDATE_TR_MAX` | 1.10 |
 
 ### CAND Entry
 

@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Workflow
+
+**IMPORTANT**: Before suggesting code changes:
+1. **Explain the plan** - Describe what you intend to change and why
+2. **Wait for approval** - User verifies the approach is correct
+3. **Implement changes** - Make the approved code modifications
+4. **Update documentation** - Update relevant requirement `.md` files to reflect changes
+
+This ensures alignment before coding and keeps documentation in sync with implementation.
+
 ## Project Overview
 
 This is a PlatformIO ESP32 project implementing a Simon Says memory game called "Shimon" for Midburn 2025. The game features 4 colored buttons (Red, Blue, Green, Yellow) and corresponding LEDs that play sequences for players to memorize and repeat.
