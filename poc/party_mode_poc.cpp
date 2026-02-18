@@ -285,6 +285,12 @@ static uint8_t breakRecoveryBars = 0;        // policy wants 1
 static uint8_t candDeepStreak = 0;           // consecutive deep bars while in CAND
 static uint8_t stdKickGoneWinStreak = 0;     // only used while in STD
 
+// Rolling kR / bKVar history for CAND entry context logging (last 4 bars)
+static constexpr uint8_t KR_HIST_LEN = 4;
+static float kRHist[KR_HIST_LEN]     = {};
+static float bKVHist[KR_HIST_LEN]    = {};
+static uint8_t kRHistIdx = 0;  // next write slot (wraps modulo KR_HIST_LEN)
+
 // -------------- v8 Return-Impact tracking --------------
 static bool returnActive = false;
 static uint8_t returnWinStreak = 0;
@@ -1172,9 +1178,9 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
   }
 
   if (DEBUG_BASELINE_LOG) {
-    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f -> bRms=%.4f bTr=%.6f bKVar=%.8f qual=%u/%u\n",
+    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f barKVar=%.8f -> bRms=%.4f bTr=%.6f bKVar=%.8f qual=%u/%u\n",
                   (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-                  kR, rR, tR, baseRms, baseTr, baseKVar,
+                  kR, rR, tR, kVar, baseRms, baseTr, baseKVar,
                   (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
   }
 }
@@ -1352,6 +1358,13 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
 
   baselineMaybeInitAndUpdate(rms, tr, kVar, rR, tR, kR);
 
+  // Push bar kR and post-update bKVar into rolling history (used at CAND entry)
+  if (baseInited) {
+    kRHist[kRHistIdx % KR_HIST_LEN] = kR;
+    bKVHist[kRHistIdx % KR_HIST_LEN] = baseKVar;
+    kRHistIdx++;
+  }
+
   if (!baselineReady) {
     state = STANDARD;
     candEnterBar = 0;
@@ -1401,6 +1414,18 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
       clearReturnTracking();
       clearDropVerify();
       logTransition(prev, state, "CAND_ENTER_KICK_ABSENCE");
+      // Dump last 4 bars of kR and bKVar to show drift trajectory leading into CAND
+      Serial.printf("CAND_CONTEXT wStr=%u last%u_kR=", (unsigned)stdKickGoneWinStreak, (unsigned)KR_HIST_LEN);
+      for (uint8_t i = 0; i < KR_HIST_LEN; i++) {
+        uint8_t slot = (kRHistIdx - KR_HIST_LEN + i) % KR_HIST_LEN;
+        Serial.printf("%.2f%s", kRHist[slot], (i < KR_HIST_LEN - 1) ? "," : "");
+      }
+      Serial.printf(" last%u_bKV=", (unsigned)KR_HIST_LEN);
+      for (uint8_t i = 0; i < KR_HIST_LEN; i++) {
+        uint8_t slot = (kRHistIdx - KR_HIST_LEN + i) % KR_HIST_LEN;
+        Serial.printf("%.6f%s", bKVHist[slot], (i < KR_HIST_LEN - 1) ? "," : "");
+      }
+      Serial.printf("\n");
       prev = state;
     }
   }
@@ -1495,6 +1520,10 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
                   (unsigned long)barCount, ctxName(last_stateForBar),
                   last_rR, last_tR, last_kR);
 
+    if (baseInited) {
+      Serial.printf(" bKV=%.6f wStr=%u", baseKVar, (unsigned)stdKickGoneWinStreak);
+    }
+
     if (last_hasBF) {
       Serial.printf(" bfK=%.2f", last_bfK);
     }
@@ -1538,6 +1567,10 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
   if (isBarStart) {
     Serial.printf(" | ctx=%s rR=%.2f tR=%.2f kR=%.2f",
                   ctxName(last_stateForBar), last_rR, last_tR, last_kR);
+
+    if (baseInited) {
+      Serial.printf(" bKV=%.6f wStr=%u", baseKVar, (unsigned)stdKickGoneWinStreak);
+    }
 
     if (last_hasBF) {
       Serial.printf(" bfR=%.2f bfT=%.2f bfK=%.2f", last_bfR, last_bfT, last_bfK);
