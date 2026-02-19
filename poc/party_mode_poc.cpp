@@ -202,7 +202,7 @@ static constexpr float CAND_RECOVERY_KR_MIN = 0.82f;
 // -------------- kMean 2D DETECTION (v9) --------------
 // kMeanR = barKMean / baseKMean  (kick band energy presence, robust to character changes)
 static constexpr float CAND_KMEANR_MAX     = 1.05f; // CAND entry blocked if kick band at/above baseline
-static constexpr float RECOVERY_KMEANR_MIN = 0.90f; // CAND/BREAK recovery: OR with kR
+static constexpr float RECOVERY_KMEANR_MIN = 0.90f; // CAND recovery: AND with kR (both must agree)
 static constexpr float BREAK_KMEANR_MAX    = 0.75f; // deep break confirm requires real energy collapse
 
 // -------------- BREAK FLOOR --------------
@@ -1483,9 +1483,14 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
       logTransition(prev, state, "BREAK_CONFIRM_DEEP_2B");
       prev = state;
     } else {
-      // OR logic: either kick impulsiveness OR kick band energy returning suffices
-      const bool kickPresent = (kR >= CAND_RECOVERY_KR_MIN) || (kMeanR >= RECOVERY_KMEANR_MIN);
-      const bool okRecover = (rR >= RECOVERY_RR_MIN) && (tR >= RECOVERY_TR_MIN) && kickPresent;
+      // AND logic: both kick impulsiveness AND kick band energy must agree on recovery.
+      // Symmetric with entry (which requires both kR and kMeanR to signal absence).
+      // Prevents oscillation on sub-bass-heavy tracks where kMeanR stays near baseline
+      // while kR remains low — OR logic would falsely recover on kMeanR alone.
+      // Minimum 1 bar in CAND before recovery evaluated (prevents same-bar entry+recovery).
+      const bool canEvalRecover = (finalizedBarNumber > candEnterBar);
+      const bool kickPresent = (kR >= CAND_RECOVERY_KR_MIN) && (kMeanR >= RECOVERY_KMEANR_MIN);
+      const bool okRecover = canEvalRecover && (rR >= RECOVERY_RR_MIN) && (tR >= RECOVERY_TR_MIN) && kickPresent;
       if (okRecover) {
         state = STANDARD;
         candEnterBar = 0;

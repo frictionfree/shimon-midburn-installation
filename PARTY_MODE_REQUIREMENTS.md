@@ -221,12 +221,14 @@ Bass-heavy breaks still enter CAND since bass-only kMeanR (~0.65–0.75) is belo
   - AND (`rR < 0.80` OR `tR < 0.55`)
   - AND `kMeanR < 0.70` — kick band energy must genuinely collapse (not just character change)
 
-**CAND → STANDARD (Recovery — OR logic for kick presence):**
+**CAND → STANDARD (Recovery — AND logic for kick presence):**
 - 1 bar with:
-  - `(kR ≥ 0.82 OR kMeanR ≥ 0.90)` — either kick signal recovered
-  - AND `(rR ≥ 0.75 AND tR ≥ 0.75)`
+  - `kR ≥ 0.82 AND kMeanR ≥ 0.90` — both kick signals must confirm recovery
+  - AND `rR ≥ 0.75 AND tR ≥ 0.75`
+- Minimum 1 bar in CAND before recovery is evaluated (prevents same-bar entry+recovery)
 
-Asymmetry: AND for absence (harder to enter), OR for recovery (easier to exit).
+Symmetry: AND for both entry (absence) and recovery (presence). Prevents oscillation on
+sub-bass-heavy tracks where kMeanR stays near baseline while kR remains low.
 
 ---
 
@@ -308,7 +310,7 @@ Asymmetry: AND for absence (harder to enter), OR for recovery (easier to exit).
 | `DEEP_BREAK_KR_MAX` | 0.40 | Kick impulsiveness floor |
 | `DEEP_BREAK_RMS_MAX` | 0.80 | Energy floor |
 | `DEEP_BREAK_TR_MAX` | 0.55 | Transient floor |
-| `BREAK_KMEANR_MAX` | 0.70 | Kick band energy must genuinely collapse |
+| `BREAK_KMEANR_MAX` | 0.75 | Kick band energy must genuinely collapse |
 
 ### Recovery
 
@@ -317,8 +319,8 @@ Asymmetry: AND for absence (harder to enter), OR for recovery (easier to exit).
 | `RECOVERY_RR_MIN` | 0.75 | Energy recovery floor |
 | `RECOVERY_TR_MIN` | 0.75 | Transient recovery floor |
 | `RECOVERY_KR_MIN` | 0.80 | BREAK→STD kick impulsiveness recovery |
-| `CAND_RECOVERY_KR_MIN` | 0.82 | CAND→STD kick impulsiveness recovery (OR) |
-| `RECOVERY_KMEANR_MIN` | 0.90 | CAND→STD kick band energy recovery (OR) |
+| `CAND_RECOVERY_KR_MIN` | 0.82 | CAND→STD kick impulsiveness recovery (AND) |
+| `RECOVERY_KMEANR_MIN` | 0.90 | CAND→STD kick band energy recovery (AND) |
 
 ### Return-Impact DROP
 
