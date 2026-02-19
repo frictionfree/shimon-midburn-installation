@@ -165,7 +165,8 @@ struct Welford {
 };
 
 // -------------- BASELINE (policy) -------------
-static constexpr float BASE_ALPHA_STD  = 0.10f; // used only on qualified STD bars
+static constexpr float BASE_ALPHA_STD      = 0.10f; // post-ready: slow, stable updates
+static constexpr float BASE_ALPHA_LEARNING = 0.30f; // pre-ready: fast convergence from false init
 static constexpr uint16_t BASELINE_MIN_QUALIFIED_BARS = 16;
 
 static constexpr float BASELINE_MIN_RMS = 0.020f;            // blocks near-silence baseline learning
@@ -202,7 +203,7 @@ static constexpr float CAND_RECOVERY_KR_MIN = 0.82f;
 // kMeanR = barKMean / baseKMean  (kick band energy presence, robust to character changes)
 static constexpr float CAND_KMEANR_MAX     = 1.05f; // CAND entry blocked if kick band at/above baseline
 static constexpr float RECOVERY_KMEANR_MIN = 0.90f; // CAND/BREAK recovery: OR with kR
-static constexpr float BREAK_KMEANR_MAX    = 0.70f; // deep break confirm requires real energy collapse
+static constexpr float BREAK_KMEANR_MAX    = 0.75f; // deep break confirm requires real energy collapse
 
 // -------------- BREAK FLOOR --------------
 static constexpr float BREAK_ALPHA = 0.10f;
@@ -1143,8 +1144,9 @@ static bool baselineEligibleBar(float rms, float kVar, float rR, float tR, float
   // Before baseline initialized: just check kick presence
   if (!baseInited) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN);
 
-  // After initialized but before ready: upper cap only - reject upward outliers, allow downward correction
-  if (!baselineReady) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN && kR <= BASELINE_UPDATE_KR_MAX);
+  // After initialized but before ready: kick presence only - no band cap, allows convergence in any direction
+  // Upper cap removed: false-low inits (quiet intro bar) would otherwise deadlock, blocking all groove bars
+  if (!baselineReady) return (kVar >= KICK_PRESENT_KVAR_ABS_MIN);
 
   // After ready: use representative bands to protect stable baseline from drift
   // kR must be in band (mandatory)
@@ -1191,7 +1193,7 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float kM
                   prevBlKVar, (int)baseInited, (int)baselineReady,
                   (unsigned)baselineQualifiedBars);
   }
-  const float a = BASE_ALPHA_STD;
+  const float a = baselineReady ? BASE_ALPHA_STD : BASE_ALPHA_LEARNING;
   baseRms   = (1.0f - a) * baseRms   + a * rms;
   baseTr    = (1.0f - a) * baseTr    + a * tr;
   baseKVar  = (1.0f - a) * baseKVar  + a * kVar;
