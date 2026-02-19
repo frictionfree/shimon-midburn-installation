@@ -117,14 +117,19 @@ See `hardware-baseline.md` Section 9 for I2S configuration:
 |--------|-------------|
 | **RMS** | Average signal energy (overall loudness) |
 | **TR** | Transient Response - high-pass filtered magnitude (percussive sharpness) |
-| **kVar** | Kick Variance Proxy - variance of low-pass envelope (kick presence/stability) |
+| **kVar** | Kick Variance Proxy - variance of low-pass envelope (kick impulsiveness) |
+| **kMean** | Kick Mean Proxy - mean of low-pass envelope per bar (kick energy presence) |
 
 ### Signal Ratios
 
 **Baseline Ratios (vs STANDARD baseline):**
 - `rR = barRms / baseRms` → Energy level
 - `tR = barTr / baseTr` → Transient density
-- `kR = barKVar / baseKVar` → Kick presence
+- `kR = barKVar / baseKVar` → Kick impulsiveness (sensitive to character changes)
+- `kMeanR = barKMean / baseKMean` → Kick band energy presence (robust to character changes)
+
+**Diagnostic (log only, not used in decisions):**
+- `kCV = barKVar / barKMean` → Kick coefficient of variation (impulsiveness relative to energy)
 
 **Break-Floor Ratios (vs BREAK floor):**
 - `bfR = barRms / breakRms`
@@ -165,6 +170,8 @@ STANDARD → CAND (kick disappears)
 - Must accumulate `BASELINE_MIN_QUALIFIED_BARS` (16) qualified bars
 - Until ready: forced to STANDARD, all transitions suppressed
 
+**Tracked values:** `baseRms`, `baseTr`, `baseKVar`, `baseKMean` — all updated via EMA (α=0.10) on qualified STANDARD bars.
+
 **Update Policy:**
 - Updates only on qualified STANDARD bars
 - Frozen during CAND, BREAK, DROP
@@ -199,20 +206,27 @@ STANDARD → CAND (kick disappears)
 
 ### 5.2 BREAK_CANDIDATE (CAND)
 
-**Entry from STANDARD:**
-- `kR < KICK_GONE_KR_MAX` (0.60)
+**Entry from STANDARD (2D gate):**
+- `kR < KICK_GONE_KR_MAX` (0.60) — kick impulsiveness low
+- AND `kMeanR < CAND_KMEANR_MAX` (1.05) — kick band energy not at baseline level
 - Plus 4 consecutive low-kick windows (~300ms)
+
+Rationale: prevents CAND when filtered/processed kicks are still clearly present (kMeanR elevated).
+Bass-heavy breaks still enter CAND since bass-only kMeanR (~0.65–0.75) is below the 1.05 cap.
 
 **CAND → BREAK (Deep Confirmation):**
 - After `CAND_MIN_BARS` (1)
 - Two consecutive bars with:
   - `kR < 0.40`
   - AND (`rR < 0.80` OR `tR < 0.55`)
+  - AND `kMeanR < 0.70` — kick band energy must genuinely collapse (not just character change)
 
-**CAND → STANDARD (Recovery):**
+**CAND → STANDARD (Recovery — OR logic for kick presence):**
 - 1 bar with:
-  - `kR ≥ 0.82`
-  - AND (`rR ≥ 0.75` OR `tR ≥ 0.75`)
+  - `(kR ≥ 0.82 OR kMeanR ≥ 0.90)` — either kick signal recovered
+  - AND `(rR ≥ 0.75 AND tR ≥ 0.75)`
+
+Asymmetry: AND for absence (harder to enter), OR for recovery (easier to exit).
 
 ---
 
@@ -278,30 +292,33 @@ STANDARD → CAND (kick disappears)
 | `BASELINE_UPDATE_TR_MIN` | 0.90 |
 | `BASELINE_UPDATE_TR_MAX` | 1.10 |
 
-### CAND Entry
+### CAND Entry (2D gate)
 
-| Parameter | Value |
-|-----------|-------|
-| `KICK_GONE_KR_MAX` | 0.60 |
-| `KICK_GONE_CONFIRM_WINDOWS` | 4 (~300ms) |
-| `CAND_MIN_BARS` | 1 |
+| Parameter | Value | Role |
+|-----------|-------|------|
+| `KICK_GONE_KR_MAX` | 0.60 | Kick impulsiveness threshold |
+| `CAND_KMEANR_MAX` | 1.05 | Kick band energy cap (blocks if groove clearly on) |
+| `KICK_GONE_CONFIRM_WINDOWS` | 4 (~300ms) | Window persistence |
+| `CAND_MIN_BARS` | 1 | Minimum bars in CAND before BREAK eval |
 
 ### BREAK Confirmation
 
-| Parameter | Value |
-|-----------|-------|
-| `DEEP_BREAK_KR_MAX` | 0.40 |
-| `DEEP_BREAK_RMS_MAX` | 0.80 |
-| `DEEP_BREAK_TR_MAX` | 0.55 |
+| Parameter | Value | Role |
+|-----------|-------|------|
+| `DEEP_BREAK_KR_MAX` | 0.40 | Kick impulsiveness floor |
+| `DEEP_BREAK_RMS_MAX` | 0.80 | Energy floor |
+| `DEEP_BREAK_TR_MAX` | 0.55 | Transient floor |
+| `BREAK_KMEANR_MAX` | 0.70 | Kick band energy must genuinely collapse |
 
 ### Recovery
 
-| Parameter | Value |
-|-----------|-------|
-| `RECOVERY_RR_MIN` | 0.75 |
-| `RECOVERY_TR_MIN` | 0.75 |
-| `RECOVERY_KR_MIN` | 0.80 |
-| `CAND_RECOVERY_KR_MIN` | 0.82 |
+| Parameter | Value | Role |
+|-----------|-------|------|
+| `RECOVERY_RR_MIN` | 0.75 | Energy recovery floor |
+| `RECOVERY_TR_MIN` | 0.75 | Transient recovery floor |
+| `RECOVERY_KR_MIN` | 0.80 | BREAK→STD kick impulsiveness recovery |
+| `CAND_RECOVERY_KR_MIN` | 0.82 | CAND→STD kick impulsiveness recovery (OR) |
+| `RECOVERY_KMEANR_MIN` | 0.90 | CAND→STD kick band energy recovery (OR) |
 
 ### Return-Impact DROP
 

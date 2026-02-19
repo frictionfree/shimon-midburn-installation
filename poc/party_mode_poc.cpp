@@ -198,6 +198,12 @@ static constexpr float RECOVERY_KR_MIN = 0.80f;
 
 static constexpr float CAND_RECOVERY_KR_MIN = 0.82f;
 
+// -------------- kMean 2D DETECTION (v9) --------------
+// kMeanR = barKMean / baseKMean  (kick band energy presence, robust to character changes)
+static constexpr float CAND_KMEANR_MAX     = 1.05f; // CAND entry blocked if kick band at/above baseline
+static constexpr float RECOVERY_KMEANR_MIN = 0.90f; // CAND/BREAK recovery: OR with kR
+static constexpr float BREAK_KMEANR_MAX    = 0.70f; // deep break confirm requires real energy collapse
+
 // -------------- BREAK FLOOR --------------
 static constexpr float BREAK_ALPHA = 0.10f;
 
@@ -266,7 +272,7 @@ static volatile ContextState last_stateForBar = STANDARD;
 
 // ---------------- Party Mode globals ----------------
 static bool baseInited = false;
-static float baseRms = 0.0f, baseTr = 0.0f, baseKVar = 0.0f;
+static float baseRms = 0.0f, baseTr = 0.0f, baseKVar = 0.0f, baseKMean = 0.0f;
 
 // baseline readiness tracking
 static bool baselineReady = false;
@@ -1091,11 +1097,11 @@ static void autoResyncIfRecovered(bool clockPresent, bool audioPresent) {
   prevBothPresent = bothPresent;
 }
 
-static void baselineInit(float rms, float tr, float kVar) {
-  baseRms = rms; baseTr = tr; baseKVar = kVar;
+static void baselineInit(float rms, float tr, float kVar, float kMean) {
+  baseRms = rms; baseTr = tr; baseKVar = kVar; baseKMean = kMean;
   baseInited = true;
-  Serial.printf("BASE_INIT rms=%.4f tr=%.6f kVar=%.8f pos=%lu.%u\n",
-                rms, tr, kVar, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+  Serial.printf("BASE_INIT rms=%.4f tr=%.6f kVar=%.8f kMean=%.6f pos=%lu.%u\n",
+                rms, tr, kVar, kMean, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
 }
 
 static void breakReset() {
@@ -1151,7 +1157,7 @@ static bool baselineEligibleBar(float rms, float kVar, float rR, float tR, float
   return (rRinBand || tRinBand);
 }
 
-static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR, float tR, float kR) {
+static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float kMean, float rR, float tR, float kR) {
   if (state != STANDARD) return; // freeze outside STD
 
   if (!baselineEligibleBar(rms, kVar, rR, tR, kR)) {
@@ -1170,14 +1176,15 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
   }
 
   if (!baseInited) {
-    baselineInit(rms, tr, kVar); // logs BASE_INIT
+    baselineInit(rms, tr, kVar, kMean); // logs BASE_INIT
     baselineQualifiedBars = 1;
     baselineReady = (baselineQualifiedBars >= BASELINE_MIN_QUALIFIED_BARS);
     if (baselineReady) logEvent("BASELINE_READY");
     return;
   }
 
-  const float prevBlKVar = baseKVar;
+  const float prevBlKVar  = baseKVar;
+  const float prevBlKMean = baseKMean;
   if (DEBUG_BASELINE_LOG && prevBlKVar > 0.5f) {
     Serial.printf("BASE_ANOMALY pos=%lu.%u prevBlKVar=%.8f baseInited=%d baselineReady=%d qual=%u\n",
                   (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
@@ -1185,9 +1192,10 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
                   (unsigned)baselineQualifiedBars);
   }
   const float a = BASE_ALPHA_STD;
-  baseRms  = (1.0f - a) * baseRms  + a * rms;
-  baseTr   = (1.0f - a) * baseTr   + a * tr;
-  baseKVar = (1.0f - a) * baseKVar + a * kVar;
+  baseRms   = (1.0f - a) * baseRms   + a * rms;
+  baseTr    = (1.0f - a) * baseTr    + a * tr;
+  baseKVar  = (1.0f - a) * baseKVar  + a * kVar;
+  baseKMean = (1.0f - a) * baseKMean + a * kMean;
 
   if (!baselineReady) {
     baselineQualifiedBars++;
@@ -1198,9 +1206,9 @@ static void baselineMaybeInitAndUpdate(float rms, float tr, float kVar, float rR
   }
 
   if (DEBUG_BASELINE_LOG) {
-    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f kVar=%.8f -> blRms=%.4f blTr=%.6f blKVar=%.8f->%.8f qual=%u/%u\n",
+    Serial.printf("BASE_UPDATE pos=%lu.%u kR=%.2f rR=%.2f tR=%.2f kVar=%.8f->%.8f kMean=%.6f->%.6f qual=%u/%u\n",
                   (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-                  kR, rR, tR, kVar, baseRms, baseTr, prevBlKVar, baseKVar,
+                  kR, rR, tR, prevBlKVar, baseKVar, prevBlKMean, baseKMean,
                   (unsigned)baselineQualifiedBars, (unsigned)BASELINE_MIN_QUALIFIED_BARS);
   }
 }
@@ -1371,12 +1379,15 @@ static void onMonitorWindow(float winRms, float winTr, float winKVar) {
 }
 
 // ---------------- Bar finalization (policy transitions) ----------------
-static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, float kVar) {
-  const float rR = baseInited ? safeDiv(rms,  baseRms)  : 0.0f;
-  const float tR = baseInited ? safeDiv(tr,   baseTr)   : 0.0f;
-  const float kR = baseInited ? safeDiv(kVar, baseKVar) : 0.0f;
+static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, float kVar, float kMean) {
+  const float rR    = baseInited ? safeDiv(rms,   baseRms)   : 0.0f;
+  const float tR    = baseInited ? safeDiv(tr,    baseTr)    : 0.0f;
+  const float kR    = baseInited ? safeDiv(kVar,  baseKVar)  : 0.0f;
 
-  baselineMaybeInitAndUpdate(rms, tr, kVar, rR, tR, kR);
+  baselineMaybeInitAndUpdate(rms, tr, kVar, kMean, rR, tR, kR);
+
+  // kMeanR computed after baseline update so baseKMean is current
+  const float kMeanR = (baseInited && baseKMean > 0.0f) ? safeDiv(kMean, baseKMean) : 0.0f;
 
   // Push bar kR and post-update bKVar into rolling history (used at CAND entry)
   if (baseInited) {
@@ -1424,8 +1435,9 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
   }
 
   // ----- STANDARD -> CAND -----
+  // 2D gate: kick impulsiveness low (kR) AND kick band energy not at baseline level (kMeanR)
   if (state == STANDARD) {
-    if ((kR < KICK_GONE_KR_MAX) && (stdKickGoneWinStreak >= KICK_GONE_CONFIRM_WINDOWS)) {
+    if ((kR < KICK_GONE_KR_MAX) && (kMeanR < CAND_KMEANR_MAX) && (stdKickGoneWinStreak >= KICK_GONE_CONFIRM_WINDOWS)) {
       state = BREAK_CANDIDATE;
       candEnterBar = finalizedBarNumber;
       breakRecoveryBars = 0;
@@ -1435,7 +1447,7 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
       clearDropVerify();
       logTransition(prev, state, "CAND_ENTER_KICK_ABSENCE");
       // Dump last 4 bars of kR and bKVar to show drift trajectory leading into CAND
-      Serial.printf("CAND_CONTEXT wStr=%u last%u_kR=", (unsigned)stdKickGoneWinStreak, (unsigned)KR_HIST_LEN);
+      Serial.printf("CAND_CONTEXT wStr=%u kMeanR=%.2f last%u_kR=", (unsigned)stdKickGoneWinStreak, kMeanR, (unsigned)KR_HIST_LEN);
       for (uint8_t i = 0; i < KR_HIST_LEN; i++) {
         uint8_t slot = (kRHistIdx - KR_HIST_LEN + i) % KR_HIST_LEN;
         Serial.printf("%.2f%s", kRHist[slot], (i < KR_HIST_LEN - 1) ? "," : "");
@@ -1454,7 +1466,8 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
   if (state == BREAK_CANDIDATE) {
     const bool canEvalDeep = (finalizedBarNumber >= (candEnterBar + (uint32_t)CAND_MIN_BARS));
     const bool deep = (kR < DEEP_BREAK_KR_MAX) &&
-                      ((rR < DEEP_BREAK_RMS_MAX) || (tR < DEEP_BREAK_TR_MAX));
+                      ((rR < DEEP_BREAK_RMS_MAX) || (tR < DEEP_BREAK_TR_MAX)) &&
+                      (kMeanR < BREAK_KMEANR_MAX); // kick band energy must genuinely collapse
 
     if (canEvalDeep && deep) candDeepStreak++;
     else                     candDeepStreak = 0;
@@ -1468,7 +1481,9 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
       logTransition(prev, state, "BREAK_CONFIRM_DEEP_2B");
       prev = state;
     } else {
-      const bool okRecover = (rR >= RECOVERY_RR_MIN) && (tR >= RECOVERY_TR_MIN) && (kR >= CAND_RECOVERY_KR_MIN);
+      // OR logic: either kick impulsiveness OR kick band energy returning suffices
+      const bool kickPresent = (kR >= CAND_RECOVERY_KR_MIN) || (kMeanR >= RECOVERY_KMEANR_MIN);
+      const bool okRecover = (rR >= RECOVERY_RR_MIN) && (tR >= RECOVERY_TR_MIN) && kickPresent;
       if (okRecover) {
         state = STANDARD;
         candEnterBar = 0;
@@ -1519,7 +1534,7 @@ static void finalizeBarNow(uint32_t stampUs, uint32_t finalizedBarNumber) {
   lastBarUs = stampUs;
 
   resetBarAcc();
-  onBarFinalized(finalizedBarNumber, rms, tr, kVar);
+  onBarFinalized(finalizedBarNumber, rms, tr, kVar, kMean);
 }
 
 // ---------------- Beat log ----------------
@@ -1547,7 +1562,9 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
     }
 
     if (baseInited) {
-      Serial.printf(" kVar=%.6f kMean=%.6f blKV=%.6f", lastBarKVar, lastBarKMean, baseKVar);
+      const float _kMeanR = (baseKMean > 0.0f) ? safeDiv(lastBarKMean, baseKMean) : 0.0f;
+      const float _kCV    = (lastBarKMean > 0.0f) ? safeDiv(lastBarKVar, lastBarKMean) : 0.0f;
+      Serial.printf(" kVar=%.6f kMean=%.6f blKV=%.6f kMeanR=%.2f kCV=%.4f", lastBarKVar, lastBarKMean, baseKVar, _kMeanR, _kCV);
     }
 
     if (last_hasBF) {
@@ -1644,7 +1661,7 @@ static void resetForHardReset() {
   hp_x_prev = 0.0f;
 
   baseInited = false;
-  baseRms = baseTr = baseKVar = 0.0f;
+  baseRms = baseTr = baseKVar = baseKMean = 0.0f;
   baselineReady = false;
   baselineQualifiedBars = 0;
 
