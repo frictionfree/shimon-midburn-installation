@@ -1552,6 +1552,9 @@ void game_tick() {
 // ---- Mode interface ----
 void game_stop() {
   audio.stop();
+#ifndef USE_WOKWI
+  dfPlayerSerial.end();  // release UART1 so Party Mode can use it for MIDI
+#endif
   for (int i = 0; i < COLOR_COUNT; i++) {
     setLed((Color)i, false);
   }
