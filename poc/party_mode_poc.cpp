@@ -1578,8 +1578,10 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
     const uint32_t candidateUs = (uint32_t)(0.85f * (float)lastBeatIntervalUs + 0.15f * (float)dtUs);
 
     if (clockHoldActive) {
-      // Hold active: accept updates only in STANDARD once clock re-stabilises
-      if (state == STANDARD && bpmHoldIntervalUs > 0) {
+      // Hold active: count toward release in STANDARD or DROP once clock re-stabilises.
+      // BREAK/CAND remain fully frozen. The stability gate (within CLOCK_HOLD_RESUME_BPM)
+      // is the real guard — no need to restrict by state beyond excluding BREAK/CAND.
+      if ((state == STANDARD || state == DROP) && bpmHoldIntervalUs > 0) {
         const float holdBpm = 60000000.0f / (float)bpmHoldIntervalUs;
         const float candBpm = 60000000.0f / (float)candidateUs;
         if (fabsf(candBpm - holdBpm) <= CLOCK_HOLD_RESUME_BPM) {

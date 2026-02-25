@@ -123,7 +123,7 @@ Certain mixers (e.g., DJM-900NXS2) may emit a temporarily erratic MIDI clock tem
 - Beat and bar counting continues from raw MIDI ticks regardless of hold state; only tempo-derived timing is affected
 
 **Exit Condition:**
-Upon recovery to STANDARD, after `CLOCK_HOLD_RESUME_BEATS` (8) consecutive beats whose IIR-candidate BPM is within `CLOCK_HOLD_RESUME_BPM` (4 BPM) of the held reference, CLOCK_HOLD releases and timing authority returns to direct MIDI clock following.
+After `CLOCK_HOLD_RESUME_BEATS` (8) consecutive beats whose IIR-candidate BPM is within `CLOCK_HOLD_RESUME_BPM` (4 BPM) of the held reference, while in **STANDARD or DROP** state, CLOCK_HOLD releases and timing authority returns to direct MIDI clock following. BREAK and CAND remain fully frozen regardless of clock stability — the hold counter resets on every beat in those states. The stability gate is the real guard; no additional state restriction beyond excluding BREAK/CAND is needed.
 
 **Log Events:**
 - `EVENT CLOCK_HOLD_ENTER pos=X.Y holdBpm=Z candBpm=W delta=D` — hold activated, shows delta magnitude
