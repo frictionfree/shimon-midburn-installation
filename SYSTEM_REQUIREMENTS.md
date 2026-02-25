@@ -1,7 +1,7 @@
 # Shimon – System Requirements
 
 **Status:** Validated
-**Scope:** Shared system behaviors for Game Mode and Party Mode
+**Scope:** Shared system behaviors for Game Mode, Party Mode, and Diagnostic Mode
 
 This document defines system-level requirements that apply consistently across all operating modes. Mode-specific requirements are documented separately in `GAME_MODE_REQUIREMENTS.md` and `PARTY_MODE_REQUIREMENTS.md`.
 
@@ -16,9 +16,9 @@ hardware-baseline.md        ← Frozen hardware truth
         ↓
 SYSTEM_REQUIREMENTS.md      ← This document (shared behaviors)
         ↓
-    ┌───┴───┐
-    ↓       ↓
-GAME_MODE   PARTY_MODE      ← Mode-specific requirements
+    ┌───┼───────────┐
+    ↓   ↓           ↓
+GAME  PARTY_MODE  DIAG_MODE ← Mode-specific requirements
 ```
 
 ---
@@ -76,33 +76,34 @@ The system enters `MODE_SELECTION` under the following conditions:
 #### Visual Feedback
 
 While in `MODE_SELECTION`:
-- All LED wings display a slow ambient breathing pattern
-- The pattern indicates the system is idle and awaiting user input
+- Blue, Red, and Green LEDs rotate in sequence (1 second each, cyclically)
+- Yellow LED is not included in the rotation (reserved for global reset)
 - The pattern continues indefinitely (no timeout)
 
 No audio feedback is produced in this state.
 
 #### User Input
 
-Mode selection is performed using **simultaneous button presses**:
+Mode selection is performed using a **single button press**:
 
-| Buttons | Action |
-|---------|--------|
-| **Blue + Red** | Enter Game Mode |
-| **Green + Yellow** | Enter Party Mode |
+| Button | Action |
+|--------|--------|
+| **Blue** | Enter Game Mode |
+| **Green** | Enter Party Mode |
+| **Red** | Enter Diagnostic Mode |
+| **Yellow hold ≥5 s** | Global reboot (see Section 3.2) |
 
 **Notes:**
-- Both buttons must be detected as pressed within the same interaction window
-- Accidental single-button presses have no effect
+- A single press on Blue, Green, or Red immediately selects the corresponding mode
 - There is no timeout; the system waits indefinitely for a valid selection
+- Yellow is only active as the long-hold reboot gesture; a short Yellow press has no effect
 
 #### Confirmation Sequence
 
 Upon valid mode selection:
-1. Ambient breathing pattern stops immediately
-2. A quick clockwise LED circle animation plays as visual confirmation
+1. Rotating LED animation stops immediately
+2. All LEDs flash in sequence (confirmation animation) as visual confirmation
 3. Control transfers to the selected mode
-4. *(Future enhancement: mode-specific audio confirmation cue)*
 
 After confirmation, the selected mode assumes full ownership of LED and audio behavior.
 
@@ -114,14 +115,14 @@ After confirmation, the selected mode assumes full ownership of LED and audio be
 
 A global reboot gesture is available at all times, regardless of the current mode or internal state:
 
-> **Red + Yellow buttons pressed simultaneously**
+> **Yellow button held for ≥ 5 seconds**
 
-This gesture is **always active** and is not masked by any mode-specific logic.
+This gesture is **always active** — detected in the `MODE_SELECTION` loop and in `loop()` via raw `digitalRead` + `millis()` timer. It is not masked by any mode-specific logic.
 
 #### Action
 
 When the reboot gesture is detected:
-- The system performs an immediate reboot
+- The system performs an immediate reboot (`ESP.restart()`)
 - No attempt is made to gracefully transition between modes
 - After reboot, the system returns to the boot sequence and enters `MODE_SELECTION`
 
@@ -138,6 +139,22 @@ This mechanism serves as a:
 - Every mode change starts from a clean slate
 
 This approach prioritizes robustness, predictability, and ease of use over seamless mode switching.
+
+---
+
+### 3.3 Party Mode — Red Button In-Mode Actions
+
+Within Party Mode, the Red button has a dual role based on hold duration:
+
+| Hold Duration | Action | Effect |
+|--------------|--------|--------|
+| Short press (< 3 s) | MIDI Resync | `resetForResumeLike()` — resets bar/beat counter, baseline **kept** |
+| Long press (≥ 3 s) | Hard Reset | `doManualResync()` → `resetForHardReset()` — clears baseline |
+
+**Notes:**
+- Action triggers on button **release** (rising edge), using press-start timestamp to calculate hold duration
+- Yellow long-hold (≥5 s) remains the global reboot gesture and is checked independently
+- Diagnostic Mode and Game Mode do not use in-mode Red button actions
 
 ---
 
@@ -281,7 +298,7 @@ The system distinguishes between:
 
 | Mechanism | Trigger | Action |
 |-----------|---------|--------|
-| Universal reboot | Red + Yellow buttons | Immediate reboot → `MODE_SELECTION` |
+| Universal reboot | Yellow held ≥5 s | Immediate reboot → `MODE_SELECTION` |
 | Watchdog timeout | System unresponsive | Auto-reboot → `MODE_SELECTION` |
 | Manual reset | Hardware reset button | Full restart |
 
@@ -304,15 +321,14 @@ ESP32 Initialization
     ↓
 Hardware Setup (pins, peripherals)
     ↓
-Boot LED Sequence (rainbow wave + 4 flashes)
+Enter MODE_SELECTION (Blue/Red/Green rotation, no timeout)
     ↓
-Enter MODE_SELECTION
-    ↓
-Wait for user input (Blue+Red or Green+Yellow)
+Wait for single button press: Blue / Green / Red
+  (Yellow held ≥5 s → reboot)
     ↓
 Confirmation animation
     ↓
-Enter selected mode
+Enter selected mode (Game / Party / Diagnostic)
 ```
 
 ### Boot LED Sequence
@@ -336,7 +352,8 @@ Enter selected mode
 | `PWM_MIN_EFFECTIVE_DUTY` | 70 | Minimum PWM for visible output |
 | `PWM_FREQUENCY` | 12000 Hz | PWM carrier frequency |
 | `PWM_RESOLUTION` | 8-bit | 0-255 duty range |
-| `MODE_SELECT_DEBOUNCE_MS` | 50 | Button combination detection window |
+| `YELLOW_HOLD_RESET_MS` | 5000 | Yellow hold duration for global reboot |
+| `PARTY_RED_LONG_PRESS_MS` | 3000 | Red hold threshold: short=resync, long=hard reset |
 
 ### Pin Assignments
 
@@ -351,4 +368,5 @@ See `hardware-baseline.md` for authoritative pin mappings.
 | `hardware-baseline.md` | Frozen hardware configuration |
 | `GAME_MODE_REQUIREMENTS.md` | Game Mode specific requirements |
 | `PARTY_MODE_REQUIREMENTS.md` | Party Mode specific requirements |
+| `src/mode_diagnostic.cpp` | Diagnostic Mode implementation (5-phase hardware check) |
 | `CLAUDE.md` | Developer guide and implementation notes |
