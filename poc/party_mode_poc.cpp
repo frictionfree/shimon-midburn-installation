@@ -239,6 +239,18 @@ static uint8_t  beatInBar = 0;          // 1..4 (display)
 static uint32_t lastBeatUs = 0;
 static uint32_t lastBeatIntervalUs = 500000; // default ~120bpm
 
+// -------------- TEMPO INTEGRITY GUARD (req 12.3.1) --------------
+// Protects visual timing against erratic MIDI clock during BREAK sections.
+// Some mixers lose BPM engine reference when kick is absent (BREAK), emitting
+// a temporarily incorrect clock that self-corrects at the DROP.
+static constexpr float   CLOCK_HOLD_JUMP_BPM     = 8.0f;  // enter hold if jump > this (BPM)
+static constexpr float   CLOCK_HOLD_RESUME_BPM   = 4.0f;  // stable = within this of hold ref
+static constexpr uint8_t CLOCK_HOLD_RESUME_BEATS = 8;     // consecutive stable beats to release
+
+static bool     clockHoldActive      = false;
+static uint32_t bpmHoldIntervalUs    = 0;   // frozen timing reference (us/beat)
+static uint8_t  clockHoldStableBeats = 0;   // consecutive beats stable toward release
+
 // Current position snapshot
 static volatile uint32_t curBarForEvents = 0;
 static volatile uint8_t  curBeatForEvents = 0;
@@ -942,21 +954,32 @@ static void visualsOnHalfBeat() {
 }
 
 static void visualsRender() {
+  // No audio signal ever seen: clock running but no music yet
+  if (seenAnyClock && !seenAnyAudio) {
+    static uint32_t lastNoAudioMs = 0;
+    const uint32_t ms = millis();
+    if ((uint32_t)(ms - lastNoAudioMs) >= 4000) {
+      lastNoAudioMs = ms;
+      Serial.printf("NO_AUDIO_SIGNAL bpm=%.1f\n", currentBPM());
+    }
+  }
+
   // FAILURE overlay: time-based blink, independent of MIDI/I2S
   if (sysMode == SYS_FAIL) {
     const uint32_t ms = millis();
 
     static uint32_t lastFailHbMs = 0;
-    if ((uint32_t)(ms - lastFailHbMs) >= 1000) {
+    if ((uint32_t)(ms - lastFailHbMs) >= 4000) {
       lastFailHbMs = ms;
       const uint32_t nowUs = micros();
       const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
-      const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
-      Serial.printf("FAIL_HEARTBEAT reason=%u pos=%lu.%u clockAge_ms=%lu audioAge_ms=%lu ctx=%s\n",
-        (unsigned)failReason,
-        (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-        (unsigned long)clockAgeMs, (unsigned long)audioAgeMs,
-        ctxName(state));
+      if (failReason == FAIL_AUDIO_LOST) {
+        Serial.printf("NO_AUDIO bpm=%.1f clockAge_ms=%lu\n", currentBPM(), (unsigned long)clockAgeMs);
+      } else {
+        const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
+        Serial.printf("FAIL reason=%u clockAge_ms=%lu audioAge_ms=%lu ctx=%s\n",
+          (unsigned)failReason, (unsigned long)clockAgeMs, (unsigned long)audioAgeMs, ctxName(state));
+      }
     }
 
     const bool on = (ms % 1000) < 150;
@@ -1480,6 +1503,10 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
       breakReset();           // break floor will init on first BREAK bar update below
       clearReturnTracking();
       clearDropVerify();
+      // Capture stable pre-BREAK tempo as reference for CLOCK_HOLD guard
+      bpmHoldIntervalUs    = lastBeatIntervalUs;
+      clockHoldActive      = false;
+      clockHoldStableBeats = 0;
       logTransition(prev, state, "BREAK_CONFIRM_DEEP_2B");
       prev = state;
     } else {
@@ -1546,11 +1573,69 @@ static void finalizeBarNow(uint32_t stampUs, uint32_t finalizedBarNumber) {
 
 // ---------------- Beat log ----------------
 static void logBeatLine(uint32_t nowUs, bool isBarStart) {
-  const uint32_t dtUs  = (lastBeatUs == 0) ? 0 : (nowUs - lastBeatUs);
+  const uint32_t dtUs = (lastBeatUs == 0) ? 0 : (nowUs - lastBeatUs);
   if (dtUs > 0) {
-    lastBeatIntervalUs = (uint32_t)(0.85f * (float)lastBeatIntervalUs + 0.15f * (float)dtUs);
+    const uint32_t candidateUs = (uint32_t)(0.85f * (float)lastBeatIntervalUs + 0.15f * (float)dtUs);
+
+    if (clockHoldActive) {
+      // Hold active: accept updates only in STANDARD once clock re-stabilises
+      if (state == STANDARD && bpmHoldIntervalUs > 0) {
+        const float holdBpm = 60000000.0f / (float)bpmHoldIntervalUs;
+        const float candBpm = 60000000.0f / (float)candidateUs;
+        if (fabsf(candBpm - holdBpm) <= CLOCK_HOLD_RESUME_BPM) {
+          clockHoldStableBeats++;
+          if (clockHoldStableBeats >= CLOCK_HOLD_RESUME_BEATS) {
+            clockHoldActive      = false;
+            clockHoldStableBeats = 0;
+            lastBeatIntervalUs   = candidateUs;
+            Serial.printf("EVENT CLOCK_HOLD_RELEASE pos=%lu.%u resumedBpm=%.1f\n",
+                          (unsigned long)curBarForEvents, (unsigned)curBeatForEvents, candBpm);
+          }
+          // else: still counting; lastBeatIntervalUs stays frozen
+        } else {
+          clockHoldStableBeats = 0; // erratic even in STD; stay frozen
+        }
+      } else {
+        // BREAK / CAND / DROP: fully frozen, reset stable-beat counter
+        clockHoldStableBeats = 0;
+      }
+      // lastBeatIntervalUs is NOT updated while hold is active
+
+    } else if (state == BREAK_CONFIRMED && bpmHoldIntervalUs > 0) {
+      // In BREAK, no hold yet: use raw tick BPM for immediate jump detection.
+      // Comparing against the IIR candidate would hide a sudden jump — the IIR
+      // absorbs only 15% per beat, so a 33 BPM raw jump appears as ~5 BPM per
+      // filtered step, never crossing the threshold while the reference slides.
+      // Using the raw tick catches the erratic beat on its very first occurrence.
+      const float holdBpm  = 60000000.0f / (float)bpmHoldIntervalUs;
+      const float rawBpm   = 60000000.0f / (float)dtUs;  // unsmoothed raw tick
+      const float bpmDelta = fabsf(rawBpm - holdBpm);
+      if (bpmDelta > CLOCK_HOLD_JUMP_BPM) {
+        clockHoldActive      = true;
+        clockHoldStableBeats = 0;
+        Serial.printf("EVENT CLOCK_HOLD_ENTER pos=%lu.%u holdBpm=%.1f rawBpm=%.1f delta=%.1f\n",
+                      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                      holdBpm, rawBpm, bpmDelta);
+        // Don't update lastBeatIntervalUs — reject the erratic tick
+      } else {
+        // Stable tick in BREAK: accept IIR update for smooth visual timing.
+        // bpmHoldIntervalUs intentionally NOT updated — fixed at BREAK entry
+        // so the reference never drifts toward a gradually-converging erratic value.
+        lastBeatIntervalUs = candidateUs;
+      }
+
+    } else {
+      // STANDARD / CAND / no hold reference: normal IIR update
+      lastBeatIntervalUs = candidateUs;
+    }
   }
   lastBeatUs = nowUs;
+
+  // Suppress bar logs when there is no audio signal
+  if (!seenAnyAudio || sysMode == SYS_FAIL) {
+    ticksSinceBeat = 0;
+    return;
+  }
 
   // Skip mid-bar beats (2,3,4) unless DEBUG_BEAT_LOG enabled
   if (!isBarStart && !DEBUG_BEAT_LOG) {
@@ -1588,6 +1673,10 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
 
     if (state == DROP && dropVerifyActive) {
       Serial.printf(" VFY(%u/%u)", (unsigned)dropVerifyGood, (unsigned)DROP_VERIFY_MIN_GOOD);
+    }
+
+    if (clockHoldActive) {
+      Serial.printf(" CLKHOLD(%.1f)", 60000000.0f / (float)bpmHoldIntervalUs);
     }
 
     Serial.print("\n");
@@ -1642,6 +1731,10 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
       Serial.printf(" vfy=ON(budg=%u good=%u/%u)",
                     (unsigned)dropVerifyBudget, (unsigned)dropVerifyGood, (unsigned)DROP_VERIFY_WINDOWS);
     }
+
+    if (clockHoldActive) {
+      Serial.printf(" CLKHOLD(hold=%.1f)", 60000000.0f / (float)bpmHoldIntervalUs);
+    }
   }
 
   Serial.print("\n");
@@ -1655,6 +1748,10 @@ static void resetForHardReset() {
   barCount = 1;
   beatInBar = 0;
   lastBeatUs = 0;
+
+  clockHoldActive      = false;
+  bpmHoldIntervalUs    = 0;
+  clockHoldStableBeats = 0;
 
   curBarForEvents = 1;
   curBeatForEvents = 0;
@@ -1720,6 +1817,10 @@ static void resetForResumeLike() {
   barCount = 1;
   beatInBar = 0;
   lastBeatUs = 0;
+
+  clockHoldActive      = false;
+  bpmHoldIntervalUs    = 0;
+  clockHoldStableBeats = 0;
 
   stdKickGoneWinStreak = 0;
 

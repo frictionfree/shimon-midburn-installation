@@ -102,6 +102,36 @@ See `hardware-baseline.md` Section 10 for MIDI input configuration (GPIO 34, 312
 
 ---
 
+### 3.1 Tempo Integrity Guard (CLOCK_HOLD)
+
+**Observed Field Behavior:**
+Certain mixers (e.g., DJM-900NXS2) may emit a temporarily erratic MIDI clock tempo when their BPM engine loses grid reference during a BREAK section (missing kick / FX channel reassignment / Pro Link source transition). Jumps of 30+ BPM have been observed while the musical tempo remained constant. The error self-corrects once the kick returns at the DROP.
+
+**Policy by State:**
+
+| State | Behavior on Sharp BPM Jump |
+|-------|---------------------------|
+| **STANDARD / CAND** | Evaluated normally; adopted if stable |
+| **BREAK_CONFIRMED** | Jumps > `CLOCK_HOLD_JUMP_BPM` are rejected; system enters **CLOCK_HOLD** |
+| **CLOCK_HOLD active** | `lastBeatIntervalUs` frozen; all timing uses held reference |
+| **STD recovery** | After `CLOCK_HOLD_RESUME_BEATS` stable beats, hold releases |
+
+**CLOCK_HOLD Mechanics:**
+- `bpmHoldIntervalUs` is captured at BREAK_CONFIRMED entry from `lastBeatIntervalUs` (the last stable tempo)
+- While in BREAK without an active hold: `bpmHoldIntervalUs` slides with small stable variations (< `CLOCK_HOLD_JUMP_BPM`) so the reference always represents the last stable value immediately before any jump
+- While CLOCK_HOLD is active: `lastBeatIntervalUs` is frozen — all timing consumers (`halfBeatUs`, `breakFadeDurUs`, BPM log fields) use the held reference
+- Beat and bar counting continues from raw MIDI ticks regardless of hold state; only tempo-derived timing is affected
+
+**Exit Condition:**
+Upon recovery to STANDARD, after `CLOCK_HOLD_RESUME_BEATS` (8) consecutive beats whose IIR-candidate BPM is within `CLOCK_HOLD_RESUME_BPM` (4 BPM) of the held reference, CLOCK_HOLD releases and timing authority returns to direct MIDI clock following.
+
+**Log Events:**
+- `EVENT CLOCK_HOLD_ENTER pos=X.Y holdBpm=Z candBpm=W delta=D` — hold activated, shows delta magnitude
+- `EVENT CLOCK_HOLD_RELEASE pos=X.Y resumedBpm=Z` — hold released after stable recovery
+- Bar log lines append `CLKHOLD(Z)` (held BPM) while hold is active
+
+---
+
 ## 4. Audio Analysis
 
 ### Hardware Reference
@@ -321,6 +351,14 @@ sub-bass-heavy tracks where kMeanR stays near baseline while kR remains low.
 | `RECOVERY_KR_MIN` | 0.80 | BREAK→STD kick impulsiveness recovery |
 | `CAND_RECOVERY_KR_MIN` | 0.82 | CAND→STD kick impulsiveness recovery (AND) |
 | `RECOVERY_KMEANR_MIN` | 0.90 | CAND→STD kick band energy recovery (AND) |
+
+### Tempo Integrity Guard
+
+| Parameter | Value | Role |
+|-----------|-------|------|
+| `CLOCK_HOLD_JUMP_BPM` | 8.0 | BPM jump threshold to enter CLOCK_HOLD (in BREAK) |
+| `CLOCK_HOLD_RESUME_BPM` | 4.0 | BPM stability tolerance toward release |
+| `CLOCK_HOLD_RESUME_BEATS` | 8 (~2 bars) | Consecutive stable beats required to release |
 
 ### Return-Impact DROP
 
@@ -688,6 +726,10 @@ Half-beat shimmer allowed during multi-wing phases.
 - DROP sensitivity tuning
 - Automatic recovery validation
 - Manual resync control
+
+### Recently Completed
+
+- ✅ Tempo Integrity Guard (CLOCK_HOLD) — req 3.1 / field-validated vs. DJM-900NXS2
 
 ---
 
