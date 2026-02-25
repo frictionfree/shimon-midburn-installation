@@ -2140,30 +2140,52 @@ static void processAudio() {
 }
 
 // ---------------- BUTTONS (RED universal reset) ----------------
+// Red button: short press = MIDI/bar resync (keep baseline); long press >= 3 s = hard reset
+static constexpr uint32_t RED_LONG_PRESS_MS = 3000;
 static bool lastRedBtn = true;
 
 static void processButtons() {
-  bool redNow = (digitalRead(PIN_BTN_RED) != LOW); // true=not pressed
-  if (lastRedBtn == true && redNow == false) {
-    Serial.printf("BTN RED_PRESS pos=%lu.%u sys=%s action=%s\n",
-      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-      (sysMode == SYS_FAIL ? "FAIL" : "OK"),
-      "HARD_RESET(BASELINE_CLEARED)");
+  static uint32_t redPressStartMs = 0;
+  bool redNow = (digitalRead(PIN_BTN_RED) != LOW); // true = not pressed
 
+  // Press (falling edge) - record start time
+  if (lastRedBtn == true && redNow == false) {
+    redPressStartMs = millis();
+  }
+
+  // Release (rising edge) - act based on hold duration
+  if (lastRedBtn == false && redNow == true) {
+    uint32_t holdMs = (uint32_t)(millis() - redPressStartMs);
+
+    // Clear failure state on any Red action
     if (sysMode == SYS_FAIL) {
       sysMode = SYS_OK;
       failReason = FAIL_NONE;
       logEvent("FAIL_EXIT_BY_RESET");
       clearStopLatches();
     }
-
     seenAnyClock = false;
     seenAnyAudio = false;
     lastClockUs = 0;
     lastAudioUs = 0;
 
-    doManualResync();
+    if (holdMs >= RED_LONG_PRESS_MS) {
+      // Long press: hard reset (clears baseline)
+      Serial.printf("BTN RED_LONG pos=%lu.%u holdMs=%lu action=HARD_RESET(BASELINE_CLEARED)\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                    (unsigned long)holdMs);
+      doManualResync();
+    } else {
+      // Short press: MIDI/bar resync (keeps baseline)
+      Serial.printf("BTN RED_SHORT pos=%lu.%u holdMs=%lu action=MIDI_RESYNC\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                    (unsigned long)holdMs);
+      Serial.printf("EVENT MANUAL_RESYNC pos=%lu.%u\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+      resetForResumeLike();
+    }
   }
+
   lastRedBtn = redNow;
 }
 
