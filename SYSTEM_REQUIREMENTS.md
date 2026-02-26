@@ -367,6 +367,38 @@ See `hardware-baseline.md` for authoritative pin mappings.
 
 Diagnostic Mode runs a 5-phase hardware verification sequence (LED / Buttons / MIDI / I2S / DFPlayer) and then enters a **summary state** until the operator explicitly exits.
 
+### Phase Results — Three-Tier Logic (C and D)
+
+Phases C (MIDI) and D (I2S) use a three-tier result model that distinguishes hardware connectivity from signal readiness:
+
+#### Phase C — MIDI Clock
+
+| Result | Condition | Meaning |
+|--------|-----------|---------|
+| PASS | `0xF8` ticks received | Clock running — ready for Party Mode |
+| WARN | Bytes received but no `0xF8` | Device connected and talking, clock not started |
+| FAIL | Zero bytes received | No MIDI signal — cable disconnected or device off |
+
+**Rationale:** Mixers typically emit Active Sensing bytes (0xFE) every ~300 ms when powered and connected but not playing. "Some bytes, no clock" therefore reliably indicates a wired device that hasn't started playback, distinguishable from a completely dead connection.
+
+#### Phase D — I2S Audio
+
+| Result | Condition | Meaning |
+|--------|-----------|---------|
+| PASS | `frames ≥ 10000` AND `RMS ≥ 0.050` | I2S clock present, music signal confirmed |
+| WARN | `frames ≥ 10000` AND `RMS < 0.050` | Converter connected and clocking, no music playing |
+| FAIL | `frames < 10000` | No I2S clock received — converter absent or unpowered |
+
+**Rationale:** When the SPDIF → I2S converter is absent or unpowered, the I2S peripheral receives no clock and `i2s_read` returns 0 bytes (times out). Frame count therefore separates hardware connectivity from content. The RMS threshold of 0.050 is set above the measured idle noise floor (~0.012) and above the Party Mode `BASELINE_MIN_RMS` (0.020) to confirm a genuine music signal.
+
+**Configuration constants** (in `mode_diagnostic.cpp`):
+```cpp
+D_MIN_FRAMES = 10000   // FAIL below this frame count (no I2S clock)
+D_MUSIC_RMS  = 0.050   // PASS above this RMS (music signal present)
+```
+
+---
+
 ### End-State Behavior (DS_DONE)
 
 After all phases complete and the summary is printed:

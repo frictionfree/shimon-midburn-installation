@@ -2,8 +2,8 @@
   Diagnostic Mode - 5-phase hardware verification
   A: LED PWM      - cycle each wing at 3 brightness levels, operator confirms
   B: Buttons      - light each wing, wait for corresponding button press
-  C: MIDI Clock   - listen 10 s for MIDI 0xF8, report BPM
-  D: I2S Audio    - blocking 3 s RMS measurement, PASS/WARN/FAIL
+  C: MIDI Clock   - listen 10 s; PASS=clock rx, WARN=bytes but no clock, FAIL=no signal
+  D: I2S Audio    - 3 s RMS; PASS=music signal, WARN=connected/no music, FAIL=no I2S clock
   E: DFPlayer     - play track 001, press BLUE within 8 s to confirm heard
 */
 
@@ -39,8 +39,8 @@ static constexpr int        D_I2S_LRCK     = 25;
 static constexpr int        D_I2S_DATA     = 22;
 static constexpr int        D_SAMPLE_RATE  = 48000;
 static constexpr int        D_READ_FRAMES  = 256;
-static constexpr float      D_PASS_RMS     = 0.010f;
-static constexpr float      D_WARN_RMS     = 0.004f;
+static constexpr uint32_t   D_MIN_FRAMES   = 10000; // below this = no I2S clock (converter absent)
+static constexpr float      D_MUSIC_RMS    = 0.050f; // above this = music signal present (PASS)
 static constexpr uint8_t PHASE_E_TRACK  = 1;
 static constexpr uint8_t PHASE_E_VOL    = 20;
 #ifndef USE_WOKWI
@@ -69,6 +69,7 @@ static uint8_t phA_wing, phA_level;
 static const uint8_t PH_A_DUTIES[3] = {64, 140, 235};
 static uint8_t phB_wing, phB_failed;
 static uint32_t phC_ticks;
+static uint32_t phC_totalBytes;
 static float    phC_bpm;
 static uint32_t phC_lastUs;
 static bool phE_dfpOk;
@@ -133,7 +134,7 @@ static bool phB_tick() {
   return false;
 }
 static void phC_enter() {
-  phC_ticks = 0; phC_bpm = 0.0f; phC_lastUs = 0;
+  phC_ticks = 0; phC_totalBytes = 0; phC_bpm = 0.0f; phC_lastUs = 0;
   diagAllOff();
   diagTimer = millis();
   Serial.printf("[DIAG] Phase C: MIDI Clock - listening %lu s on GPIO%d.\n",
@@ -153,7 +154,9 @@ static bool phC_tick() {
   }
 #ifndef USE_WOKWI
   while (DiagMidi.available()) {
-    if (DiagMidi.read() == MIDI_CLOCK_BYTE) {
+    uint8_t b = DiagMidi.read();
+    phC_totalBytes++;
+    if (b == MIDI_CLOCK_BYTE) {
       uint32_t us = micros();
       if (phC_lastUs > 0) {
         uint32_t dt = us - phC_lastUs;
@@ -205,8 +208,18 @@ static void phD_run() {
   }
   i2s_driver_uninstall(DIAG_I2S_PORT);
   float rms = (n > 0) ? sqrtf((float)(sumSq / (double)n)) : 0.0f;
-  resultD = (rms >= D_PASS_RMS) ? DR_PASS : (rms >= D_WARN_RMS) ? DR_WARN : DR_FAIL;
-  Serial.printf("  RMS=%.4f  Result: %s\n", rms, drStr(resultD));
+  if (n < D_MIN_FRAMES) {
+    resultD = DR_FAIL;
+    Serial.printf("  frames=%lu  RMS=%.4f  Result: FAIL (no I2S clock - converter absent?)\n",
+                  (unsigned long)n, rms);
+  } else if (rms < D_MUSIC_RMS) {
+    resultD = DR_WARN;
+    Serial.printf("  frames=%lu  RMS=%.4f  Result: WARN (connected, no music signal)\n",
+                  (unsigned long)n, rms);
+  } else {
+    resultD = DR_PASS;
+    Serial.printf("  frames=%lu  RMS=%.4f  Result: PASS\n", (unsigned long)n, rms);
+  }
 }
 static void phE_enter() {
   phE_dfpOk = false;
@@ -304,13 +317,17 @@ void diag_tick() {
       break;
     case DS_PHASE_C:
       if (phC_tick()) {
-        if (phC_ticks == 0) {
-          resultC = DR_FAIL;
-          Serial.println("  Phase C: FAIL (no MIDI clock)");
-        } else {
+        if (phC_ticks > 0) {
           resultC = DR_PASS;
           Serial.printf("  Phase C: PASS  (%lu ticks, BPM=%.1f)\n",
                         (unsigned long)phC_ticks, phC_bpm);
+        } else if (phC_totalBytes > 0) {
+          resultC = DR_WARN;
+          Serial.printf("  Phase C: WARN  (device present, %lu bytes, no clock)\n",
+                        (unsigned long)phC_totalBytes);
+        } else {
+          resultC = DR_FAIL;
+          Serial.println("  Phase C: FAIL  (no signal - cable disconnected?)");
         }
         phD_run();
         diagState = DS_PHASE_E;
