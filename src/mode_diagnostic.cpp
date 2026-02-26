@@ -28,6 +28,7 @@ static constexpr uint32_t PHASE_A_LEVEL_MS   = 800;
 static constexpr uint32_t PHASE_A_TIMEOUT_MS = 15000;
 static constexpr uint32_t PHASE_B_BTN_TOUT   = 5000;
 static constexpr uint32_t PHASE_B_MIN_VIS_MS = 300;  // min LED-on time before accepting press
+static constexpr uint32_t PHASE_B_MIN_PRESS_MS = 50; // min hold-time to reject PWM ghost clicks
 static constexpr uint32_t PHASE_C_PROMPT_MS  = 30000;
 static constexpr uint32_t PHASE_C_LISTEN_MS  = 10000;
 static constexpr uint32_t DIAG_DONE_AUTO_MS  = 20000;
@@ -52,6 +53,11 @@ static HardwareSerial      DiagDfpSer(1);
 static DFRobotDFPlayerMini diagDfp;
 #endif
 enum DiagResult : uint8_t { DR_NONE=0, DR_PASS, DR_WARN, DR_FAIL };
+enum DiagState : uint8_t {
+  DS_PHASE_A, DS_PHASE_A_CONFIRM, DS_PHASE_B,
+  DS_PHASE_C_PROMPT, DS_PHASE_C, DS_PHASE_E, DS_DONE
+};
+static DiagState  diagState;
 static const char* diagStateName() {
   switch (diagState) {
     case DS_PHASE_A:        return "A";
@@ -72,11 +78,6 @@ static const char* drStr(DiagResult r) {
     default:      return "NONE";
   }
 }
-enum DiagState : uint8_t {
-  DS_PHASE_A, DS_PHASE_A_CONFIRM, DS_PHASE_B,
-  DS_PHASE_C_PROMPT, DS_PHASE_C, DS_PHASE_E, DS_DONE
-};
-static DiagState  diagState;
 static DiagResult resultA, resultB, resultC, resultD, resultE;
 static DiagResult    diagOverallResult;
 static bool          diagBlinkOn;
@@ -85,7 +86,8 @@ static unsigned long diagDoneStart;
 static uint8_t phA_wing, phA_level;
 static const uint8_t PH_A_DUTIES[3] = {64, 140, 235};
 static uint8_t phB_wing, phB_failed;
-static bool      btnPrev[4] = {false, false, false, false};
+static bool     phB_pressing  = false;
+static uint32_t phB_pressStart = 0;
 static uint32_t phC_ticks;
 static uint32_t phC_totalBytes;
 static float    phC_bpm;
@@ -113,8 +115,11 @@ static bool phA_tick() {
   if (millis() - diagTimer > 200UL) {  // debounce: ignore presses in first 200ms
     for (int i = 0; i < 4; i++) {
       if (digitalRead(DIAG_BTN[i]) == LOW) {
-        Serial.println("  Skipped.");
-        diagWing(phA_wing, 0); diagAllOff(); return true;
+        delay(20);  // reject sub-ms 12V switching transients; real press stays LOW
+        if (digitalRead(DIAG_BTN[i]) == LOW) {
+          Serial.println("  Skipped.");
+          diagWing(phA_wing, 0); diagAllOff(); return true;
+        }
       }
     }
   }
@@ -132,7 +137,7 @@ static bool phA_tick() {
   return false;
 }
 static void phB_enter() {
-  phB_wing = 0; phB_failed = 0;
+  phB_wing = 0; phB_failed = 0; phB_pressing = false; phB_pressStart = 0;
   diagAllOff();
   // Wait for any button held from Phase A confirm to release (up to 500 ms)
   unsigned long releaseStart = millis();
@@ -149,11 +154,15 @@ static void phB_enter() {
 }
 static bool phB_tick() {
   if (millis() - diagTimer < PHASE_B_MIN_VIS_MS) return false;  // wait for LED to be visible
-  bool pressed = (digitalRead(DIAG_BTN[phB_wing]) == LOW);
+  bool btnLow = (digitalRead(DIAG_BTN[phB_wing]) == LOW);
   bool timeout = (millis() - diagTimer >= PHASE_B_BTN_TOUT);
-  if (!pressed && !timeout) return false;
+  // Track press onset; require sustained hold to filter PWM ghost clicks
+  if (btnLow && !phB_pressing) { phB_pressing = true; phB_pressStart = millis(); }
+  if (!btnLow)                  { phB_pressing = false; }
+  bool confirmed = phB_pressing && (millis() - phB_pressStart >= PHASE_B_MIN_PRESS_MS);
+  if (!confirmed && !timeout) return false;
   diagWing(phB_wing, 0);
-  if (pressed) {
+  if (confirmed) {
     Serial.printf("  %s: PASS\n", WING_NAME[phB_wing]);
     diagWing(phB_wing, 235); delay(150); diagWing(phB_wing, 0);
   } else {
@@ -162,6 +171,7 @@ static bool phB_tick() {
   }
   phB_wing++;
   if (phB_wing >= 4) return true;
+  phB_pressing = false;  // reset for next wing
   delay(300);
   diagTimer = millis();
   Serial.printf("  Press %s...\n", WING_NAME[phB_wing]);
@@ -351,22 +361,10 @@ void diag_init() {
   Serial.println("  YELLOW hold 5s exits to Mode Selection at any time.");
   diagPwmInit();
   resultA = resultB = resultC = resultD = resultE = DR_NONE;
-  for (int i = 0; i < 4; i++) btnPrev[i] = false;
   diagState = DS_PHASE_A;
   phA_enter();
 }
 void diag_tick() {
-  // Debug: log every button press and release with current phase
-  for (int i = 0; i < 4; i++) {
-    bool now = (digitalRead(DIAG_BTN[i]) == LOW);
-    if (now && !btnPrev[i])
-      Serial.printf("[BTN] %s PRESS  (phase %s, t=%lums)\n",
-                    WING_NAME[i], diagStateName(), millis());
-    else if (!now && btnPrev[i])
-      Serial.printf("[BTN] %s release (phase %s, t=%lums)\n",
-                    WING_NAME[i], diagStateName(), millis());
-    btnPrev[i] = now;
-  }
   switch (diagState) {
     case DS_PHASE_A:
       if (phA_tick()) {

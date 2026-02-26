@@ -2141,7 +2141,8 @@ static void processAudio() {
 
 // ---------------- BUTTONS (RED universal reset) ----------------
 // Red button: short press = MIDI/bar resync (keep baseline); long press >= 3 s = hard reset
-static constexpr uint32_t RED_LONG_PRESS_MS = 3000;
+static constexpr uint32_t RED_LONG_PRESS_MS  = 3000;
+static constexpr uint32_t RED_SHORT_MIN_MS   = 20;   // min hold-time to reject PWM ghost clicks
 static bool lastRedBtn = true;
 
 static void processButtons() {
@@ -2169,7 +2170,10 @@ static void processButtons() {
     lastClockUs = 0;
     lastAudioUs = 0;
 
-    if (holdMs >= RED_LONG_PRESS_MS) {
+    if (holdMs < RED_SHORT_MIN_MS) {
+      // Sub-threshold: ghost click from PWM noise — ignore silently
+      Serial.printf("BTN RED_GHOST holdMs=%lu ignored\n", (unsigned long)holdMs);
+    } else if (holdMs >= RED_LONG_PRESS_MS) {
       // Long press: hard reset (clears baseline)
       Serial.printf("BTN RED_LONG pos=%lu.%u holdMs=%lu action=HARD_RESET(BASELINE_CLEARED)\n",
                     (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
