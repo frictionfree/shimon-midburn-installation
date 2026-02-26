@@ -2,7 +2,7 @@
   Diagnostic Mode - 5-phase hardware verification
   A: LED PWM      - cycle each wing at 3 brightness levels, operator confirms
   B: Buttons      - light each wing, wait for corresponding button press
-  C: MIDI Clock   - listen 10 s; PASS=clock rx, WARN=bytes but no clock, FAIL=no signal
+  C: MIDI Clock   - prompt to start music, then listen 10 s; PASS/WARN/FAIL
   D: I2S Audio    - 3 s RMS; PASS=music signal, WARN=connected/no music, FAIL=no I2S clock
   E: DFPlayer     - play track 001, press BLUE within 8 s to confirm heard
 */
@@ -27,7 +27,9 @@ static const char* const  WING_NAME[4]    = {"BLUE", "RED", "GREEN", "YELLOW"};
 static constexpr uint32_t PHASE_A_LEVEL_MS   = 800;
 static constexpr uint32_t PHASE_A_TIMEOUT_MS = 15000;
 static constexpr uint32_t PHASE_B_BTN_TOUT   = 5000;
+static constexpr uint32_t PHASE_C_PROMPT_MS  = 30000;
 static constexpr uint32_t PHASE_C_LISTEN_MS  = 10000;
+static constexpr uint32_t DIAG_DONE_AUTO_MS  = 20000;
 static constexpr uint32_t PHASE_D_MEASURE_MS = 3000;
 static constexpr uint32_t PHASE_E_TIMEOUT_MS = 8000;
 static constexpr uint32_t MIDI_BAUD       = 31250;
@@ -58,13 +60,15 @@ static const char* drStr(DiagResult r) {
   }
 }
 enum DiagState : uint8_t {
-  DS_PHASE_A, DS_PHASE_A_CONFIRM, DS_PHASE_B, DS_PHASE_C, DS_PHASE_E, DS_DONE
+  DS_PHASE_A, DS_PHASE_A_CONFIRM, DS_PHASE_B,
+  DS_PHASE_C_PROMPT, DS_PHASE_C, DS_PHASE_E, DS_DONE
 };
 static DiagState  diagState;
 static DiagResult resultA, resultB, resultC, resultD, resultE;
-static DiagResult diagOverallResult;
-static bool       diagBlinkOn;
+static DiagResult    diagOverallResult;
+static bool          diagBlinkOn;
 static unsigned long diagTimer;
+static unsigned long diagDoneStart;
 static uint8_t phA_wing, phA_level;
 static const uint8_t PH_A_DUTIES[3] = {64, 140, 235};
 static uint8_t phB_wing, phB_failed;
@@ -108,6 +112,14 @@ static bool phA_tick() {
 static void phB_enter() {
   phB_wing = 0; phB_failed = 0;
   diagAllOff();
+  // Wait for any button held from Phase A confirm to release (up to 500 ms)
+  unsigned long releaseStart = millis();
+  bool anyHeld;
+  do {
+    anyHeld = false;
+    for (int i = 0; i < 4; i++) anyHeld |= (digitalRead(DIAG_BTN[i]) == LOW);
+  } while (anyHeld && millis() - releaseStart < 500UL);
+  delay(50);
   diagTimer = millis();
   Serial.println("[DIAG] Phase B: Buttons - press each lit button.");
   Serial.printf("  Press %s...\n", WING_NAME[0]);
@@ -131,6 +143,29 @@ static bool phB_tick() {
   diagTimer = millis();
   Serial.printf("  Press %s...\n", WING_NAME[phB_wing]);
   diagWing(phB_wing, 200);
+  return false;
+}
+static void phCPrompt_enter() {
+  diagAllOff();
+  diagTimer = millis();
+  Serial.printf("[DIAG] Start music on mixer. Press BLUE when ready (auto in %lus).\n",
+                (unsigned long)(PHASE_C_PROMPT_MS / 1000));
+  diagWing(0, 80);  // dim blue: waiting for operator
+}
+static bool phCPrompt_tick() {
+  // Pulse blue gently while waiting
+  uint8_t duty = (uint8_t)(40.0f + 40.0f * sinf((float)(millis() % 1500) * 6.2832f / 1500.0f));
+  diagWing(0, duty);
+  if (digitalRead(DIAG_BTN[0]) == LOW) {
+    diagAllOff();
+    Serial.println("  BLUE pressed - starting music phases.");
+    return true;
+  }
+  if (millis() - diagTimer >= PHASE_C_PROMPT_MS) {
+    diagAllOff();
+    Serial.println("  Timeout - proceeding without music confirmation.");
+    return true;
+  }
   return false;
 }
 static void phC_enter() {
@@ -264,7 +299,8 @@ static void printSummary() {
   diagOverallResult = anyFail ? DR_FAIL : (anyWarn ? DR_WARN : DR_PASS);
   Serial.println(anyFail ? "  OVERALL: FAIL" : (anyWarn ? "  OVERALL: WARN" : "  OVERALL: PASS"));
   Serial.println("=========================================");
-  Serial.println("  Press any button to return to Mode Selection.");
+  Serial.printf("  Press any button to return, or wait %lus for auto-return.\n",
+                (unsigned long)(DIAG_DONE_AUTO_MS / 1000));
   if (anyFail) {
     for (int i = 0; i < 6; i++) { diagWing(1,235); delay(120); diagWing(1,0); delay(120); }
   } else if (anyWarn) {
@@ -311,6 +347,12 @@ void diag_tick() {
       if (phB_tick()) {
         resultB = (phB_failed == 0) ? DR_PASS : (phB_failed < 4 ? DR_WARN : DR_FAIL);
         Serial.printf("  Phase B: %s  (%u/4 ok)\n", drStr(resultB), 4 - phB_failed);
+        diagState = DS_PHASE_C_PROMPT;
+        phCPrompt_enter();
+      }
+      break;
+    case DS_PHASE_C_PROMPT:
+      if (phCPrompt_tick()) {
         diagState = DS_PHASE_C;
         phC_enter();
       }
@@ -342,6 +384,7 @@ void diag_tick() {
         DiagDfpSer.end();
 #endif
         printSummary();
+        diagDoneStart = millis();
         diagState = DS_DONE;
       }
       break;
@@ -352,6 +395,11 @@ void diag_tick() {
           Serial.println("[DIAG] Returning to Mode Selection...");
           delay(200); ESP.restart();
         }
+      }
+      if (millis() - diagDoneStart >= DIAG_DONE_AUTO_MS) {
+        diagAllOff();
+        Serial.println("[DIAG] Auto-returning to Mode Selection...");
+        delay(200); ESP.restart();
       }
       if (millis() - diagTimer >= 750UL) {
         diagTimer = millis();
