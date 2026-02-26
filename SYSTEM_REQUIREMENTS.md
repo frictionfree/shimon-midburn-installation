@@ -361,7 +361,41 @@ See `hardware-baseline.md` for authoritative pin mappings.
 
 ---
 
-## 12. References
+## 12. Diagnostic Mode Lifecycle
+
+### Overview
+
+Diagnostic Mode runs a 5-phase hardware verification sequence (LED / Buttons / MIDI / I2S / DFPlayer) and then enters a **summary state** until the operator explicitly exits.
+
+### End-State Behavior (DS_DONE)
+
+After all phases complete and the summary is printed:
+
+1. **Initial visual feedback** (blocking):
+   - FAIL: RED wing flashes 6× rapidly
+   - WARN: YELLOW wing pulses 4× slowly
+   - PASS: All wings light for 2 seconds
+
+2. **Continuous result blink** (non-blocking, indefinite):
+   - The result color blinks at ~750 ms on / 750 ms off
+   - RED = FAIL, YELLOW = WARN, GREEN = PASS
+   - This provides persistent visual feedback for no-monitor use
+
+3. **Exit: any button press → `ESP.restart()`**
+   - Pressing any of the four buttons reboots the system
+   - The system returns to `MODE_SELECTION`
+   - Yellow held ≥5 s (global reboot gesture) also remains active via `loop()`
+
+### Design Rationale
+
+- Without a monitor, the result must be readable from LEDs alone
+- Continuous blinking keeps the result visible even if the operator looks away during the initial flash
+- Any-button-to-exit is consistent with the mode selection model (single press = action)
+- `ESP.restart()` keeps mode transitions simple — every mode change starts from a clean slate (see Section 3.2)
+
+---
+
+## 13. References
 
 | Document | Content |
 |----------|---------|

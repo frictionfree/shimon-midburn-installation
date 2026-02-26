@@ -62,6 +62,8 @@ enum DiagState : uint8_t {
 };
 static DiagState  diagState;
 static DiagResult resultA, resultB, resultC, resultD, resultE;
+static DiagResult diagOverallResult;
+static bool       diagBlinkOn;
 static unsigned long diagTimer;
 static uint8_t phA_wing, phA_level;
 static const uint8_t PH_A_DUTIES[3] = {64, 140, 235};
@@ -246,9 +248,10 @@ static void printSummary() {
   Serial.printf("  D (I2S Audio):  %s\n", drStr(resultD));
   Serial.printf("  E (DFPlayer):   %s\n", drStr(resultE));
   Serial.println("-----------------------------------------");
+  diagOverallResult = anyFail ? DR_FAIL : (anyWarn ? DR_WARN : DR_PASS);
   Serial.println(anyFail ? "  OVERALL: FAIL" : (anyWarn ? "  OVERALL: WARN" : "  OVERALL: PASS"));
   Serial.println("=========================================");
-  Serial.println("  Hold YELLOW 5s to reboot.");
+  Serial.println("  Press any button to return to Mode Selection.");
   if (anyFail) {
     for (int i = 0; i < 6; i++) { diagWing(1,235); delay(120); diagWing(1,0); delay(120); }
   } else if (anyWarn) {
@@ -257,6 +260,8 @@ static void printSummary() {
     for (int i = 0; i < 4; i++) diagWing(i,200);
     delay(2000); diagAllOff();
   }
+  diagTimer = millis();
+  diagBlinkOn = false;
 }
 void diag_init() {
   Serial.println("\n=== DIAGNOSTIC MODE ===");
@@ -323,8 +328,28 @@ void diag_tick() {
         diagState = DS_DONE;
       }
       break;
-    case DS_DONE:
+    case DS_DONE: {
+      for (int i = 0; i < 4; i++) {
+        if (digitalRead(DIAG_BTN[i]) == LOW) {
+          diagAllOff();
+          Serial.println("[DIAG] Returning to Mode Selection...");
+          delay(200); ESP.restart();
+        }
+      }
+      if (millis() - diagTimer >= 750UL) {
+        diagTimer = millis();
+        diagBlinkOn = !diagBlinkOn;
+        if (diagBlinkOn) {
+          uint8_t wing = (diagOverallResult == DR_FAIL) ? 1 :  // RED
+                         (diagOverallResult == DR_WARN) ? 3 :  // YELLOW
+                         2;                                     // GREEN
+          diagWing(wing, 200);
+        } else {
+          diagAllOff();
+        }
+      }
       break;
+    }
   }
 }
 void diag_stop() {
