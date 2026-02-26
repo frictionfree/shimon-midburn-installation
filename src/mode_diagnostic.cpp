@@ -27,6 +27,7 @@ static const char* const  WING_NAME[4]    = {"BLUE", "RED", "GREEN", "YELLOW"};
 static constexpr uint32_t PHASE_A_LEVEL_MS   = 800;
 static constexpr uint32_t PHASE_A_TIMEOUT_MS = 15000;
 static constexpr uint32_t PHASE_B_BTN_TOUT   = 5000;
+static constexpr uint32_t PHASE_B_MIN_VIS_MS = 300;  // min LED-on time before accepting press
 static constexpr uint32_t PHASE_C_PROMPT_MS  = 30000;
 static constexpr uint32_t PHASE_C_LISTEN_MS  = 10000;
 static constexpr uint32_t DIAG_DONE_AUTO_MS  = 20000;
@@ -126,6 +127,7 @@ static void phB_enter() {
   diagWing(0, 200);
 }
 static bool phB_tick() {
+  if (millis() - diagTimer < PHASE_B_MIN_VIS_MS) return false;  // wait for LED to be visible
   bool pressed = (digitalRead(DIAG_BTN[phB_wing]) == LOW);
   bool timeout = (millis() - diagTimer >= PHASE_B_BTN_TOUT);
   if (!pressed && !timeout) return false;
