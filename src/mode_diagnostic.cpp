@@ -52,6 +52,18 @@ static HardwareSerial      DiagDfpSer(1);
 static DFRobotDFPlayerMini diagDfp;
 #endif
 enum DiagResult : uint8_t { DR_NONE=0, DR_PASS, DR_WARN, DR_FAIL };
+static const char* diagStateName() {
+  switch (diagState) {
+    case DS_PHASE_A:        return "A";
+    case DS_PHASE_A_CONFIRM:return "A_CONFIRM";
+    case DS_PHASE_B:        return "B";
+    case DS_PHASE_C_PROMPT: return "C_PROMPT";
+    case DS_PHASE_C:        return "C";
+    case DS_PHASE_E:        return "E";
+    case DS_DONE:           return "DONE";
+    default:                return "?";
+  }
+}
 static const char* drStr(DiagResult r) {
   switch (r) {
     case DR_PASS: return "PASS";
@@ -73,6 +85,7 @@ static unsigned long diagDoneStart;
 static uint8_t phA_wing, phA_level;
 static const uint8_t PH_A_DUTIES[3] = {64, 140, 235};
 static uint8_t phB_wing, phB_failed;
+static bool      btnPrev[4] = {false, false, false, false};
 static uint32_t phC_ticks;
 static uint32_t phC_totalBytes;
 static float    phC_bpm;
@@ -338,10 +351,22 @@ void diag_init() {
   Serial.println("  YELLOW hold 5s exits to Mode Selection at any time.");
   diagPwmInit();
   resultA = resultB = resultC = resultD = resultE = DR_NONE;
+  for (int i = 0; i < 4; i++) btnPrev[i] = false;
   diagState = DS_PHASE_A;
   phA_enter();
 }
 void diag_tick() {
+  // Debug: log every button press and release with current phase
+  for (int i = 0; i < 4; i++) {
+    bool now = (digitalRead(DIAG_BTN[i]) == LOW);
+    if (now && !btnPrev[i])
+      Serial.printf("[BTN] %s PRESS  (phase %s, t=%lums)\n",
+                    WING_NAME[i], diagStateName(), millis());
+    else if (!now && btnPrev[i])
+      Serial.printf("[BTN] %s release (phase %s, t=%lums)\n",
+                    WING_NAME[i], diagStateName(), millis());
+    btnPrev[i] = now;
+  }
   switch (diagState) {
     case DS_PHASE_A:
       if (phA_tick()) {
