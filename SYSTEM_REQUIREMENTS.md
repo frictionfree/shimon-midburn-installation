@@ -367,6 +367,40 @@ See `hardware-baseline.md` for authoritative pin mappings.
 
 Diagnostic Mode runs a 5-phase hardware verification sequence (LED / Buttons / MIDI / I2S / DFPlayer) and then enters a **summary state** until the operator explicitly exits.
 
+### Phase Navigation
+
+The operator can advance or exit at any time without waiting for phases to complete.
+
+#### Skip Current Phase
+
+Any button press skips the current phase and advances to the next:
+
+| Phase | Skip available | Notes |
+|-------|----------------|-------|
+| A (LED cycling) | ✅ Any button | 200 ms debounce at phase start to avoid spurious triggers |
+| A_CONFIRM | ✅ Any button | Already the designed advance gesture |
+| B (Buttons) | ❌ Not available | All four buttons are under test |
+| C_PROMPT | ✅ Any button | BLUE is the primary gesture; others also advance |
+| C (MIDI listen) | ✅ Any button | Exits early; evaluates ticks/bytes collected so far |
+| D (I2S) | ❌ Not available | 3 s blocking measurement; too short to warrant skip |
+| E (DFPlayer) | ✅ BLUE | Already the designed confirmation gesture |
+| DONE | ✅ Any button | Returns to Mode Selection immediately |
+
+#### Exit to Mode Selection
+
+**At any point during the diagnostic run:**
+> **YELLOW held ≥ 5 seconds → `ESP.restart()` → Mode Selection**
+
+This is the universal exit gesture defined in Section 3.2. It is active in all phases including Phase B and Phase D (blocking). It is always announced in the diagnostic startup banner.
+
+#### Design Rationale
+
+- Phase B cannot offer a skip because there is no neutral button — all four are the test subject
+- Phase D (I2S) is a 3-second blocking measurement; the complexity of adding a skip outweighs the cost of waiting
+- Skip evaluates partial results (e.g. Phase C may have collected some ticks before skip), preserving useful diagnostic information
+
+---
+
 ### Phase Results — Three-Tier Logic (C and D)
 
 Phases C (MIDI) and D (I2S) use a three-tier result model that distinguishes hardware connectivity from signal readiness:

@@ -97,6 +97,14 @@ static void phA_enter() {
   Serial.printf("  BLUE @ %u%%\n", (unsigned)(PH_A_DUTIES[0] * 100 / 255));
 }
 static bool phA_tick() {
+  if (millis() - diagTimer > 200UL) {  // debounce: ignore presses in first 200ms
+    for (int i = 0; i < 4; i++) {
+      if (digitalRead(DIAG_BTN[i]) == LOW) {
+        Serial.println("  Skipped.");
+        diagWing(phA_wing, 0); diagAllOff(); return true;
+      }
+    }
+  }
   if (millis() - diagTimer < PHASE_A_LEVEL_MS) return false;
   diagWing(phA_wing, 0);
   phA_level++;
@@ -183,6 +191,15 @@ static void phC_enter() {
 #endif
 }
 static bool phC_tick() {
+  for (int i = 0; i < 4; i++) {
+    if (digitalRead(DIAG_BTN[i]) == LOW) {
+#ifndef USE_WOKWI
+      DiagMidi.end();
+#endif
+      Serial.println("  Skipped.");
+      return true;
+    }
+  }
   if (millis() - diagTimer >= PHASE_C_LISTEN_MS) {
 #ifndef USE_WOKWI
     DiagMidi.end();
@@ -317,6 +334,8 @@ static void printSummary() {
 void diag_init() {
   Serial.println("\n=== DIAGNOSTIC MODE ===");
   Serial.println("  Phases: A=LED  B=Buttons  C=MIDI  D=I2S  E=DFPlayer");
+  Serial.println("  Any button skips current phase (except B: buttons under test).");
+  Serial.println("  YELLOW hold 5s exits to Mode Selection at any time.");
   diagPwmInit();
   resultA = resultB = resultC = resultD = resultE = DR_NONE;
   diagState = DS_PHASE_A;
