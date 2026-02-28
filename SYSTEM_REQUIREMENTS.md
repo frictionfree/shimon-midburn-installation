@@ -422,7 +422,7 @@ Any button press skips the current phase and advances to the next:
 | C_PROMPT | ✅ BLUE (primary) | **Edge only** — a BLUE button still held from Phase B cannot confirm instantly |
 | C (MIDI listen) | ✅ Any button | **Edge only** — a button held from C_PROMPT cannot skip Phase C with 0 bytes (would falsely FAIL) |
 | D (I2S) | ❌ Not available | 3 s blocking measurement; too short to warrant skip |
-| E (DFPlayer) | ✅ BLUE | **Edge only** — first new BLUE press after track starts |
+| E (DFPlayer) | ✅ BLUE | **Edge only** — first new BLUE press after track starts; BLUE LED blinks at 400 ms while waiting; DFPlayer stops immediately on BLUE confirm |
 | DONE | ✅ Any button | **Edge only** — prevents PWM-switching ghost clicks from triggering spurious restart |
 
 #### Exit to Mode Selection

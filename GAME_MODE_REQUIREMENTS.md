@@ -324,7 +324,7 @@ Same as idle invite sequence. Encourages replay.
 
 | Button | GPIO | Wing |
 |--------|------|------|
-| Blue | 21 | W1 |
+| Blue | 32 | W1 |
 | Red | 13 | W2 |
 | Green | 14 | W3 |
 | Yellow | 27 | W4 |
