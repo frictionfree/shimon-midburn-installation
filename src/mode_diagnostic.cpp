@@ -295,8 +295,13 @@ static void phE_enter() {
 }
 static bool phE_tick() {
   if (resultE != DR_NONE) return true;
-  if (hw_btn_edge(BLUE)) { resultE = DR_PASS; return true; }
-  if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) { resultE = DR_WARN; return true; }
+  hw_led_duty(BLUE, ((millis() / 400) & 1) ? 180 : 0);  // blink BLUE: "press to confirm"
+  if (hw_btn_edge(BLUE)) { hw_led_all_off();
+#ifndef USE_WOKWI
+    if (phE_dfpOk) diagDfp.stop();
+#endif
+    resultE = DR_PASS; return true; }
+  if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) { hw_led_all_off(); resultE = DR_WARN; return true; }
   return false;
 }
 static void printSummary() {
