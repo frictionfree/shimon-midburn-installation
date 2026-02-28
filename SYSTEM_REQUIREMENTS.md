@@ -117,7 +117,7 @@ A global reboot gesture is available at all times, regardless of the current mod
 
 > **Yellow button held for ≥ 5 seconds**
 
-This gesture is **always active** — detected in the `MODE_SELECTION` loop and in `loop()` via raw `digitalRead` + `millis()` timer. It is not masked by any mode-specific logic.
+This gesture is **always active** — detected in the `MODE_SELECTION` loop and in `loop()` via the shared hw layer (`hw_btn_held_ms(YELLOW) >= 5000`). It is not masked by any mode-specific logic.
 
 #### Action
 
@@ -238,20 +238,59 @@ Hardware stress testing (Section 8) validated that the hardware layer is robust;
 
 ---
 
-## 7. Recommended Architectural Direction
+## 7. Shared Hardware Abstraction Layer (hw.h / hw.cpp)
 
-To fully harden the system, the following architecture is recommended:
+A shared hardware abstraction layer was introduced to eliminate duplicated LED/button code across all three modes and to establish a single, correct debounce implementation.
 
-| Component | Purpose |
-|-----------|---------|
-| Central state machine | Single source of truth for system state |
-| Event-based button handling | Decouple input from action |
-| Single LED owner | One code path controls PWM targets |
-| Single audio control point | Centralized DFPlayer management |
-| Explicit recovery state | Defined path back to known-good state |
-| Software watchdog | Detect and recover from stalls |
+### LED PWM API
 
-**Status:** Identified but not yet fully implemented.
+| Function | Description |
+|----------|-------------|
+| `hw_led_init()` | Initialize LEDC channels 0–3 (one per color) |
+| `hw_led_duty(Color, duty)` | Set PWM duty 0–255 |
+| `hw_led_all_off()` | Zero all four channels |
+| `hw_led_name(Color)` | Human-readable color name |
+
+### Button Debounce API
+
+| Function | Description |
+|----------|-------------|
+| `hw_btn_init()` | Configure INPUT_PULLUP on all four button pins |
+| `hw_btn_update()` | Called **once per loop tick** (in `loop()` before mode dispatch) |
+| `hw_btn_edge(Color)` | True for exactly one tick after a confirmed press |
+| `hw_btn_pressed(Color)` | True while button is confirmed held |
+| `hw_btn_raw(Color)` | Fresh `digitalRead` — for blocking release-wait loops only |
+| `hw_btn_any_edge(Color*)` | Returns first edge this tick; writes color to pointer |
+| `hw_btn_held_ms(Color)` | Milliseconds since press confirmed (0 if not pressed) |
+| `hw_btn_reset_edges()` | Clear all edge flags |
+
+### Ghost-Press Filter
+
+The hw layer requires **3 consecutive matching reads** (≈30 ms at 10 ms loop) **plus a minimum hold time of 50 ms** before a PRESS is confirmed. This filters:
+
+- PWM-switching transients on the MOSFET gate (12.5 kHz bursts much shorter than 50 ms)
+- Mechanical bounce on button contacts
+
+Releases are confirmed after 3 consistent reads with no hold-time requirement (no delay on release).
+
+### Color Enum
+
+```cpp
+enum Color : uint8_t { BLUE=0, RED=1, GREEN=2, YELLOW=3, COLOR_COUNT=4 };
+```
+
+This enum is the shared type used across all modes. Mode-specific aliases (`Wing`, local `Color`) have been removed.
+
+### Architectural Status
+
+| Component | Status |
+|-----------|--------|
+| Shared button debounce (hw layer) | ✅ Implemented |
+| Shared LED PWM (hw layer) | ✅ Implemented |
+| Edge-based button handling | ✅ Implemented (via `hw_btn_edge`) |
+| Central state machine | ❌ Not implemented (per-mode FSMs remain) |
+| Single audio control point | ❌ Not implemented |
+| Software watchdog | ❌ Not implemented |
 
 The successful Party Mode POC confirms that a centralized timing service (MIDI Clock) is viable and should be treated as a first-class system component.
 
@@ -350,7 +389,7 @@ Enter selected mode (Game / Party / Diagnostic)
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `PWM_MIN_EFFECTIVE_DUTY` | 70 | Minimum PWM for visible output |
-| `PWM_FREQUENCY` | 12000 Hz | PWM carrier frequency |
+| `PWM_FREQUENCY` | 12500 Hz | PWM carrier frequency |
 | `PWM_RESOLUTION` | 8-bit | 0-255 duty range |
 | `YELLOW_HOLD_RESET_MS` | 5000 | Yellow hold duration for global reboot |
 | `PARTY_RED_LONG_PRESS_MS` | 3000 | Red hold threshold: short=resync, long=hard reset |
@@ -377,14 +416,14 @@ Any button press skips the current phase and advances to the next:
 
 | Phase | Skip available | Notes |
 |-------|----------------|-------|
-| A (LED cycling) | ✅ Any button | 200 ms debounce at phase start to avoid spurious triggers |
-| A_CONFIRM | ✅ Any button | Already the designed advance gesture |
-| B (Buttons) | ❌ Not available | All four buttons are under test |
-| C_PROMPT | ✅ Any button | BLUE is the primary gesture; others also advance |
-| C (MIDI listen) | ✅ Any button | Exits early; evaluates ticks/bytes collected so far |
+| A (LED cycling) | ✅ Any button | 200 ms window at phase start where presses are ignored |
+| A_CONFIRM | ✅ Any button | Detected via edge (first new press after A completes) |
+| B (Buttons) | ❌ Not available | All four buttons are under test; Phase B waits ≥300 ms after LED lights before accepting a press |
+| C_PROMPT | ✅ BLUE (primary) | **Edge only** — a BLUE button still held from Phase B cannot confirm instantly |
+| C (MIDI listen) | ✅ Any button | **Edge only** — a button held from C_PROMPT cannot skip Phase C with 0 bytes (would falsely FAIL) |
 | D (I2S) | ❌ Not available | 3 s blocking measurement; too short to warrant skip |
-| E (DFPlayer) | ✅ BLUE | Already the designed confirmation gesture |
-| DONE | ✅ Any button | Returns to Mode Selection immediately |
+| E (DFPlayer) | ✅ BLUE | **Edge only** — first new BLUE press after track starts |
+| DONE | ✅ Any button | **Edge only** — prevents PWM-switching ghost clicks from triggering spurious restart |
 
 #### Exit to Mode Selection
 
@@ -447,8 +486,9 @@ After all phases complete and the summary is printed:
    - RED = FAIL, YELLOW = WARN, GREEN = PASS
    - This provides persistent visual feedback for no-monitor use
 
-3. **Exit: any button press → `ESP.restart()`**
-   - Pressing any of the four buttons reboots the system
+3. **Exit: any button edge → `ESP.restart()`**
+   - A **new** button press (edge, not raw level) reboots the system
+   - Raw level detection is explicitly avoided here: the LED blink drives the MOSFET at 12.5 kHz, which can generate ghost LOW readings on button pins; edge detection suppresses these
    - The system returns to `MODE_SELECTION`
    - Yellow held ≥5 s (global reboot gesture) also remains active via `loop()`
 

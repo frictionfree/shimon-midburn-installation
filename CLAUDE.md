@@ -24,8 +24,8 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
 - **Pin Configuration** (include/shimon.h):
   - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5 (all on right header)
-  - **Button Inputs**: BLUE=21, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND, with hardware pull-up + capacitor)
-  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (GPIOs unused/reserved - button LEDs hardwired to mirror LED strips)
+  - **Button Inputs**: BLUE=32, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND, with 10kΩ pull-up + 100nF + 1µF caps to GND; BLUE moved from GPIO21 → GPIO32 Feb 2026 — right-header grouping)
+  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (GPIOs unused/reserved — button LEDs hardwired to mirror LED strips; GPIO32 formerly BTN_LED_GREEN is now BTN_BLUE)
   - **DFPlayer Mini**: RX2=16, TX2=17 (Serial2)
   - **Service LED**: Pin 2 (heartbeat indicator)
 
@@ -266,8 +266,8 @@ The project includes complete Wokwi simulation setup:
 **Hardware Pin Assignments** (from include/shimon.h):
 ```
 LED Strips (MOSFET gates): BLUE=D23, RED=D19, GREEN=D18, YELLOW=D5
-Button Inputs:             BLUE=D21, RED=D13, GREEN=D14, YELLOW=D27
-Button LEDs:               BLUE=D25, RED=D26, GREEN=D32, YELLOW=D33
+Button Inputs:             BLUE=D32, RED=D13, GREEN=D14, YELLOW=D27
+Button LEDs:               BLUE=D25, RED=D26, YELLOW=D33  (no firmware GPIO for green btn LED; D32 is now BTN_BLUE)
 DFPlayer Mini:             RX2=D16, TX2=D17 (Serial2)
 Service LED:               D2 (heartbeat)
 ```
@@ -512,10 +512,40 @@ Service LED:               D2 (heartbeat)
    - Added GENERAL_GAME_OVER state with 6-second pause before invite
    - Score thresholds: Novice/Int ≥8, Advanced/Pro ≥10
 
+### Diagnostic Mode Fixes (Pre-HAL, Branch: `feat/party-mode-poc`)
+
+6. **Phase B minimum LED visibility window**
+   - Phase B now waits 300 ms after lighting the wing LED before accepting a button press
+   - Prevents false PASS if operator's finger is already on the button when the LED lights
+   - Constant: `PHASE_B_MIN_VIS_MS = 300`
+
+7. **Phase skip + exit navigation**
+   - Any button skips the current diagnostic phase (except B — all four buttons under test)
+   - YELLOW 5 s exits to Mode Selection at any time (standard universal gesture)
+   - Skip uses partial results (Phase C evaluates ticks/bytes collected before skip)
+
+### Shared Hardware Abstraction Layer (February 2026, Branch: `feat/party-mode-poc`)
+
+8. **hw.h / hw.cpp — Shared HAL**
+   - Single `Color` enum, LED PWM, and button debounce used by all three modes and main.cpp
+   - Ghost filter: 3 consistent reads + 50 ms hold for PRESS; release immediate
+   - `hw_btn_update()` called once per loop tick in `loop()` before mode dispatch
+   - `hw_btn_edge()` for single-tick press events; `hw_btn_pressed()` for held state; `hw_btn_raw()` for blocking release-wait loops
+   - Removed per-mode duplicates: `SEL_*` (main), `DIAG_LED/BTN/LEDC` (diagnostic), `PIN_LED/BTN/LEDC_CH` (party), `ledPins/btnPins/btnLedPins` (game)
+   - `Wing` enum in party mode renamed to `Color`; all `W_BLUE/RED/GREEN/YELLOW` → `BLUE/RED/GREEN/YELLOW`
+   - `PWM_FREQUENCY_HZ` corrected: 12000 → 12500 in shimon.h (code always ran at 12500; doc fix)
+
+9. **Three diagnostic edge-detection bug fixes** (side-effect of hw.h migration)
+   - **Bug fix 1 — C_PROMPT instant-confirm**: `phCPrompt_tick` now uses `hw_btn_edge(BLUE)`; a BLUE held from Phase B can no longer confirm C_PROMPT on the very first tick, which would transition directly to Phase C with 0 collected bytes → false FAIL
+   - **Bug fix 2 — Phase C instant-skip**: `phC_tick` now uses `hw_btn_any_edge`; a button still held from C_PROMPT can no longer skip Phase C with 0 bytes → false FAIL
+   - **Bug fix 3 — DS_DONE ghost restart**: `DS_DONE` now uses `hw_btn_any_edge`; the blinking LED drives the MOSFET at 12.5 kHz which can couple ghost LOW readings onto button pins; edge detection (requiring a new press) suppresses these
+
 ### Known Issues (Resolved)
 - ✅ Audio messages getting cut off (fixed with finish detection)
 - ✅ No post-game prompt (fixed with POST_GAME_INVITE state)
 - ✅ Button LEDs flashing instead of staying on (fixed with hold detection)
+- ✅ Phase C MIDI FAIL when BLUE held from C_PROMPT (fixed with edge detection in hw.h)
+- ✅ DS_DONE spurious restart from PWM ghost clicks (fixed with edge detection in hw.h)
 
 ### PlatformIO Access
 PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`
@@ -523,8 +553,13 @@ Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
 
 ## File Structure
 
-- `src/main.cpp`: Main game logic, FSM, and all visual effects (1050+ lines)
+- `src/main.cpp`: Top-level mode selection FSM and loop dispatcher
+- `include/hw.h` + `src/hw.cpp`: **Shared hardware abstraction layer** — Color enum, LED PWM, button debounce
 - `include/shimon.h`: Configuration header with all tunable parameters
+- `src/mode_game.cpp`: Simon Says game logic (~1050 lines)
+- `src/mode_party.cpp`: Party mode — I2S audio analysis, MIDI clock, beat-sync visuals
+- `src/mode_diagnostic.cpp`: 5-phase hardware diagnostic (LED / Buttons / MIDI / I2S / DFPlayer)
+- `src/mode_game.h`, `src/mode_party.h`, `src/mode_diagnostic.h`: Mode interface headers
 - `platformio.ini`: Build environments (sim, hardware, native testing)
 - `wokwi.toml` + `diagram.json`: Wokwi simulation configuration with proper pin connections
 - `CLAUDE.md`: This comprehensive documentation file

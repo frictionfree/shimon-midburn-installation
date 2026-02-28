@@ -18,7 +18,8 @@ constexpr uint8_t LED_GREEN  = 18;  // Green strip gate (GPIO18)
 constexpr uint8_t LED_YELLOW = 5;   // Yellow strip gate (GPIO5)
 
 // Button inputs (to GND, use INPUT_PULLUP)
-constexpr uint8_t BTN_BLUE   = 21;  // Blue  button input (GPIO21)
+// All four pins are on the right header, grouped together away from LED pins.
+constexpr uint8_t BTN_BLUE   = 32;  // Blue  button input (GPIO32) — moved from GPIO21 Feb 2026
 constexpr uint8_t BTN_RED    = 13;  // Red   button input (GPIO13)
 constexpr uint8_t BTN_GREEN  = 14;  // Green button input (GPIO14)
 constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
@@ -27,17 +28,18 @@ constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 // NOTE: Button LEDs are hardwired to mirror LED strips via MOSFET channels.
 // These GPIO assignments are RESERVED but not actively used by firmware.
 // Button LEDs automatically turn on/off when LED strips do (hardware-controlled).
+// NOTE: GPIO32 was previously BTN_LED_GREEN; it is now BTN_BLUE (see above).
 constexpr uint8_t BTN_LED_BLUE   = 25;  // RESERVED (was: Blue  button LED)
 constexpr uint8_t BTN_LED_RED    = 26;  // RESERVED (was: Red   button LED)
-constexpr uint8_t BTN_LED_GREEN  = 32;  // RESERVED (was: Green button LED)
 constexpr uint8_t BTN_LED_YELLOW = 33;  // RESERVED (was: Yellow button LED)
+// BTN_LED_GREEN previously on GPIO32 — that pin is now BTN_BLUE; no firmware GPIO for green btn LED
 
 // DFPlayer (Serial2)
 constexpr uint8_t DFP_RX2 = 16;   // ESP32 RX2  (optional)
 constexpr uint8_t DFP_TX2 = 17;   // ESP32 TX2 → DF RX (via 1k resistor)
 
 // --- Notes ---
-// - Button switches: connect to GND (use INPUT_PULLUP with 10kΩ pull-up + 100nF cap to GND).
+// - Button switches: connect to GND (use INPUT_PULLUP with 10kΩ pull-up + 100nF + 1µF caps to GND).
 // - Button LEDs: HARDWARE-CONTROLLED (12V LEDs hardwired to mirror LED strips via MOSFET).
 // - MOSFET gates: GPIO → 330Ω → Gate; 10k Gate→GND.
 //   Drain → LED strip "–"; strip "+" → +12V rail.
@@ -70,7 +72,7 @@ constexpr uint8_t POWER_BUDGET_SAFETY_MARGIN = 20;  // Percent headroom
 
 // PWM Configuration (Stable Operating Envelope)
 // Higher frequency/resolution combinations are unstable or non-functional.
-constexpr unsigned long PWM_FREQUENCY_HZ = 12000;  // 12 kHz (stable, silent)
+constexpr unsigned long PWM_FREQUENCY_HZ = 12500;  // 12.5 kHz (stable, silent)
 constexpr uint8_t PWM_RESOLUTION_BITS = 8;         // 8-bit (0-255)
 
 // --- Game Timing Configuration ---
@@ -194,8 +196,7 @@ constexpr unsigned long MAIN_INSTRUCTIONS_DURATION_MS = 10000;       // Main ins
 constexpr unsigned long DIFFICULTY_INSTRUCTIONS_DURATION_MS = 8000;  // Difficulty-specific instructions (8 sec fallback)
 constexpr unsigned long MY_TURN_DURATION_MS = 3000;                  // "My Turn" audio duration (increased fallback)
 constexpr unsigned long YOUR_TURN_DURATION_MS = 3000;                // "Your Turn" audio duration (increased fallback)
-constexpr unsigned long FEEDBACK_DURATION_MS = 2000;                 // Correct/Wrong feedback duration (2 sec fallback, DFPlayer notification preferred)
-                                                                     // TODO: Increase timeout - audio file 0051 (wrong) is longer than 2000ms and gets cut off
+constexpr unsigned long FEEDBACK_DURATION_MS = 5000;                 // Correct/Wrong feedback duration (5 sec fallback, DFPlayer notification preferred)
 constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message duration (increased fallback)
 constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 6000;            // Delay before playing post-game invite (pause after general game over)
 constexpr unsigned long GAME_OVER_MESSAGE_DELAY_MS = 1000;           // Delay between personalized and general game over messages (increased to prevent overlap)
@@ -216,7 +217,7 @@ constexpr unsigned long START_BURST_DELAY_MS = 100;         // Game start burst 
 // =============================================================================
 
 // Internal derived constants (calculated from above settings)
-constexpr uint8_t COLOR_COUNT = 4;
+// Note: COLOR_COUNT is defined in hw.h as part of the Color enum
 constexpr uint8_t AMBIENT_EFFECT_COUNT = 4;
 
 #endif // SHIMON_H

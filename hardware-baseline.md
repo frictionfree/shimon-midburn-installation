@@ -83,11 +83,11 @@ PWM generation and fade behavior are handled in firmware; hardware provides low�
 - 60 mm illuminated arcade buttons (12 V LED)
 - Button contacts wired to ESP32 GPIOs using **INPUT_PULLUP** logic
 
-**GPIO Assignments:**
+**GPIO Assignments** (Blue moved from GPIO 21 → GPIO 32 in Feb 2026 — right-header grouping):
 
 | Wing   | GPIO |
 |--------|------|
-| Blue   | 21   |
+| Blue   | 32   |
 | Red    | 13   |
 | Green  | 14   |
 | Yellow | 27   |
@@ -97,8 +97,9 @@ PWM generation and fade behavior are handled in firmware; hardware provides low�
 Each button input includes:
 - **10 kΩ pull‑up to 3.3 V**
 - **100 nF ceramic capacitor to GND**
+- **1 µF electrolytic capacitor to GND** (added Feb 2026, in parallel with 100 nF — broader low-frequency filtering)
 
-This RC network eliminates noise and ghost presses caused by long cable runs and EMI.
+This RC network eliminates noise and ghost presses caused by long cable runs and EMI. The 1 µF cap provides additional filtering of lower-frequency transients that the 100 nF alone cannot suppress.
 
 ### 5.3 Button LED Integration (Final, Implemented Design)
 

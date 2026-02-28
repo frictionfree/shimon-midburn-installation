@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "shimon.h"
+#include "hw.h"
 #include "mode_game.h"
 #include "mode_party.h"
 #include "mode_diagnostic.h"
@@ -14,77 +15,60 @@
 enum TopMode : uint8_t { GAME_MODE = 0, PARTY_MODE = 1, DIAG_MODE = 2 };
 static TopMode activeMode = GAME_MODE;
 
-static constexpr uint8_t SEL_CH[4]  = {0, 1, 2, 3};
-static const     uint8_t SEL_LED[4] = {LED_BLUE, LED_RED, LED_GREEN, LED_YELLOW};
-static const     uint8_t SEL_BTN[4] = {BTN_BLUE, BTN_RED, BTN_GREEN, BTN_YELLOW};
-
-static void selPwmInit() {
-  for (int i = 0; i < 4; i++) {
-    ledcSetup(SEL_CH[i], 12500, 8);
-    ledcAttachPin(SEL_LED[i], SEL_CH[i]);
-    ledcWrite(SEL_CH[i], 0);
-  }
-}
-static void selAllOff() { for (int i = 0; i < 4; i++) ledcWrite(SEL_CH[i], 0); }
-
 static void selConfirmAnimation() {
   for (int lap = 0; lap < 2; lap++) {
     for (int i = 0; i < 4; i++) {
-      ledcWrite(SEL_CH[i], 180); delay(120); ledcWrite(SEL_CH[i], 0);
+      hw_led_duty((Color)i, 180); delay(120); hw_led_duty((Color)i, 0);
     }
   }
-  for (int i = 0; i < 4; i++) ledcWrite(SEL_CH[i], 180);
+  for (int i = 0; i < 4; i++) hw_led_duty((Color)i, 180);
   delay(300);
-  selAllOff();
+  hw_led_all_off();
 }
 
 static TopMode runModeSelection() {
-  selPwmInit();
-  for (int i = 0; i < 4; i++) pinMode(SEL_BTN[i], INPUT_PULLUP);
+  hw_led_init();
+  hw_btn_init();
   Serial.println("\n=== MODE SELECTION ===");
   Serial.println("  BLUE  -> Game Mode");
   Serial.println("  GREEN -> Party Mode");
   Serial.println("  RED   -> Diagnostic Mode");
   Serial.println("  YELLOW hold 5s -> Global Reset");
   uint8_t rotSlot = 0;
-  ledcWrite(SEL_CH[0], 180);
+  hw_led_duty(BLUE, 180);
   unsigned long ledTimer = millis();
-  unsigned long yHoldStart = 0;
-  bool yHeld = false;
-  bool btnPrev[3] = {false, false, false};
   while (true) {
     unsigned long now = millis();
+    hw_btn_update();
+
     if (now - ledTimer >= 1000UL) {
-      ledcWrite(SEL_CH[rotSlot], 0);
-      rotSlot = (rotSlot + 1) % 3;
-      ledcWrite(SEL_CH[rotSlot], 180);
+      hw_led_duty((Color)rotSlot, 0);
+      rotSlot = (rotSlot + 1) % 3;  // cycles BLUE(0) → RED(1) → GREEN(2)
+      hw_led_duty((Color)rotSlot, 180);
       ledTimer = now;
     }
-    bool yNow = (digitalRead(SEL_BTN[3]) == LOW);
-    if (yNow && !yHeld) { yHoldStart = now; yHeld = true; }
-    else if (!yNow) { yHeld = false; }
-    if (yHeld && now - yHoldStart >= 5000UL) {
-      selAllOff();
+
+    if (hw_btn_held_ms(YELLOW) >= 5000UL) {
+      hw_led_all_off();
       Serial.println("[SYS] Yellow 5s: global reset.");
       delay(200); ESP.restart();
     }
-    for (int i = 0; i < 3; i++) {
-      bool btnNow = (digitalRead(SEL_BTN[i]) == LOW);
-      if (btnNow && !btnPrev[i]) {
-        selAllOff();
-        TopMode sel;
-        const char* nm;
-        switch (i) {
-          case 0: sel = GAME_MODE;   nm = "Game Mode";       break;
-          case 1: sel = DIAG_MODE;   nm = "Diagnostic Mode"; break;
-          default: sel = PARTY_MODE; nm = "Party Mode";      break;
-        }
-        Serial.printf("[MODE] %s selected.\n", nm);
-        selConfirmAnimation();
-        return sel;
+
+    Color pressed;
+    if (hw_btn_any_edge(&pressed) && pressed != YELLOW) {
+      hw_led_all_off();
+      TopMode sel;
+      const char* nm;
+      switch (pressed) {
+        case BLUE:  sel = GAME_MODE;   nm = "Game Mode";       break;
+        case RED:   sel = DIAG_MODE;   nm = "Diagnostic Mode"; break;
+        default:    sel = PARTY_MODE;  nm = "Party Mode";      break;
       }
-      btnPrev[i] = btnNow;
+      Serial.printf("[MODE] %s selected.\n", nm);
+      selConfirmAnimation();
+      return sel;
     }
+
     delay(10);
   }
 }
@@ -102,17 +86,18 @@ void setup() {
 }
 
 void loop() {
-  {
-    static unsigned long yHoldStart = 0;
-    static bool yHeld = false;
-    bool yNow = (digitalRead(BTN_YELLOW) == LOW);
-    if (yNow && !yHeld) { yHoldStart = millis(); yHeld = true; }
-    else if (!yNow) { yHeld = false; }
-    if (yHeld && millis() - yHoldStart >= 5000UL) {
-      Serial.println("[SYS] Yellow 5s: global reset.");
-      delay(200); ESP.restart();
+  hw_btn_update();  // Single canonical button update; all modes read from hw layer
+
+  if (hw_btn_held_ms(YELLOW) >= 5000UL) {
+    Serial.println("[SYS] Yellow 5s: global reset.");
+    switch (activeMode) {
+      case PARTY_MODE: party_stop(); break;
+      case DIAG_MODE:  diag_stop();  break;
+      default:         game_stop();  break;
     }
+    delay(200); ESP.restart();
   }
+
   switch (activeMode) {
     case PARTY_MODE: party_tick(); break;
     case DIAG_MODE:  diag_tick();  break;

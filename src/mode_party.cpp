@@ -32,9 +32,9 @@
 #include <Arduino.h>
 #include "driver/i2s.h"
 #include "mode_party.h"
+#include "hw.h"
 
 // ---------- VISUAL TYPES MUST BE ABOVE ANY FUNCTIONS ----------
-enum Wing : uint8_t { W_BLUE=0, W_RED=1, W_GREEN=2, W_YELLOW=3 };
 enum VisualMode : uint8_t { VIS_STD=0, VIS_BREAK=1, VIS_DROP=2, VIS_DEBUG=3 };
 
 // ---------- FAILURE TYPES (MUST BE ABOVE ANY FUNCTIONS) ----------
@@ -64,32 +64,6 @@ static const char* ctxName(ContextState s) {
     default: return "?";
   }
 }
-
-// ---------------- BASELINE-LOCKED LED / BUTTON PINS ----------------
-// PWM pins (locked)
-static constexpr int PIN_LED_BLUE   = 23;
-static constexpr int PIN_LED_RED    = 19;
-static constexpr int PIN_LED_GREEN  = 18;
-static constexpr int PIN_LED_YELLOW = 5;
-
-// Button input pins (locked)
-static constexpr int PIN_BTN_BLUE   = 21;
-static constexpr int PIN_BTN_RED    = 13;
-static constexpr int PIN_BTN_GREEN  = 14;
-static constexpr int PIN_BTN_YELLOW = 27;
-
-// PWM envelope (locked/validated)
-static constexpr int PWM_FREQ_HZ = 12500;
-static constexpr int PWM_RES_BITS = 8;
-
-// LEDC channels (one per wing)
-static constexpr uint8_t LEDC_CH_BLUE   = 0;
-static constexpr uint8_t LEDC_CH_RED    = 1;
-static constexpr uint8_t LEDC_CH_GREEN  = 2;
-static constexpr uint8_t LEDC_CH_YELLOW = 3;
-
-// MOSFET minimum visible duty behavior (empirically ~70/255)
-static constexpr uint8_t MIN_VISIBLE_DUTY = 70;
 
 // ---------------- DEBUG CONTROL ----------------
 // Set to true for verbose beat-by-beat logging (beats 2,3,4 within bars)
@@ -375,13 +349,9 @@ static void logEvent(const char* e) {
 
 // ---------------- VISUALS ----------------
 
-// IMPORTANT: pin map must match Wing enum ordering above
-static const int WING_PINS[4] = { PIN_LED_BLUE, PIN_LED_RED, PIN_LED_GREEN, PIN_LED_YELLOW };
-static const uint8_t WING_CHANNELS[4] = { LEDC_CH_BLUE, LEDC_CH_RED, LEDC_CH_GREEN, LEDC_CH_YELLOW };
-
 // Physical rotation order (clockwise from top-left): W1=BLUE, W2=RED, W3=GREEN, W4=YELLOW
-static const Wing CW_ORDER[4]  = { W_BLUE, W_RED, W_GREEN, W_YELLOW };
-static const Wing CCW_ORDER[4] = { W_BLUE, W_YELLOW, W_GREEN, W_RED };
+static const Color CW_ORDER[4]  = { BLUE, RED, GREEN, YELLOW };
+static const Color CCW_ORDER[4] = { BLUE, YELLOW, GREEN, RED };
 
 static VisualMode visMode = VIS_STD;
 
@@ -452,11 +422,11 @@ static uint32_t patWindowStartBeat = 0;  // Global beat at window start
 
 // BREAK crossfade state
 static bool breakFading = false;
-static Wing breakFrom = W_BLUE;
-static Wing breakTo = W_GREEN;
+static Color breakFrom = BLUE;
+static Color breakTo = GREEN;
 static uint32_t breakFadeStartUs = 0;
 static uint32_t breakFadeDurUs = 1000000;
-static Wing brkLastWing = W_BLUE;     // For no-repeat rule
+static Color brkLastWing = BLUE;     // For no-repeat rule
 
 // DROP timing state
 static uint8_t dropStep = 0;
@@ -467,16 +437,16 @@ static uint32_t halfBeatUs = 250000;
 static bool std02IsAccent = false;
 static uint32_t std02RetriggerUs = 0;
 
-static inline void writeWingDuty(Wing w, uint8_t duty) {
-  ledcWrite(WING_CHANNELS[w], duty);
+static inline void writeWingDuty(Color w, uint8_t duty) {
+  hw_led_duty(w, duty);
   outDuty[w] = duty;
 }
 
 static uint8_t dutyFromLevel(float level01, uint8_t target) {
   level01 = clamp01(level01);
   if (level01 <= 0.0f) return 0;
-  if (target <= MIN_VISIBLE_DUTY) return target;
-  float d = (float)MIN_VISIBLE_DUTY + level01 * ((float)target - (float)MIN_VISIBLE_DUTY);
+  if (target <= HW_PWM_MIN_DUTY) return target;
+  float d = (float)HW_PWM_MIN_DUTY + level01 * ((float)target - (float)HW_PWM_MIN_DUTY);
   if (d < 0) d = 0;
   if (d > 255) d = 255;
   return (uint8_t)(d + 0.5f);
@@ -491,12 +461,13 @@ static void applyGlobalCap(uint8_t req[4]) {
     if (req[i] == 0) continue;
     float v = (float)req[i] * scale;
     req[i] = (uint8_t)(v + 0.5f);
-    if (req[i] > 0 && req[i] < MIN_VISIBLE_DUTY) req[i] = MIN_VISIBLE_DUTY;
+    if (req[i] > 0 && req[i] < HW_PWM_MIN_DUTY) req[i] = HW_PWM_MIN_DUTY;
   }
 }
 
 static void allOff() {
-  for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, 0);
+  hw_led_all_off();
+  for (int i = 0; i < 4; i++) outDuty[i] = 0;
 }
 
 // Clear all wing requests
@@ -505,7 +476,7 @@ static void clearRequests() {
 }
 
 // Set a wing's brightness request (0.0-1.0)
-static void setWing(Wing w, float brightness) {
+static void setWing(Color w, float brightness) {
   if (w >= 4) {
     Serial.printf("WING_OOB setWing w=%u pos=%lu.%u\n",
                   (unsigned)w, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
@@ -515,7 +486,7 @@ static void setWing(Wing w, float brightness) {
 }
 
 // Add to a wing's brightness (for overlaps)
-static void addWing(Wing w, float brightness) {
+static void addWing(Color w, float brightness) {
   if (w >= 4) {
     Serial.printf("WING_OOB addWing w=%u pos=%lu.%u\n",
                   (unsigned)w, (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
@@ -548,7 +519,7 @@ static void commitRequests() {
   applyGlobalCap(duties);
 
   for (int i = 0; i < 4; i++) {
-    writeWingDuty((Wing)i, duties[i]);
+    writeWingDuty((Color)i, duties[i]);
   }
 }
 
@@ -595,18 +566,18 @@ static void patStd02OnBeat(uint8_t bar, uint8_t beat) {
 
   // Edge patterns: [beat1, beat2, beat3, beat4] for each bar
   // Oscillates between two adjacent wings per bar
-  static const Wing EDGE_PATTERN[4][4] = {
-    { W_RED, W_BLUE, W_RED, W_BLUE },       // Bar 1: Top edge (W2↔W1)
-    { W_GREEN, W_RED, W_GREEN, W_RED },     // Bar 2: Right edge (W3↔W2)
-    { W_YELLOW, W_GREEN, W_YELLOW, W_GREEN }, // Bar 3: Bottom edge (W4↔W3)
-    { W_BLUE, W_YELLOW, W_BLUE, W_YELLOW }  // Bar 4: Left edge (W1↔W4)
+  static const Color EDGE_PATTERN[4][4] = {
+    { RED, BLUE, RED, BLUE },       // Bar 1: Top edge (W2↔W1)
+    { GREEN, RED, GREEN, RED },     // Bar 2: Right edge (W3↔W2)
+    { YELLOW, GREEN, YELLOW, GREEN }, // Bar 3: Bottom edge (W4↔W3)
+    { BLUE, YELLOW, BLUE, YELLOW }  // Bar 4: Left edge (W1↔W4)
   };
 
   // Bars 5-8 repeat bars 1-4
   uint8_t barIdx = ((bar - 1) % 4);
   uint8_t beatIdx = beat - 1;  // 0-3
 
-  Wing w = EDGE_PATTERN[barIdx][beatIdx];
+  Color w = EDGE_PATTERN[barIdx][beatIdx];
   setWing(w, 1.0f);
 
   commitRequests();
@@ -618,18 +589,18 @@ static void patStd03OnBeat(uint8_t bar, uint8_t beat) {
   clearRequests();
 
   bool oddBar = (bar % 2) == 1;
-  Wing pair[2];
+  Color pair[2];
 
   if (oddBar) {
-    pair[0] = W_BLUE;   // W1
-    pair[1] = W_GREEN;  // W3
+    pair[0] = BLUE;   // W1
+    pair[1] = GREEN;  // W3
   } else {
-    pair[0] = W_RED;    // W2
-    pair[1] = W_YELLOW; // W4
+    pair[0] = RED;    // W2
+    pair[1] = YELLOW; // W4
   }
 
   // Alternate within pair: beat 1,3 = pair[0]; beat 2,4 = pair[1]
-  Wing w = ((beat % 2) == 1) ? pair[0] : pair[1];
+  Color w = ((beat % 2) == 1) ? pair[0] : pair[1];
 
   setWing(w, 1.0f);
   commitRequests();
@@ -640,10 +611,10 @@ static void patStd03OnBeat(uint8_t bar, uint8_t beat) {
 static void patBrk01OnBeat(uint8_t bar, uint8_t beat) {
   // Trigger new crossfade every 2 beats
   if ((beat == 1) || (beat == 3)) {
-    Wing next = brkLastWing;
+    Color next = brkLastWing;
     // Pick random different wing
     while (next == brkLastWing) {
-      next = (Wing)(esp_random() % 4);
+      next = (Color)(esp_random() % 4);
     }
 
     breakFrom = brkLastWing;
@@ -660,7 +631,7 @@ static void patBrk01OnBeat(uint8_t bar, uint8_t beat) {
 // Single wing holds 1 bar, fade in first 2 beats, fade out last 2 beats
 static void patBrk02OnBeat(uint8_t bar, uint8_t beat) {
   // Select wing for this bar (cycle through)
-  Wing w = CW_ORDER[(bar - 1) % 4];
+  Color w = CW_ORDER[(bar - 1) % 4];
 
   // Store for render
   breakFrom = w;
@@ -679,7 +650,7 @@ static void patBrk02OnBeat(uint8_t bar, uint8_t beat) {
 static void patBrk03OnBeat(uint8_t bar, uint8_t beat) {
   if ((beat == 1) || (beat == 3)) {
     // Advance to next wing
-    Wing next = brkLastWing;
+    Color next = brkLastWing;
     next = CW_ORDER[((uint8_t)next + 1) % 4];  // Sequential, not random
 
     breakFrom = brkLastWing;
@@ -725,11 +696,11 @@ static void patDrp02OnBeat(uint8_t bar, uint8_t beat) {
 
   // Strong hit on beat
   if (drp02Axis13) {
-    setWing(W_BLUE, 1.0f);
-    setWing(W_GREEN, 1.0f);
+    setWing(BLUE, 1.0f);
+    setWing(GREEN, 1.0f);
   } else {
-    setWing(W_RED, 1.0f);
-    setWing(W_YELLOW, 1.0f);
+    setWing(RED, 1.0f);
+    setWing(YELLOW, 1.0f);
   }
 
   dropStep = 0;  // Reset for half-beat tracking
@@ -746,20 +717,20 @@ static void patDrp02OnHalfBeat() {
   if (dropStep == 1) {
     // Off-beat: flash opposite axis
     if (!drp02Axis13) {
-      setWing(W_BLUE, 0.6f);
-      setWing(W_GREEN, 0.6f);
+      setWing(BLUE, 0.6f);
+      setWing(GREEN, 0.6f);
     } else {
-      setWing(W_RED, 0.6f);
-      setWing(W_YELLOW, 0.6f);
+      setWing(RED, 0.6f);
+      setWing(YELLOW, 0.6f);
     }
   } else {
     // Main beat: primary axis
     if (drp02Axis13) {
-      setWing(W_BLUE, 1.0f);
-      setWing(W_GREEN, 1.0f);
+      setWing(BLUE, 1.0f);
+      setWing(GREEN, 1.0f);
     } else {
-      setWing(W_RED, 1.0f);
-      setWing(W_YELLOW, 1.0f);
+      setWing(RED, 1.0f);
+      setWing(YELLOW, 1.0f);
     }
   }
 
@@ -936,7 +907,7 @@ static void visualsOnBeat(bool isBarStart) {
   if (visMode == VIS_DEBUG) {
     clearRequests();
     bool on = ((globalBeatIndex() % 2) == 0);
-    setWing(W_RED, on ? 1.0f : 0.0f);
+    setWing(RED, on ? 1.0f : 0.0f);
     commitRequests();
     return;
   }
@@ -985,9 +956,9 @@ static void visualsRender() {
 
     const bool on = (ms % 1000) < 150;
     uint8_t req[4] = {0,0,0,0};
-    req[W_RED] = on ? DEBUG_BRIGHT : 0;
+    req[RED] = on ? DEBUG_BRIGHT : 0;
     applyGlobalCap(req);
-    for (int i = 0; i < 4; i++) writeWingDuty((Wing)i, req[i]);
+    for (int i = 0; i < 4; i++) writeWingDuty((Color)i, req[i]);
     return;
   }
 
@@ -1046,8 +1017,8 @@ static void visualsRender() {
     // Pattern-specific DROP rendering
     if (activePattern == PAT_DRP_01) {
       // Impact Chase: half-beat rotation through all wings
-      Wing cur = CW_ORDER[dropStep % 4];
-      Wing nxt = CW_ORDER[(dropStep + 1) % 4];
+      Color cur = CW_ORDER[dropStep % 4];
+      Color nxt = CW_ORDER[(dropStep + 1) % 4];
 
       float holdEnd = 1.0f - DROP_OVERLAP_FRAC;
 
@@ -1068,21 +1039,21 @@ static void visualsRender() {
       if (dropStep == 0) {
         // Primary axis
         if (drp02Axis13) {
-          setWing(W_BLUE, pulse);
-          setWing(W_GREEN, pulse);
+          setWing(BLUE, pulse);
+          setWing(GREEN, pulse);
         } else {
-          setWing(W_RED, pulse);
-          setWing(W_YELLOW, pulse);
+          setWing(RED, pulse);
+          setWing(YELLOW, pulse);
         }
       } else {
         // Alternate axis (lower intensity)
         float altPulse = 0.4f + 0.2f * (1.0f - phase);
         if (!drp02Axis13) {
-          setWing(W_BLUE, altPulse);
-          setWing(W_GREEN, altPulse);
+          setWing(BLUE, altPulse);
+          setWing(GREEN, altPulse);
         } else {
-          setWing(W_RED, altPulse);
-          setWing(W_YELLOW, altPulse);
+          setWing(RED, altPulse);
+          setWing(YELLOW, altPulse);
         }
       }
     }
@@ -1804,7 +1775,7 @@ static void resetForHardReset() {
   patWindowStartBeat = 0;
   prevStateForPattern = STANDARD;
   breakFading = false;
-  brkLastWing = W_BLUE;
+  brkLastWing = BLUE;
   dropStep = 0;
   lastHalfBeatUs = micros();
   std02IsAccent = false;
@@ -1868,7 +1839,7 @@ static void resetForResumeLike() {
   patWindowStartBeat = 0;
   prevStateForPattern = STANDARD;
   breakFading = false;
-  brkLastWing = W_BLUE;
+  brkLastWing = BLUE;
   dropStep = 0;
   lastHalfBeatUs = micros();
   std02IsAccent = false;
@@ -2143,21 +2114,16 @@ static void processAudio() {
 // Red button: short press = MIDI/bar resync (keep baseline); long press >= 3 s = hard reset
 static constexpr uint32_t RED_LONG_PRESS_MS  = 3000;
 static constexpr uint32_t RED_SHORT_MIN_MS   = 20;   // min hold-time to reject PWM ghost clicks
-static bool lastRedBtn = true;
 
 static void processButtons() {
-  static uint32_t redPressStartMs = 0;
-  bool redNow = (digitalRead(PIN_BTN_RED) != LOW); // true = not pressed
+  static uint32_t redHoldAtRelease = 0;
+  static bool     redWasPressed    = false;
+  bool redIsPressed = hw_btn_pressed(RED);
 
-  // Press (falling edge) - record start time
-  if (lastRedBtn == true && redNow == false) {
-    redPressStartMs = millis();
-  }
+  if (redIsPressed) redHoldAtRelease = hw_btn_held_ms(RED);
 
-  // Release (rising edge) - act based on hold duration
-  if (lastRedBtn == false && redNow == true) {
-    uint32_t holdMs = (uint32_t)(millis() - redPressStartMs);
-
+  if (redWasPressed && !redIsPressed) {
+    // Release edge - act based on captured hold duration
     // Clear failure state on any Red action
     if (sysMode == SYS_FAIL) {
       sysMode = SYS_OK;
@@ -2170,44 +2136,28 @@ static void processButtons() {
     lastClockUs = 0;
     lastAudioUs = 0;
 
-    if (holdMs < RED_SHORT_MIN_MS) {
+    if (redHoldAtRelease < RED_SHORT_MIN_MS) {
       // Sub-threshold: ghost click from PWM noise — ignore silently
-      Serial.printf("BTN RED_GHOST holdMs=%lu ignored\n", (unsigned long)holdMs);
-    } else if (holdMs >= RED_LONG_PRESS_MS) {
+      // (hw layer's 50ms ghost filter makes this redundant, kept for documentation)
+      Serial.printf("BTN RED_GHOST holdMs=%lu ignored\n", (unsigned long)redHoldAtRelease);
+    } else if (redHoldAtRelease >= RED_LONG_PRESS_MS) {
       // Long press: hard reset (clears baseline)
       Serial.printf("BTN RED_LONG pos=%lu.%u holdMs=%lu action=HARD_RESET(BASELINE_CLEARED)\n",
                     (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-                    (unsigned long)holdMs);
+                    (unsigned long)redHoldAtRelease);
       doManualResync();
     } else {
       // Short press: MIDI/bar resync (keeps baseline)
       Serial.printf("BTN RED_SHORT pos=%lu.%u holdMs=%lu action=MIDI_RESYNC\n",
                     (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-                    (unsigned long)holdMs);
+                    (unsigned long)redHoldAtRelease);
       Serial.printf("EVENT MANUAL_RESYNC pos=%lu.%u\n",
                     (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
       resetForResumeLike();
     }
   }
 
-  lastRedBtn = redNow;
-}
-
-// ---------------- LED PWM INIT ----------------
-static void pwmInit() {
-  // Setup LEDC channels (older ESP32 Arduino API)
-  ledcSetup(LEDC_CH_BLUE,   PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcSetup(LEDC_CH_RED,    PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcSetup(LEDC_CH_GREEN,  PWM_FREQ_HZ, PWM_RES_BITS);
-  ledcSetup(LEDC_CH_YELLOW, PWM_FREQ_HZ, PWM_RES_BITS);
-
-  // Attach pins to channels
-  ledcAttachPin(PIN_LED_BLUE,   LEDC_CH_BLUE);
-  ledcAttachPin(PIN_LED_RED,    LEDC_CH_RED);
-  ledcAttachPin(PIN_LED_GREEN,  LEDC_CH_GREEN);
-  ledcAttachPin(PIN_LED_YELLOW, LEDC_CH_YELLOW);
-
-  allOff();
+  redWasPressed = redIsPressed;
 }
 
 // ---------------- MODE INTERFACE ----------------
@@ -2221,13 +2171,8 @@ void party_init() {
                 (uint32_t)&wingRequest[0], (uint32_t)&wingRequest[1],
                 (uint32_t)&wingRequest[2], (uint32_t)&wingRequest[3]);
 
-  pinMode(PIN_BTN_BLUE,   INPUT_PULLUP);
-  pinMode(PIN_BTN_RED,    INPUT_PULLUP);
-  pinMode(PIN_BTN_GREEN,  INPUT_PULLUP);
-  pinMode(PIN_BTN_YELLOW, INPUT_PULLUP);
-  lastRedBtn = (digitalRead(PIN_BTN_RED) != LOW);
-
-  pwmInit();
+  hw_led_init();
+  hw_btn_init();
 
   MidiSerial.begin(31250, SERIAL_8N1, 34, -1);
 

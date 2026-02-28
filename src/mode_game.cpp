@@ -1,14 +1,12 @@
 #include <Arduino.h>
 #include "shimon.h"
+#include "hw.h"
 #include "mode_game.h"
 
 #ifndef USE_WOKWI
 #include <HardwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
 #endif
-
-// Color enum mapped to audio file numbers: Blue=1, Red=2, Green=3, Yellow=4
-enum Color { BLUE=0, RED=1, GREEN=2, YELLOW=3 };
 
 // --- Difficulty Level System ---
 enum DifficultyLevel {
@@ -45,12 +43,6 @@ struct GameState {
 
 // --- Runtime Configurable Features ---
 bool ENABLE_AUDIO_CONFUSER = false; // Default: confuser mode OFF (configured automatically based on difficulty level)
-
-// --- Pin Arrays (reordered to match Color enum: BLUE, RED, GREEN, YELLOW) ---
-// Note: GPIO pin numbers in shimon.h remain unchanged, only array order changes
-uint8_t ledPins[COLOR_COUNT] = {LED_BLUE, LED_RED, LED_GREEN, LED_YELLOW};
-uint8_t btnPins[COLOR_COUNT] = {BTN_BLUE, BTN_RED, BTN_GREEN, BTN_YELLOW};
-uint8_t btnLedPins[COLOR_COUNT] = {BTN_LED_BLUE, BTN_LED_RED, BTN_LED_GREEN, BTN_LED_YELLOW};
 
 // ---- Audio Playback Tracking ----
 // Audio playback tracking (declared here for global access)
@@ -400,11 +392,6 @@ unsigned long nextInviteDelay = 0; // Next invite delay
 bool ledOn = false;                // Current LED state during display
 Color lastButtonPressed = RED;     // Track button presses
 
-// Button debouncing
-bool buttonStates[4] = {false, false, false, false};
-bool lastButtonStates[4] = {true, true, true, true};
-unsigned long buttonDebounceTime[4] = {0, 0, 0, 0};
-
 // Ambient effects state
 AmbientEffect currentAmbientEffect = BREATHING;
 unsigned long ambientTimer = 0;
@@ -434,47 +421,7 @@ bool isAudioComplete(unsigned long startTime, unsigned long timeoutMs) {
 }
 
 static inline void setLed(Color c, bool on) {
-  // Normal logic for current-sourcing LEDs: HIGH = ON, LOW = OFF
-  digitalWrite(ledPins[c], on ? HIGH : LOW);
-
-  // **HARDWARE NOTE**: Button LEDs automatically mirror LED strip state (hardwired).
-  // When LED strip turns on/off, corresponding button LED does the same.
-  // See hardware-baseline.md Section 6 for details.
-
-  // **PWM NOTE**: If implementing PWM/fading in future (analogWrite):
-  // - MOSFETs require minimum ~70/255 duty to conduct at 3.3V gate voltage
-  // - Must jump to PWM_MIN_EFFECTIVE_DUTY immediately, do NOT ramp from 0
-  // - See hardware-baseline.md Section 10.1 and shimon.h for details
-
-  // Debug output for LED state changes
-  //Serial.printf("LED %s (pin %d) -> %s\n",
-  //              c==RED?"RED":c==BLUE?"BLUE":c==GREEN?"GREEN":"YELLOW",
-  //              ledPins[c], on ? "ON" : "OFF");
-}
-
-static inline void setBtnLed(Color c, bool on) {
-  // **HARDWARE NOTE**: Button LEDs are HARDWARE-CONTROLLED (hardwired to mirror LED strips).
-  // This function is INEFFECTIVE - button LEDs automatically turn on/off with LED strips.
-  // GPIOs 25, 26, 32, 33 are unused/reserved. This function is kept for code compatibility
-  // and potential future use, but has no effect on button LED behavior.
-  // See hardware-baseline.md Section 6 for details.
-
-  // Control illuminated button LEDs: HIGH = ON, LOW = OFF
-  static bool lastBtnLedStates[4] = {false, false, false, false};
-
-  // Only update if state changed
-  if (lastBtnLedStates[c] != on) {
-    digitalWrite(btnLedPins[c], on ? HIGH : LOW);
-    lastBtnLedStates[c] = on;
-    // Commented out to reduce debug spam - uncomment if needed for debugging button LEDs
-    // Serial.printf("Button LED %s (pin %d) -> %s\n",
-    //               c==BLUE?"BLUE":c==RED?"RED":c==GREEN?"GREEN":"YELLOW",
-    //               btnLedPins[c], on ? "ON" : "OFF");
-  }
-}
-
-static inline bool pressed(Color c) {
-  return digitalRead(btnPins[c]) == LOW;
+  hw_led_duty(c, on ? 255 : 0);
 }
 
 // Helper function to select appropriate game over message based on difficulty and score
@@ -601,71 +548,14 @@ void extendSequence() {
 }
 
 // ---- Button Input Handling ----
-// Enhanced debouncing with consecutive read requirement
-static uint8_t buttonConsistentCount[4] = {0, 0, 0, 0};
-constexpr uint8_t REQUIRED_CONSISTENT_READS = 3; // Require 3 consecutive consistent reads
-
-void updateButtonStates() {
-  unsigned long now = millis();
-
-  for (int i = 0; i < COLOR_COUNT; i++) {
-    bool rawState = pressed((Color)i);
-
-    // Enhanced debouncing: require multiple consecutive consistent reads
-    if (rawState != lastButtonStates[i]) {
-      // State change detected - reset consistency counter and timer
-      buttonDebounceTime[i] = now;
-      buttonConsistentCount[i] = 1;
-    } else {
-      // Same state as last read - increment consistency counter
-      if (buttonConsistentCount[i] < REQUIRED_CONSISTENT_READS) {
-        buttonConsistentCount[i]++;
-      }
-
-      // Only update button state if:
-      // 1. We've seen enough consistent reads AND
-      // 2. Enough time has passed (debounce time)
-      if (buttonConsistentCount[i] >= REQUIRED_CONSISTENT_READS &&
-          now - buttonDebounceTime[i] > BUTTON_DEBOUNCE_MS) {
-        buttonStates[i] = rawState;
-      }
-    }
-
-    lastButtonStates[i] = rawState;
-  }
-}
-
-bool getButtonPress(Color c, bool reset = false) {
-  // Returns true only on the first frame of a button press (edge detection)
-  static bool lastProcessedStates[4] = {false, false, false, false};
-  
-  if (reset) {
-    // Reset all edge detection states
-    for (int i = 0; i < 4; i++) {
-      lastProcessedStates[i] = false;
-    }
-    return false;
-  }
-  
-  bool pressed = buttonStates[c] && !lastProcessedStates[c];
-  lastProcessedStates[c] = buttonStates[c];
-  return pressed;
-}
-
-void resetButtonEdgeDetection() {
-  getButtonPress(RED, true); // Reset the edge detection state
-}
 
 bool anyButtonPressed() {
-  for (int i = 0; i < COLOR_COUNT; i++) {
-    if (getButtonPress((Color)i)) {
-      lastButtonPressed = (Color)i;
-      Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n",
-                    i==RED?"RED":i==BLUE?"BLUE":i==GREEN?"GREEN":"YELLOW", btnPins[i]);
-      // Light up button LED when button is pressed (in all states)
-      setBtnLed((Color)i, true);
-      return true;
-    }
+  Color c;
+  if (hw_btn_any_edge(&c)) {
+    lastButtonPressed = c;
+    Serial.printf("BUTTON DETECTED: %s button pressed (pin %d)\n",
+                  hw_led_name(c), HW_BTN_PIN[c]);
+    return true;
   }
   return false;
 }
@@ -879,13 +769,9 @@ void game_init() {
   Serial.println("Serial test complete!");
   pinMode(LED_SERVICE, OUTPUT);
   Serial.println("Setting up pins...");
-  for (auto p: ledPins) pinMode(p, OUTPUT);
-  for (auto p: btnPins) {
-    pinMode(p, INPUT_PULLUP);
-    Serial.printf("Button pin %d set to INPUT_PULLUP\n", p);
-  }
-  for (auto p: btnLedPins) pinMode(p, OUTPUT);
-  
+  hw_led_init();
+  hw_btn_init();
+
   // LED test - flash each LED to verify they work
   Serial.println("Testing wing LEDs...");
   for (int i = 0; i < COLOR_COUNT; i++) {
@@ -895,16 +781,6 @@ void game_init() {
     delay(200);
   }
   Serial.println("Wing LED test complete!");
-  
-  // Button LED test
-  Serial.println("Testing button LEDs...");
-  for (int i = 0; i < COLOR_COUNT; i++) {
-    setBtnLed((Color)i, true);
-    delay(500);
-    setBtnLed((Color)i, false);
-    delay(200);
-  }
-  Serial.println("Button LED test complete!");
   Serial.println("Initializing audio...");
   audio.begin();
   Serial.println("Setting random seed...");
@@ -933,29 +809,6 @@ void game_tick() {
   static unsigned long lastLoopDebug = 0;
 
   digitalWrite(LED_SERVICE, (millis() >> 9) & 1); // Heartbeat LED
-  updateButtonStates(); // Handle button debouncing
-
-  // Update button LEDs to reflect button states (turn off when released)
-  // Only in non-gameplay states - SEQ_INPUT handles its own LED logic
-  static bool btnLedStates[4] = {false, false, false, false};
-  if (gameState != SEQ_INPUT && gameState != CORRECT_FEEDBACK && gameState != WRONG_FEEDBACK) {
-    for (int i = 0; i < COLOR_COUNT; i++) {
-      // Only update if state changed to avoid debug spam
-      if (buttonStates[i] && !btnLedStates[i]) {
-        // Button pressed, turn on LED (handled by anyButtonPressed)
-        btnLedStates[i] = true;
-      } else if (!buttonStates[i] && btnLedStates[i]) {
-        // Button released, turn off LED
-        setBtnLed((Color)i, false);
-        btnLedStates[i] = false;
-      }
-    }
-  } else {
-    // In gameplay states, sync our tracking with actual button states
-    for (int i = 0; i < COLOR_COUNT; i++) {
-      btnLedStates[i] = buttonStates[i];
-    }
-  }
 
 #ifndef USE_WOKWI
   audio.handleStatus(); // Handle DFPlayer status/errors for real hardware
@@ -1036,9 +889,6 @@ void game_tick() {
           const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
           Serial.printf("Instructions skipped - Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
 
-          // Turn on selected button LED
-          setBtnLed((Color)selectedDifficulty, true);
-
           // Play difficulty-specific instructions
           audioFinished = false;
           audio.playDifficultyInstructions(selectedDifficulty);
@@ -1078,11 +928,6 @@ void game_tick() {
       if (anyButtonPressed()) {
         selectedDifficulty = (DifficultyLevel)lastButtonPressed;
 
-        // Turn off all button LEDs except selected
-        for (int i = 0; i < COLOR_COUNT; i++) {
-          setBtnLed((Color)i, i == selectedDifficulty);
-        }
-
         const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
         Serial.printf("Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
 
@@ -1095,19 +940,11 @@ void game_tick() {
     }
 
     case DIFFICULTY_INSTRUCTIONS: {
-      // Keep selected button LED on
-      setBtnLed((Color)selectedDifficulty, true);
-
       // Allow user to skip instructions by pressing any button, OR wait for audio completion
       bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
       bool audioComplete = isAudioComplete(stateTimer, DIFFICULTY_INSTRUCTIONS_DURATION_MS);
 
       if (buttonPressed || audioComplete) {
-        // Turn off selected button LED
-        for (int i = 0; i < COLOR_COUNT; i++) {
-          setBtnLed((Color)i, false);
-        }
-
         if (buttonPressed) {
           Serial.println("Difficulty instructions skipped by user - starting game immediately");
           audio.stop();  // Stop audio playback immediately
@@ -1212,7 +1049,7 @@ void game_tick() {
           if (currentStep >= game.level) {
             // Sequence complete - play "Your Turn" and immediately allow input
             audio.playYourTurn(); // Play in background (non-blocking)
-            resetButtonEdgeDetection(); // Reset at start of input phase
+            hw_btn_reset_edges(); // Reset at start of input phase
             stateTimer = now;
             currentStep = 0;
             gameState = SEQ_INPUT; // Skip SEQ_DISPLAY_YOURTURN - go directly to input
@@ -1265,7 +1102,6 @@ void game_tick() {
           if (lastButtonPressed == expectedColor) {
             // Correct! Provide visual feedback only (audio too slow for rapid input)
             setLed(lastButtonPressed, true); // Brief wing LED feedback
-            setBtnLed(lastButtonPressed, true); // Turn on button LED
             currentStep++;
 
             if (currentStep >= game.level) {
@@ -1279,18 +1115,16 @@ void game_tick() {
             } else {
               // Continue with next input - keep button LED on while button is held
               // Wait for button release before proceeding
-              while (pressed(lastButtonPressed)) {
+              while (hw_btn_raw(lastButtonPressed)) {
                 delay(10); // Small delay to prevent tight loop
               }
               setLed(lastButtonPressed, false);
-              setBtnLed(lastButtonPressed, false);
               // Reset timeout with fresh timestamp (after button release)
               stateTimer = millis();
               Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", stateTimer, currentStep);
             }
           } else {
             // Wrong!
-            setBtnLed(lastButtonPressed, true); // Turn on button LED for wrong press
             audioFinished = false; // Reset flag before playing
             audio.playWrong();
             stateTimer = now;
@@ -1313,20 +1147,11 @@ void game_tick() {
         celebrationPlayed = true;
       }
 
-      // Keep button LED on while button is held during feedback
-      static bool ledTurnedOff = false;
-      if (!pressed(lastButtonPressed) && !ledTurnedOff) {
-        // Button released, turn off button LED (only once)
-        setBtnLed(lastButtonPressed, false);
-        ledTurnedOff = true;
-      }
-
       if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
         celebrationPlayed = false;  // Reset for next time
         // Turn off all feedback LEDs
         for (int i = 0; i < COLOR_COUNT; i++) {
           setLed((Color)i, false);
-          setBtnLed((Color)i, false);
         }
 
         auto settings = difficultyConfigs[selectedDifficulty];
@@ -1347,28 +1172,17 @@ void game_tick() {
                         game.level, getCurrentCueOnMs(game.level), getCurrentCueGapMs(game.level), getCurrentInputTimeout(game.level));
         }
 
-        ledTurnedOff = false; // Reset flag for next time
         gameState = SEQ_DISPLAY_INIT;
       }
       break;
     }
 
     case WRONG_FEEDBACK: {
-      // Keep button LED on while button is held during feedback
-      static bool ledTurnedOff = false;
-      if (!pressed(lastButtonPressed) && !ledTurnedOff) {
-        // Button released, turn off button LED (only once)
-        setBtnLed(lastButtonPressed, false);
-        ledTurnedOff = true;
-      }
-
       if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
-        // Clear all LED feedback (both wing and button LEDs)
+        // Clear all LED feedback
         for (int i = 0; i < COLOR_COUNT; i++) {
           setLed((Color)i, false);
-          setBtnLed((Color)i, false);
         }
-        ledTurnedOff = false; // Reset flag for next time
 
         // Calculate personalized game over message based on difficulty and score
         uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
@@ -1390,7 +1204,6 @@ void game_tick() {
         // Clear all LEDs before game over
         for (int i = 0; i < COLOR_COUNT; i++) {
           setLed((Color)i, false);
-          setBtnLed((Color)i, false);
         }
 
         // Calculate personalized game over message based on difficulty and score
