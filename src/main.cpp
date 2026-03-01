@@ -78,8 +78,7 @@ void setup() {
   Serial.println("\n=== Shimon Integrated Firmware (Phase 3: Game + Party + Diagnostic) ===");
   hw_led_init();
   hw_btn_init();
-  // Common boot sweep: sequential BLUE→RED→GREEN→YELLOW, 100ms each
-  for (int i = 0; i < 4; i++) { hw_led_duty((Color)i, 200); delay(100); hw_led_duty((Color)i, 0); }
+  Serial.println("[BOOT] Hardware init done. Entering mode selection.");
   activeMode = runModeSelection();
   switch (activeMode) {
     case PARTY_MODE: party_init(); break;

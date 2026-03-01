@@ -278,8 +278,9 @@ Service LED:               D2 (heartbeat)
 ### **Boot Sequence**
 
 #### Common (`setup()`) — always runs at power-on
-**Duration**: ~400 ms
-**Visual**: Sequential single-wing flash — BLUE → RED → GREEN → YELLOW (100 ms on/off each). Confirms all four LED channels before mode selection.
+**Duration**: ~0 ms (no LED pattern)
+**Serial**: `[BOOT] Hardware init done. Entering mode selection.`
+**Visual**: None — LED sweep removed; mode-specific splashes handle visual confirmation.
 
 #### Game Mode splash (`game_init()` → `bootSequence()`)
 **Duration**: ~3 seconds
@@ -548,8 +549,9 @@ Service LED:               D2 (heartbeat)
 
 ### Boot Cleanup + Global Power Cap (March 2026, Branch: `feat/party-mode-poc`)
 
-10. **Common boot sweep in `setup()`**
-    - `hw_led_init()`, `hw_btn_init()`, and a 4-color sequential sweep (BLUE→RED→GREEN→YELLOW, 100 ms each) now run once in `setup()` before `runModeSelection()`
+10. **Common boot in `setup()`**
+    - `hw_led_init()`, `hw_btn_init()` run once in `setup()` before `runModeSelection()`; prints `[BOOT] Hardware init done. Entering mode selection.`
+    - No LED pattern during common boot (LED sweep removed)
     - Removed redundant `hw_led_init()`/`hw_btn_init()` calls from `runModeSelection()`, `game_init()`, `party_init()`, and `diag_init()`
 
 11. **`game_init()` cleanup**
