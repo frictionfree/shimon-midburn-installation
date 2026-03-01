@@ -459,15 +459,15 @@ Service LED:               D2 (heartbeat)
 - **Usage**: `pio test -e native`
 
 #### **`[env:pattern_test]` - Visual Pattern Tester**
-- **Build Flag**: `-D PATTERN_TEST=N` where N is the `PatternID` integer:
-  - STD: `S1=0  S2=1  S3=2`
-  - BRK: `B1=3  B2=4  B3=5`
-  - DRP: `D1=6  D2=7  D3=8`
 - **Purpose**: Standalone 120 BPM visual pattern test — no audio, no MIDI, no game logic; drives LEDs only
 - **Source filter**: compiles only `hw.cpp`, `party_patterns.cpp`, `main_pattern_test.cpp`
-- **Upload**: `pio run -e pattern_test -t upload`
-- **Monitor**: `pio device monitor -e pattern_test`
-- **Example (test D3)**: Set `PATTERN_TEST=8` in `platformio.ini`, then upload
+- **PatternID** integers are defined in `include/party_patterns.h` (new patterns appended to end of enum)
+- **Pass pattern on the command line** — no need to edit `platformio.ini`:
+  ```bash
+  pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=8" -t upload
+  pio device monitor -e pattern_test
+  ```
+- **Fallback default**: `PATTERN_TEST=0` (STD-01) if no override is given
 
 ## Quick Reference for Testing
 
@@ -522,16 +522,14 @@ Visual patterns live in a **shared module** (`include/party_patterns.h` / `src/p
 
 Runs a single pattern at a fixed 120 BPM software clock. No MIDI, no audio, no game FSM — LED output only.
 
-```bash
-# 1. Edit platformio.ini: set PATTERN_TEST to the desired PatternID integer
-#    S1=0  S2=1  S3=2   (STD)
-#    B1=3  B2=4  B3=5   (BRK)
-#    D1=6  D2=7  D3=8   (DRP)
+Pass the PatternID directly on the command line — no need to edit `platformio.ini`:
 
-# 2. Upload and monitor:
-pio run -e pattern_test -t upload
+```bash
+pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=8" -t upload
 pio device monitor -e pattern_test
 ```
+
+PatternID integers are defined in `include/party_patterns.h`. If no override is given the fallback default (`PATTERN_TEST=0`, STD-01) is used.
 
 Serial output confirms the running pattern and beats:
 ```
@@ -570,7 +568,11 @@ bar=1 beat=2
    static const PatternID stdPatterns[] = { PAT_STD_01, PAT_STD_02, PAT_STD_03, PAT_STD_04 };
    ```
 
-6. **Test with the pattern tester**: set `PATTERN_TEST=9` in `platformio.ini`, upload, and observe.
+6. **Test with the pattern tester**:
+   ```bash
+   pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=9" -t upload
+   pio device monitor -e pattern_test
+   ```
 
 7. **Ship**: Once validated, the pattern is automatically picked up by production — `mode_party.cpp` uses the same family arrays.
 

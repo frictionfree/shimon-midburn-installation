@@ -749,15 +749,14 @@ All 9 visual patterns are implemented in the **shared pattern engine** (`include
 
 The `[env:pattern_test]` PlatformIO environment runs a single pattern at a fixed 120 BPM software clock (no MIDI, no audio, no game logic required).
 
-```bash
-# Set PATTERN_TEST in platformio.ini to the desired PatternID integer:
-#   STD: S1=0  S2=1  S3=2
-#   BRK: B1=3  B2=4  B3=5
-#   DRP: D1=6  D2=7  D3=8
+Pass the PatternID directly on the command line — no need to edit `platformio.ini`:
 
-pio run -e pattern_test -t upload
+```bash
+pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=8" -t upload
 pio device monitor -e pattern_test
 ```
+
+PatternID integers are defined in `include/party_patterns.h`.
 
 ### 16.3 Adding a New Pattern
 
@@ -771,7 +770,11 @@ pio device monitor -e pattern_test
 
 5. **Add to the family array** in `party_patterns.cpp` (`stdPatterns[]`, `brkPatterns[]`, or `drpPatterns[]`).
 
-6. **Test with pattern tester**: set `PATTERN_TEST=N`, upload, verify LED behavior at 120 BPM.
+6. **Test with pattern tester**:
+   ```bash
+   pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=N" -t upload
+   pio device monitor -e pattern_test
+   ```
 
 7. **Ship**: pattern is automatically available in production — `mode_party.cpp` uses the same family arrays.
 
