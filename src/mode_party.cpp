@@ -706,34 +706,27 @@ static void patDrp02OnHalfBeat() {
 }
 
 // --- DRP-03: Expanding Impact Wave ---
-// Bars 1-4: 1→2→3→4 wings; Bars 5-8: 4→3→2→1 wings
-static void patDrp03OnBeat(uint8_t bar, uint8_t beat) {
-  clearRequests();
+// 16-step symmetrical cycle driven at half-beat rate: 1-2-3-4-4-3-2-1-1-2-3-4-4-3-2-1
+static const uint8_t DRP03_WINGS[16] = {1,2,3,4,4,3,2,1,1,2,3,4,4,3,2,1};
 
-  uint8_t numWings;
-  if (bar <= 4) {
-    numWings = bar;  // 1,2,3,4 wings
-  } else {
-    numWings = 9 - bar;  // 4,3,2,1 wings
-  }
-
-  // Light the first N wings in CW order, with beat-based emphasis
-  for (uint8_t i = 0; i < numWings; i++) {
-    float brightness = 1.0f;
-    // Emphasize beat 1
-    if (beat == 1) brightness = 1.0f;
-    else brightness = 0.85f;
-
-    setWing(CW_ORDER[i], brightness);
-  }
-
+static void patDrp03Step() {
+  dropStep = (dropStep + 1) % 16;
   lastHalfBeatUs = micros();
+  // Hard cut: clear then immediately commit new wings (no smear)
+  clearRequests();
+  uint8_t n = DRP03_WINGS[dropStep];
+  for (uint8_t i = 0; i < n; i++) setWing(CW_ORDER[i], 1.0f);
   commitRequests();
 }
 
+static void patDrp03OnBeat(uint8_t bar, uint8_t beat) {
+  // Reset cycle alignment at pattern start
+  if (bar == 1 && beat == 1) dropStep = 15;
+  patDrp03Step();
+}
+
 static void patDrp03OnHalfBeat() {
-  // Half-beat shimmer during multi-wing phases
-  lastHalfBeatUs = micros();
+  patDrp03Step();
 }
 
 // ---------------- PATTERN DISPATCH ----------------
@@ -1024,18 +1017,10 @@ static void visualsRender() {
       }
     }
     else if (activePattern == PAT_DRP_03) {
-      // Expanding Impact Wave: shimmer on multi-wing lighting
-      uint8_t numWings;
-      if (patWindowBar <= 4) {
-        numWings = patWindowBar;
-      } else {
-        numWings = 9 - patWindowBar;
-      }
-
-      float pulse = 0.85f + 0.15f * (1.0f - phase);  // Subtle shimmer
-      for (uint8_t i = 0; i < numWings; i++) {
-        setWing(CW_ORDER[i], pulse);
-      }
+      // Shimmer within current step; numWings from half-beat-driven dropStep
+      float pulse = 0.85f + 0.15f * (1.0f - phase);
+      uint8_t n = DRP03_WINGS[dropStep % 16];
+      for (uint8_t i = 0; i < n; i++) setWing(CW_ORDER[i], pulse);
     }
 
     commitRequests();
