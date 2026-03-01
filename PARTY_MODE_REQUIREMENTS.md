@@ -674,16 +674,16 @@ Within each bar: Strong dual-wing hit on beats 1,3; half-beat pulses on 2,4.
 
 #### DRP-03 — Expanding Impact Wave
 
-**Identity:** Spatial expansion and contraction at half-beat resolution.
+**Identity:** Spatial expansion and contraction that reverses direction every bar.
 
-**Implementation:** 16-step symmetrical cycle driven at half-beat rate:
+**Implementation:** 8-step half-beat cycle per bar. Direction alternates each bar:
 
-```
-Step:   1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16
-Wings:  1  2  3  4  4  3  2  1  1  2  3  4  4  3  2  1
-```
+| Bar | Half-beat sequence (8 steps) |
+|-----|------------------------------|
+| Odd (1,3,5,7) | B → BR → BRG → BRGY → BRGY → BRG → BR → B |
+| Even (2,4,6,8) | Y → YG → YGR → YGRB → YGRB → YGR → YG → Y |
 
-One full expansion + contraction per 8-bar window (16 half-beats × 0.5 beat = 8 beats = 2 bars per cycle, 4 cycles total). Hard LED clear before each step transition to prevent visual smearing.
+Each step is a hard cut (LEDs not in the new set are immediately off). Step brightness pulses gently between half-beats via continuous render.
 
 ---
 
@@ -749,10 +749,10 @@ All 9 visual patterns are implemented in the **shared pattern engine** (`include
 
 The `[env:pattern_test]` PlatformIO environment runs a single pattern at a fixed 120 BPM software clock (no MIDI, no audio, no game logic required).
 
-Pass the PatternID directly on the command line — no need to edit `platformio.ini`:
+Edit `PATTERN_TEST=N` in `platformio.ini`, then upload:
 
 ```bash
-pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=8" -t upload
+pio run -e pattern_test -t upload
 pio device monitor -e pattern_test
 ```
 
@@ -770,9 +770,9 @@ PatternID integers are defined in `include/party_patterns.h`.
 
 5. **Add to the family array** in `party_patterns.cpp` (`stdPatterns[]`, `brkPatterns[]`, or `drpPatterns[]`).
 
-6. **Test with pattern tester**:
+6. **Test with pattern tester**: set `PATTERN_TEST=N` in `platformio.ini`, then:
    ```bash
-   pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=N" -t upload
+   pio run -e pattern_test -t upload
    pio device monitor -e pattern_test
    ```
 

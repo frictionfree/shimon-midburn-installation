@@ -462,12 +462,11 @@ Service LED:               D2 (heartbeat)
 - **Purpose**: Standalone 120 BPM visual pattern test — no audio, no MIDI, no game logic; drives LEDs only
 - **Source filter**: compiles only `hw.cpp`, `party_patterns.cpp`, `main_pattern_test.cpp`
 - **PatternID** integers are defined in `include/party_patterns.h` (new patterns appended to end of enum)
-- **Pass pattern on the command line** — no need to edit `platformio.ini`:
+- **Usage**: Edit `PATTERN_TEST=N` in `platformio.ini`, then:
   ```bash
-  pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=8" -t upload
+  pio run -e pattern_test -t upload
   pio device monitor -e pattern_test
   ```
-- **Fallback default**: `PATTERN_TEST=0` (STD-01) if no override is given
 
 ## Quick Reference for Testing
 
@@ -522,14 +521,14 @@ Visual patterns live in a **shared module** (`include/party_patterns.h` / `src/p
 
 Runs a single pattern at a fixed 120 BPM software clock. No MIDI, no audio, no game FSM — LED output only.
 
-Pass the PatternID directly on the command line — no need to edit `platformio.ini`:
+Edit `PATTERN_TEST=N` in `platformio.ini`, then upload:
 
 ```bash
-pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=8" -t upload
+pio run -e pattern_test -t upload
 pio device monitor -e pattern_test
 ```
 
-PatternID integers are defined in `include/party_patterns.h`. If no override is given the fallback default (`PATTERN_TEST=0`, STD-01) is used.
+PatternID integers are defined in `include/party_patterns.h`.
 
 Serial output confirms the running pattern and beats:
 ```
@@ -568,9 +567,9 @@ bar=1 beat=2
    static const PatternID stdPatterns[] = { PAT_STD_01, PAT_STD_02, PAT_STD_03, PAT_STD_04 };
    ```
 
-6. **Test with the pattern tester**:
+6. **Test with the pattern tester**: set `PATTERN_TEST=N` in `platformio.ini`, then:
    ```bash
-   pio run -e pattern_test --project-option="build_flags=-D PATTERN_TEST=9" -t upload
+   pio run -e pattern_test -t upload
    pio device monitor -e pattern_test
    ```
 

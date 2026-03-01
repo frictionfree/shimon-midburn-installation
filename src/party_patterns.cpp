@@ -126,6 +126,10 @@ static uint32_t std02RetriggerUs   = 0;
 // DRP-02 axis state
 static bool     drp02Axis13        = true;
 
+// DRP-03 state
+static uint8_t  drp03HalfStep      = 0;    // 0-7 within current bar
+static bool     drp03OddBar        = true; // odd bar = expand from BLUE; even = from YELLOW
+
 // Visual mode
 static VisualMode visMode          = VIS_STD;
 static ContextState prevStateForPat = STANDARD;
@@ -257,25 +261,26 @@ static void patDrp02OnHalfBeat() {
 }
 
 // --- DRP-03: Expanding Impact Wave ---
-// 16-step symmetrical cycle at half-beat rate: 1-2-3-4-4-3-2-1-1-2-3-4-4-3-2-1
-static const uint8_t DRP03_WINGS[16] = {1,2,3,4,4,3,2,1,1,2,3,4,4,3,2,1};
-
-static void patDrp03Step() {
-  dropStep = (dropStep + 1) % 16;
-  lastHalfBeatUs = micros();
-  clearRequests();
-  uint8_t n = DRP03_WINGS[dropStep];
-  for (uint8_t i = 0; i < n; i++) setWing(CW_ORDER[i], 1.0f);
-  commitRequests();
-}
+// 8-step half-beat cycle per bar, direction alternates each bar:
+//   Odd  bars (1,3,5,7): B → BR → BRG → BRGY → BRGY → BRG → BR → B
+//   Even bars (2,4,6,8): Y → YG → YGR → YGRB → YGRB → YGR → YG → Y
+static const uint8_t DRP03_NUM[8]      = {1, 2, 3, 4, 4, 3, 2, 1};
+static const Color   DRP03_ODD_ORD[4]  = {BLUE, RED, GREEN, YELLOW};
+static const Color   DRP03_EVEN_ORD[4] = {YELLOW, GREEN, RED, BLUE};
 
 static void patDrp03OnBeat(uint8_t bar, uint8_t beat) {
-  if (bar == 1 && beat == 1) dropStep = 15;
-  patDrp03Step();
+  if (beat == 1) {
+    drp03OddBar   = (bar % 2) == 1;
+    drp03HalfStep = 0;
+  } else {
+    drp03HalfStep = (beat - 1) * 2;
+  }
+  lastHalfBeatUs = micros();
 }
 
 static void patDrp03OnHalfBeat() {
-  patDrp03Step();
+  if (drp03HalfStep < 7) drp03HalfStep++;
+  lastHalfBeatUs = micros();
 }
 
 // ============================================================
@@ -318,7 +323,10 @@ static VisualMode modeForState(ContextState s) {
 
 static void onVisualModeEnter(VisualMode m) {
   if (m == VIS_BREAK) { breakFading = false; }
-  else if (m == VIS_DROP) { dropStep = 0; lastHalfBeatUs = micros(); }
+  else if (m == VIS_DROP) {
+    dropStep = 0; lastHalfBeatUs = micros();
+    drp03HalfStep = 0; drp03OddBar = true;
+  }
 }
 
 static void refreshVisualMode() {
@@ -368,6 +376,8 @@ void pp_setPattern(PatternID p) {
   breakFading      = false;
   dropStep         = 0;
   lastHalfBeatUs   = micros();
+  drp03HalfStep    = 0;
+  drp03OddBar      = true;
   patWindowBar     = 0;
   patWindowBeat    = 1;
 }
@@ -395,6 +405,8 @@ void pp_selectForState(ContextState s) {
   breakFading   = false;
   dropStep      = 0;
   lastHalfBeatUs = micros();
+  drp03HalfStep = 0;
+  drp03OddBar   = true;
   patWindowBar  = 0;
   patWindowBeat = 1;
 }
@@ -501,8 +513,8 @@ void pp_render() {
     }
     else if (activePattern == PAT_DRP_03) {
       float pulse = 0.85f + 0.15f * (1.0f - phase);
-      uint8_t n = DRP03_WINGS[dropStep % 16];
-      for (uint8_t i = 0; i < n; i++) setWing(CW_ORDER[i], pulse);
+      const Color* ord = drp03OddBar ? DRP03_ODD_ORD : DRP03_EVEN_ORD;
+      for (uint8_t i = 0; i < DRP03_NUM[drp03HalfStep]; i++) setWing(ord[i], pulse);
     }
     commitRequests();
   }
@@ -522,6 +534,8 @@ void pp_reset() {
   brkLastWing     = BLUE;
   dropStep        = 0;
   lastHalfBeatUs  = micros();
+  drp03HalfStep   = 0;
+  drp03OddBar     = true;
   std02IsAccent   = false;
   std02RetriggerUs = 0;
   drp02Axis13     = true;
