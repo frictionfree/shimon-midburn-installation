@@ -752,38 +752,8 @@ void updateAmbientEffects(unsigned long now) {
 
 
 void game_init() {
-  // Initialize serial with explicit configuration for Wokwi
-  Serial.begin(115200);
-  while(!Serial && millis() < 3000) { delay(10); } // Wait for serial or timeout
-  
-  Serial.println();  // Send a newline to clear buffer
-  Serial.println("=== SHIMON DEBUG: Serial Started ===");
-  Serial.flush();
-  
-  // Verify serial is working with a visible countdown
-  for(int i = 5; i > 0; i--) {
-    Serial.printf("Boot countdown: %d\n", i);
-    Serial.flush();
-    delay(1000);
-  }
-  Serial.println("Serial test complete!");
   pinMode(LED_SERVICE, OUTPUT);
-  Serial.println("Setting up pins...");
-  hw_led_init();
-  hw_btn_init();
-
-  // LED test - flash each LED to verify they work
-  Serial.println("Testing wing LEDs...");
-  for (int i = 0; i < COLOR_COUNT; i++) {
-    setLed((Color)i, true);
-    delay(500);
-    setLed((Color)i, false);
-    delay(200);
-  }
-  Serial.println("Wing LED test complete!");
-  Serial.println("Initializing audio...");
   audio.begin();
-  Serial.println("Setting random seed...");
   randomSeed(esp_random());
   
   

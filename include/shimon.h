@@ -66,9 +66,9 @@ constexpr uint8_t PWM_MIN_EFFECTIVE_DUTY = 70;  // Minimum duty for visible LED 
 
 // Power Budget Constraint
 // LED PSU: 12V / 100W (~8.3A max). Each wing uses ~3A at full brightness.
-// Patterns must limit simultaneous wing activation to avoid PSU overload.
-constexpr uint8_t MAX_SIMULTANEOUS_WINGS_FULL_BRIGHTNESS = 2;  // Conservative limit
-constexpr uint8_t POWER_BUDGET_SAFETY_MARGIN = 20;  // Percent headroom
+// hw_led_all_set() enforces this cap: sum of all 4 channel duties must not exceed 320.
+// 320/255 × 3A/wing ≈ 3.8A total — safe below the 8.3A limit even with transient peaks.
+constexpr uint16_t HW_GLOBAL_DUTY_CAP = 320;
 
 // PWM Configuration (Stable Operating Envelope)
 // Higher frequency/resolution combinations are unstable or non-functional.

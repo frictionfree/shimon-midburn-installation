@@ -87,9 +87,6 @@ static constexpr float CAND_DIM     = 0.55f;  // Multiplier on STANDARD during C
 // Base brightness before state cap (max duty request)
 static constexpr uint8_t BASE_BRIGHT = 235;
 
-// Global power cap (safety net). If sum of channel duties > cap, scale down.
-static constexpr uint16_t GLOBAL_DUTY_CAP = 320;
-
 // Pattern window length
 static constexpr uint8_t PATTERN_LEN_BARS = 8;
 
@@ -355,9 +352,6 @@ static const Color CCW_ORDER[4] = { BLUE, YELLOW, GREEN, RED };
 
 static VisualMode visMode = VIS_STD;
 
-// Per-wing current output duty
-static uint8_t outDuty[4] = {0,0,0,0};
-
 // Per-wing brightness request (0.0-1.0, before caps)
 static float wingRequest[4] = {0,0,0,0};
 
@@ -437,11 +431,6 @@ static uint32_t halfBeatUs = 250000;
 static bool std02IsAccent = false;
 static uint32_t std02RetriggerUs = 0;
 
-static inline void writeWingDuty(Color w, uint8_t duty) {
-  hw_led_duty(w, duty);
-  outDuty[w] = duty;
-}
-
 static uint8_t dutyFromLevel(float level01, uint8_t target) {
   level01 = clamp01(level01);
   if (level01 <= 0.0f) return 0;
@@ -450,24 +439,6 @@ static uint8_t dutyFromLevel(float level01, uint8_t target) {
   if (d < 0) d = 0;
   if (d > 255) d = 255;
   return (uint8_t)(d + 0.5f);
-}
-
-static void applyGlobalCap(uint8_t req[4]) {
-  uint16_t sum = (uint16_t)req[0] + req[1] + req[2] + req[3];
-  if (sum <= GLOBAL_DUTY_CAP || sum == 0) return;
-
-  float scale = (float)GLOBAL_DUTY_CAP / (float)sum;
-  for (int i = 0; i < 4; i++) {
-    if (req[i] == 0) continue;
-    float v = (float)req[i] * scale;
-    req[i] = (uint8_t)(v + 0.5f);
-    if (req[i] > 0 && req[i] < HW_PWM_MIN_DUTY) req[i] = HW_PWM_MIN_DUTY;
-  }
-}
-
-static void allOff() {
-  hw_led_all_off();
-  for (int i = 0; i < 4; i++) outDuty[i] = 0;
 }
 
 // Clear all wing requests
@@ -516,11 +487,7 @@ static void commitRequests() {
     duties[i] = dutyFromLevel(level, BASE_BRIGHT);
   }
 
-  applyGlobalCap(duties);
-
-  for (int i = 0; i < 4; i++) {
-    writeWingDuty((Color)i, duties[i]);
-  }
+  hw_led_all_set(duties);
 }
 
 // Cosine ease for smooth fades (0.0-1.0 input, 0.0-1.0 output)
@@ -957,8 +924,7 @@ static void visualsRender() {
     const bool on = (ms % 1000) < 150;
     uint8_t req[4] = {0,0,0,0};
     req[RED] = on ? DEBUG_BRIGHT : 0;
-    applyGlobalCap(req);
-    for (int i = 0; i < 4; i++) writeWingDuty((Color)i, req[i]);
+    hw_led_all_set(req);
     return;
   }
 
@@ -1780,7 +1746,7 @@ static void resetForHardReset() {
   lastHalfBeatUs = micros();
   std02IsAccent = false;
   std02RetriggerUs = 0;
-  allOff();
+  hw_led_all_off();
 
   gBeatIndex = 0;
 }
@@ -1844,7 +1810,7 @@ static void resetForResumeLike() {
   lastHalfBeatUs = micros();
   std02IsAccent = false;
   std02RetriggerUs = 0;
-  allOff();
+  hw_led_all_off();
 
   gBeatIndex = 0;
 }
@@ -2162,17 +2128,16 @@ static void processButtons() {
 
 // ---------------- MODE INTERFACE ----------------
 void party_init() {
-  Serial.begin(115200);
-  delay(200);
-
   Serial.println("\nShimon – Party Mode + MIDI Clock (Debug v8.1) + Visuals v1 + Failure/MusicStop\n");
   Serial.printf("MEM baseKVar=0x%08X wingReq[0]=0x%08X [1]=0x%08X [2]=0x%08X [3]=0x%08X\n",
                 (uint32_t)&baseKVar,
                 (uint32_t)&wingRequest[0], (uint32_t)&wingRequest[1],
                 (uint32_t)&wingRequest[2], (uint32_t)&wingRequest[3]);
 
-  hw_led_init();
-  hw_btn_init();
+  // Party mode splash: 2× all-wing pulse
+  uint8_t on[4] = {180, 180, 180, 180};
+  uint8_t off4[4] = {0, 0, 0, 0};
+  for (int f = 0; f < 2; f++) { hw_led_all_set(on); delay(150); hw_led_all_set(off4); delay(100); }
 
   MidiSerial.begin(31250, SERIAL_8N1, 34, -1);
 
@@ -2197,7 +2162,7 @@ void party_tick() {
 }
 
 void party_stop() {
-  allOff();                          // zero all LED duties immediately
+  hw_led_all_off();                          // zero all LED duties immediately
   resetForHardReset();               // reset FSM, baselines, accumulators, visuals
   i2s_driver_uninstall(I2S_PORT);   // free DMA buffers
   MidiSerial.end();                  // release UART1 so Game Mode can use it for DFPlayer

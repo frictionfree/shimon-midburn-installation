@@ -21,9 +21,10 @@ static constexpr uint32_t HW_BTN_GHOST_MS   = 50;  // minimum hold time for vali
 void hw_led_init();                       // ledcSetup + ledcAttachPin channels 0-3
 void hw_btn_init();                       // INPUT_PULLUP all 4 button pins
 
-void        hw_led_duty(Color c, uint8_t duty);   // set PWM duty (0-255)
-void        hw_led_all_off();                      // all duties to 0
-const char* hw_led_name(Color c);                 // "BLUE"/"RED"/"GREEN"/"YELLOW"
+void        hw_led_duty(Color c, uint8_t duty);          // set PWM duty (0-255)
+void        hw_led_all_off();                             // all duties to 0
+void        hw_led_all_set(const uint8_t duties[4]);      // write all 4 channels with global cap
+const char* hw_led_name(Color c);                        // "BLUE"/"RED"/"GREEN"/"YELLOW"
 
 // Call hw_btn_update() ONCE per loop tick before any query
 void     hw_btn_update();

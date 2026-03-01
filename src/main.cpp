@@ -21,14 +21,13 @@ static void selConfirmAnimation() {
       hw_led_duty((Color)i, 180); delay(120); hw_led_duty((Color)i, 0);
     }
   }
-  for (int i = 0; i < 4; i++) hw_led_duty((Color)i, 180);
+  uint8_t f[4] = {180, 180, 180, 180};
+  hw_led_all_set(f);
   delay(300);
   hw_led_all_off();
 }
 
 static TopMode runModeSelection() {
-  hw_led_init();
-  hw_btn_init();
   Serial.println("\n=== MODE SELECTION ===");
   Serial.println("  BLUE  -> Game Mode");
   Serial.println("  GREEN -> Party Mode");
@@ -77,6 +76,10 @@ void setup() {
   Serial.begin(115200);
   delay(300);
   Serial.println("\n=== Shimon Integrated Firmware (Phase 3: Game + Party + Diagnostic) ===");
+  hw_led_init();
+  hw_btn_init();
+  // Common boot sweep: sequential BLUE→RED→GREEN→YELLOW, 100ms each
+  for (int i = 0; i < 4; i++) { hw_led_duty((Color)i, 200); delay(100); hw_led_duty((Color)i, 0); }
   activeMode = runModeSelection();
   switch (activeMode) {
     case PARTY_MODE: party_init(); break;

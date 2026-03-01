@@ -247,8 +247,9 @@ A shared hardware abstraction layer was introduced to eliminate duplicated LED/b
 | Function | Description |
 |----------|-------------|
 | `hw_led_init()` | Initialize LEDC channels 0–3 (one per color) |
-| `hw_led_duty(Color, duty)` | Set PWM duty 0–255 |
+| `hw_led_duty(Color, duty)` | Set PWM duty 0–255 (single channel, caller ensures power safety) |
 | `hw_led_all_off()` | Zero all four channels |
+| `hw_led_all_set(duties[4])` | Write all 4 channels atomically; scales proportionally if sum > `HW_GLOBAL_DUTY_CAP` |
 | `hw_led_name(Color)` | Human-readable color name |
 
 ### Button Debounce API
@@ -356,29 +357,37 @@ The system distinguishes between:
 ```
 Power On
     ↓
-ESP32 Initialization
+setup(): Serial.begin, hw_led_init, hw_btn_init
     ↓
-Hardware Setup (pins, peripherals)
+Common boot sweep: BLUE → RED → GREEN → YELLOW (100ms each, ~400ms total)
     ↓
 Enter MODE_SELECTION (Blue/Red/Green rotation, no timeout)
     ↓
 Wait for single button press: Blue / Green / Red
   (Yellow held ≥5 s → reboot)
     ↓
-Confirmation animation
+Confirmation animation (selConfirmAnimation — capped via hw_led_all_set)
+    ↓
+mode_init(): mode-specific splash + mode-specific hw init only
     ↓
 Enter selected mode (Game / Party / Diagnostic)
 ```
 
-### Boot LED Sequence
+### Common Boot Sweep (`setup()`)
 
-**Duration:** ~5-6 seconds
+**Duration:** ~400 ms
 
-**Visual:**
-1. Rainbow wave: LEDs light in sequence (3 cycles)
-2. Flash finale: All 4 LEDs flash together 4 times
+**Visual:** Sequential single-wing flash — BLUE on/off → RED on/off → GREEN on/off → YELLOW on/off (100 ms each).
 
-**Purpose:** Visual confirmation that system is operational.
+**Purpose:** Confirms all four LED channels are live before mode selection begins.
+
+### Mode-Specific Entry Splashes (in `mode_init()`)
+
+| Mode | Splash | Duration |
+|------|--------|----------|
+| **Game** | Rainbow wave ×3 + sparkle (`bootSequence()`) | ~3 s |
+| **Party** | 2× all-wing pulse (capped via `hw_led_all_set`) | ~500 ms |
+| **Diagnostic** | BLUE blinks 2× | ~700 ms |
 
 ---
 
@@ -389,6 +398,7 @@ Enter selected mode (Game / Party / Diagnostic)
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `PWM_MIN_EFFECTIVE_DUTY` | 70 | Minimum PWM for visible output |
+| `HW_GLOBAL_DUTY_CAP` | 320 | Max sum of all 4 channel duties; enforced by `hw_led_all_set()` |
 | `PWM_FREQUENCY` | 12500 Hz | PWM carrier frequency |
 | `PWM_RESOLUTION` | 8-bit | 0-255 duty range |
 | `YELLOW_HOLD_RESET_MS` | 5000 | Yellow hold duration for global reboot |

@@ -223,7 +223,9 @@ Reserved for future use. Base 70 + score value.
 
 ### Boot Sequence
 
-**Duration:** ~5-6 seconds
+**Note:** A common 4-color sequential sweep runs in `setup()` before mode selection (see `SYSTEM_REQUIREMENTS.md §10`). The Game Mode splash below runs after mode selection, inside `game_init()`.
+
+**Duration:** ~3 seconds
 
 **Visual:**
 1. Rainbow wave: LEDs light in sequence (3 cycles)

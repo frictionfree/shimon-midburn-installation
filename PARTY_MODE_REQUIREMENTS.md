@@ -539,6 +539,8 @@ If `I_EST_A > I_BUDGET_A`: proportionally scale all duties.
 
 Guarantees: No PSU overload, no brownouts.
 
+**Implementation:** The runtime clamp is enforced by `hw_led_all_set(duties[4])` in the shared HAL (`hw.cpp`). Any write of all four channels in party mode must go through this function. The cap constant is `HW_GLOBAL_DUTY_CAP = 320` (defined in `shimon.h`); if the sum of all four duties exceeds 320, all are scaled proportionally before writing to LEDC. Single-channel writes via `hw_led_duty()` are uncapped by design — callers that write one wing at a time are safe by construction.
+
 ---
 
 ## 12. Creative Philosophy

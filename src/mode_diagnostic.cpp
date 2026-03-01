@@ -326,7 +326,8 @@ static void printSummary() {
   } else if (anyWarn) {
     for (int i = 0; i < 4; i++) { hw_led_duty(YELLOW, 200); delay(350); hw_led_duty(YELLOW, 0); delay(350); }
   } else {
-    for (int i = 0; i < 4; i++) hw_led_duty((Color)i, 200);
+    uint8_t p[4] = {200, 200, 200, 200};
+    hw_led_all_set(p);
     delay(2000); hw_led_all_off();
   }
   diagTimer = millis();
@@ -337,8 +338,8 @@ void diag_init() {
   Serial.println("  Phases: A=LED  B=Buttons  C=MIDI  D=I2S  E=DFPlayer");
   Serial.println("  Any button skips phases; BLUE confirms checkpoints and exits.");
   Serial.println("  YELLOW hold 5s exits to Mode Selection at any time.");
-  hw_led_init();
-  hw_btn_init();
+  // Diag mode splash: BLUE blinks 2× (matches BLUE=select-diag button)
+  for (int b = 0; b < 2; b++) { hw_led_duty(BLUE, 200); delay(200); hw_led_duty(BLUE, 0); delay(150); }
   resultA = resultB = resultC = resultD = resultE = DR_NONE;
   diagState = DS_PHASE_A;
   phA_enter();

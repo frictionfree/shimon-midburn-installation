@@ -39,6 +39,18 @@ void hw_led_all_off() {
   for (int i = 0; i < 4; i++) ledcWrite(HW_LEDC_CH[i], 0);
 }
 
+void hw_led_all_set(const uint8_t duties[4]) {
+  uint16_t sum = (uint16_t)duties[0] + duties[1] + duties[2] + duties[3];
+  if (sum > HW_GLOBAL_DUTY_CAP && sum > 0) {
+    float scale = (float)HW_GLOBAL_DUTY_CAP / (float)sum;
+    for (int i = 0; i < 4; i++)
+      ledcWrite(HW_LEDC_CH[i], (uint8_t)(duties[i] * scale + 0.5f));
+  } else {
+    for (int i = 0; i < 4; i++)
+      ledcWrite(HW_LEDC_CH[i], duties[i]);
+  }
+}
+
 const char* hw_led_name(Color c) {
   switch (c) {
     case BLUE:   return "BLUE";

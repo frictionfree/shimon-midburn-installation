@@ -70,11 +70,10 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Per-wing current**: ~3A at full brightness
 - **Constraint**: Sustained full-brightness operation of all four wings simultaneously is **not allowed**
 - **Firmware Requirement**:
-  - Lighting patterns must prefer one dominant wing at a time
-  - Allow short overlaps of two wings
-  - Reserve four-wing activation for brief, low-duty accents
-  - Respect global brightness cap to avoid PSU overload
-- **Configuration**: See power budget settings in `shimon.h`
+  - Any simultaneous multi-wing write must use `hw_led_all_set()` (shared HAL)
+  - `hw_led_all_set()` enforces `HW_GLOBAL_DUTY_CAP = 320`: if sum of all 4 duties exceeds 320, all are scaled proportionally
+  - Single-wing writes via `hw_led_duty()` are uncapped (safe by construction)
+- **Configuration**: `HW_GLOBAL_DUTY_CAP = 320` in `shimon.h`; enforced by `hw_led_all_set()` in `hw.cpp`
 
 #### PWM Configuration
 - **Method**: `analogWrite()` / ESP32 LEDC backend
@@ -276,10 +275,16 @@ Service LED:               D2 (heartbeat)
 
 ## Game States and Audio-Visual Sequences
 
-### **Boot Sequence (Setup)**
-**Duration**: ~5-6 seconds  
-**Audio**: `[AUDIO] DFPlayer initialized (simulation)`  
-**Visual**: 
+### **Boot Sequence**
+
+#### Common (`setup()`) — always runs at power-on
+**Duration**: ~400 ms
+**Visual**: Sequential single-wing flash — BLUE → RED → GREEN → YELLOW (100 ms on/off each). Confirms all four LED channels before mode selection.
+
+#### Game Mode splash (`game_init()` → `bootSequence()`)
+**Duration**: ~3 seconds
+**Audio**: `[AUDIO] DFPlayer initialized (simulation)`
+**Visual**:
 - Rainbow wave: LEDs light Red→Blue→Green→Yellow (3 cycles)
 - Flash finale: All 4 LEDs flash together 4 times
 - Serial: `"Playing boot LED sequence..." → "Boot sequence complete!"`
@@ -531,6 +536,7 @@ Service LED:               D2 (heartbeat)
    - Ghost filter: 3 consistent reads + 50 ms hold for PRESS; release immediate
    - `hw_btn_update()` called once per loop tick in `loop()` before mode dispatch
    - `hw_btn_edge()` for single-tick press events; `hw_btn_pressed()` for held state; `hw_btn_raw()` for blocking release-wait loops
+   - `hw_led_all_set(duties[4])`: safe multi-wing write — scales all 4 duties proportionally if sum > `HW_GLOBAL_DUTY_CAP` (320); use this for any simultaneous multi-wing write
    - Removed per-mode duplicates: `SEL_*` (main), `DIAG_LED/BTN/LEDC` (diagnostic), `PIN_LED/BTN/LEDC_CH` (party), `ledPins/btnPins/btnLedPins` (game)
    - `Wing` enum in party mode renamed to `Color`; all `W_BLUE/RED/GREEN/YELLOW` → `BLUE/RED/GREEN/YELLOW`
    - `PWM_FREQUENCY_HZ` corrected: 12000 → 12500 in shimon.h (code always ran at 12500; doc fix)
@@ -540,12 +546,36 @@ Service LED:               D2 (heartbeat)
    - **Bug fix 2 — Phase C instant-skip**: `phC_tick` now uses `hw_btn_any_edge`; a button still held from C_PROMPT can no longer skip Phase C with 0 bytes → false FAIL
    - **Bug fix 3 — DS_DONE ghost restart**: `DS_DONE` now uses `hw_btn_any_edge`; the blinking LED drives the MOSFET at 12.5 kHz which can couple ghost LOW readings onto button pins; edge detection (requiring a new press) suppresses these
 
+### Boot Cleanup + Global Power Cap (March 2026, Branch: `feat/party-mode-poc`)
+
+10. **Common boot sweep in `setup()`**
+    - `hw_led_init()`, `hw_btn_init()`, and a 4-color sequential sweep (BLUE→RED→GREEN→YELLOW, 100 ms each) now run once in `setup()` before `runModeSelection()`
+    - Removed redundant `hw_led_init()`/`hw_btn_init()` calls from `runModeSelection()`, `game_init()`, `party_init()`, and `diag_init()`
+
+11. **`game_init()` cleanup**
+    - Removed: `Serial.begin()` + wait loop, 5-second boot countdown, per-LED flash test
+    - `bootSequence()` (rainbow wave splash) now starts immediately — reduces game mode entry from ~8 s to ~3 s
+
+12. **Mode-specific entry splashes**
+    - **Party mode**: 2× all-wing pulse (capped via `hw_led_all_set()`) — was nothing before
+    - **Diagnostic mode**: BLUE blinks 2× — was nothing before
+    - **Game mode**: existing `bootSequence()` unchanged
+
+13. **`hw_led_all_set(duties[4])` — global power cap in shared HAL**
+    - Replaces the private `applyGlobalCap()` + `writeWingDuty()` pair that existed only in `mode_party.cpp`
+    - All simultaneous 4-wing writes now go through this function: `selConfirmAnimation()` (main), PASS summary (diag), `commitRequests()` and `visualsRender()` failure path (party)
+    - Constant `HW_GLOBAL_DUTY_CAP = 320` (sum of all 4 channel duties); previously only party mode enforced a cap — `selConfirmAnimation` (sum=720) and diagnostic PASS (sum=800) were both over the PSU limit
+    - Removed dead code from `mode_party.cpp`: `GLOBAL_DUTY_CAP`, `applyGlobalCap()`, `writeWingDuty()`, `outDuty[]`, `allOff()`
+    - Removed dead constants from `shimon.h`: `MAX_SIMULTANEOUS_WINGS_FULL_BRIGHTNESS`, `POWER_BUDGET_SAFETY_MARGIN`
+
 ### Known Issues (Resolved)
 - ✅ Audio messages getting cut off (fixed with finish detection)
 - ✅ No post-game prompt (fixed with POST_GAME_INVITE state)
 - ✅ Button LEDs flashing instead of staying on (fixed with hold detection)
 - ✅ Phase C MIDI FAIL when BLUE held from C_PROMPT (fixed with edge detection in hw.h)
 - ✅ DS_DONE spurious restart from PWM ghost clicks (fixed with edge detection in hw.h)
+- ✅ `selConfirmAnimation` and diag PASS exceeding PSU limit (fixed with `hw_led_all_set()`)
+- ✅ Redundant hw init calls in every mode (cleaned up — now only in `setup()`)
 
 ### PlatformIO Access
 PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`
