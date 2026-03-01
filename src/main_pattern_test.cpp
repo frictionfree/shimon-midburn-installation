@@ -26,10 +26,16 @@ static uint8_t  beat        = 1;
 
 // Derive the appropriate ContextState for the selected pattern family
 // so brightness caps and visual mode routing work correctly.
+// Add a case here when adding a new STD or BRK pattern; DROP is the default.
 static ContextState ctxForPattern(PatternID p) {
-  if (p <= PAT_STD_03) return STANDARD;
-  if (p <= PAT_BRK_03) return BREAK_CONFIRMED;
-  return DROP;
+  switch (p) {
+    case PAT_STD_01: case PAT_STD_02: case PAT_STD_03:
+      return STANDARD;
+    case PAT_BRK_01: case PAT_BRK_02: case PAT_BRK_03:
+      return BREAK_CONFIRMED;
+    default:
+      return DROP;
+  }
 }
 
 void setup() {
