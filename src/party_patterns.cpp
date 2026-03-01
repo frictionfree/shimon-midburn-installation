@@ -96,6 +96,7 @@ static PatternID activePattern    = PAT_STD_01;
 static uint8_t   stdPatternIdx    = 0;
 static uint8_t   brkPatternIdx    = 0;
 static uint8_t   drpPatternIdx    = 0;
+static bool      ppPatternLocked  = false;  // true = pp_setPattern(); suppresses round-robin switching
 
 static const PatternID STD_PATTERNS[3] = { PAT_STD_01, PAT_STD_02, PAT_STD_03 };
 static const PatternID BRK_PATTERNS[3] = { PAT_BRK_01, PAT_BRK_02, PAT_BRK_03 };
@@ -362,15 +363,17 @@ void pp_setContext(ContextState state, uint32_t beatIntervalUs) {
 }
 
 void pp_setPattern(PatternID p) {
-  activePattern = p;
-  breakFading   = false;
-  dropStep      = 0;
-  lastHalfBeatUs = micros();
-  patWindowBar  = 0;
-  patWindowBeat = 1;
+  activePattern    = p;
+  ppPatternLocked  = true;
+  breakFading      = false;
+  dropStep         = 0;
+  lastHalfBeatUs   = micros();
+  patWindowBar     = 0;
+  patWindowBeat    = 1;
 }
 
 void pp_selectForState(ContextState s) {
+  ppPatternLocked = false;
   switch (s) {
     case STANDARD:
     case BREAK_CANDIDATE:
@@ -413,7 +416,7 @@ void pp_onBeat(uint8_t bar, uint8_t beat) {
     }
     prevStateForPat = ppState;
   }
-  if (shouldSelect) {
+  if (shouldSelect && !ppPatternLocked) {
     pp_selectForState(ppState);
     patWindowBar = 0;
     Serial.printf("PATTERN_SELECT pat=%s state=%s\n",
@@ -424,9 +427,11 @@ void pp_onBeat(uint8_t bar, uint8_t beat) {
   if (isBarStart) {
     patWindowBar++;
     if (patWindowBar > PATTERN_LEN_BARS) {
-      pp_selectForState(ppState);
+      if (!ppPatternLocked) {
+        pp_selectForState(ppState);
+        Serial.printf("PATTERN_SWITCH pat=%s\n", pp_patternName(activePattern));
+      }
       patWindowBar = 1;
-      Serial.printf("PATTERN_SWITCH pat=%s\n", pp_patternName(activePattern));
     }
     patWindowBeat = 1;
   } else {
@@ -506,6 +511,7 @@ void pp_render() {
 
 void pp_reset() {
   activePattern   = PAT_STD_01;
+  ppPatternLocked = false;
   stdPatternIdx   = 1;   // next switch gets S-2
   brkPatternIdx   = 0;
   drpPatternIdx   = 0;
