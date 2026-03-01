@@ -402,6 +402,8 @@ The visual layer produces music-synchronized visual behavior suitable for live D
 
 **Key principle:** The visual system **consumes** musical state, not audio directly.
 
+**Implementation:** All visual patterns are implemented in the **shared pattern engine** (`include/party_patterns.h` / `src/party_patterns.cpp`). This module is used by both `mode_party.cpp` (production) and the standalone pattern tester (`main_pattern_test.cpp`). See `CLAUDE.md § Visual Pattern Development` for the full API reference and workflow for adding new patterns.
+
 ### 8.2 State-to-Visual Mapping
 
 | State | Visual Character | Brightness Cap |
@@ -592,7 +594,7 @@ All STANDARD patterns: 8-bar window, 1-beat resolution, deterministic, minimal o
 | A | 1-4 | Counterclockwise: W1 → W2 → W3 → W4 |
 | B | 5-8 | Clockwise: W4 → W3 → W2 → W1 |
 
-#### STD-02 — Alternating Axis
+#### STD-02 — Edge Oscillation Walk
 
 **Identity:** Structured symmetry using opposite wings.
 
@@ -601,7 +603,7 @@ All STANDARD patterns: 8-bar window, 1-beat resolution, deterministic, minimal o
 | Odd (1,3,5,7) | W1 → W3 → W1 → W3 |
 | Even (2,4,6,8) | W2 → W4 → W2 → W4 |
 
-#### STD-03 — Directional Sweep Ladder
+#### STD-03 — Diagonal Pairs
 
 **Identity:** Structured spatial travel with mirrored second half.
 
@@ -672,14 +674,16 @@ Within each bar: Strong dual-wing hit on beats 1,3; half-beat pulses on 2,4.
 
 #### DRP-03 — Expanding Impact Wave
 
-**Identity:** Spatial expansion and contraction.
+**Identity:** Spatial expansion and contraction at half-beat resolution.
 
-| Phase | Bars | Motion |
-|-------|------|--------|
-| Expansion | 1-4 | 1 wing → 2 → 3 → 4 wings |
-| Contraction | 5-8 | 4 wings → 3 → 2 → 1 wing |
+**Implementation:** 16-step symmetrical cycle driven at half-beat rate:
 
-Half-beat shimmer allowed during multi-wing phases.
+```
+Step:   1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16
+Wings:  1  2  3  4  4  3  2  1  1  2  3  4  4  3  2  1
+```
+
+One full expansion + contraction per 8-bar window (16 half-beats × 0.5 beat = 8 beats = 2 bars per cycle, 4 cycles total). Hard LED clear before each step transition to prevent visual smearing.
 
 ---
 
@@ -714,13 +718,10 @@ Half-beat shimmer allowed during multi-wing phases.
 - ✅ MIDI clock integration (USB-MIDI and DIN-MIDI)
 - ✅ Basic visual pattern per state (1 each)
 - ✅ Power-aware PWM brightness control
-
-### In Development (Current Focus)
-
-- ⏳ Full pattern catalog (9 patterns)
-- ⏳ Pattern switching logic (round-robin)
-- ⏳ Pattern execution framework (8-bar windows)
-- ⏳ Power budgeting model (pattern declarations)
+- ✅ Full pattern catalog (9 patterns — 3 STD / 3 BRK / 3 DRP)
+- ✅ Pattern switching logic (round-robin, 8-bar windows)
+- ✅ Pattern execution framework (`party_patterns.h/cpp` shared module)
+- ✅ Standalone pattern tester (`[env:pattern_test]`, 120 BPM, pattern-selectable via build flag)
 
 ### Open Issues
 
@@ -732,13 +733,57 @@ Half-beat shimmer allowed during multi-wing phases.
 ### Recently Completed
 
 - ✅ Tempo Integrity Guard (CLOCK_HOLD) — req 3.1 / field-validated vs. DJM-900NXS2
+- ✅ Pattern catalog implementation — all 9 patterns in `party_patterns.cpp`
+- ✅ DRP-03 redesign — half-beat 16-step symmetrical cycle (field-tested)
+- ✅ Standalone pattern tester — `[env:pattern_test]` with `ppPatternLocked` flag
 
 ---
 
-## 16. References
+## 16. Visual Pattern Development Workflow
+
+### 16.1 Architecture
+
+All 9 visual patterns are implemented in the **shared pattern engine** (`include/party_patterns.h` / `src/party_patterns.cpp`). Both `mode_party.cpp` (production) and the standalone pattern tester (`main_pattern_test.cpp`) use this module — new patterns developed in the tester work automatically in production.
+
+### 16.2 Pattern Tester
+
+The `[env:pattern_test]` PlatformIO environment runs a single pattern at a fixed 120 BPM software clock (no MIDI, no audio, no game logic required).
+
+```bash
+# Set PATTERN_TEST in platformio.ini to the desired PatternID integer:
+#   STD: S1=0  S2=1  S3=2
+#   BRK: B1=3  B2=4  B3=5
+#   DRP: D1=6  D2=7  D3=8
+
+pio run -e pattern_test -t upload
+pio device monitor -e pattern_test
+```
+
+### 16.3 Adding a New Pattern
+
+1. **Write the pattern function** in `src/party_patterns.cpp` using `setWing()`, `clearRequests()`, `commitRequests()`. Patterns receive `pp_onBeat(bar, beat)` and `pp_onHalfBeat()` callbacks.
+
+2. **Add the `PatternID`** to the enum in `include/party_patterns.h`. Increment `PAT_COUNT`.
+
+3. **Add the pattern name** to `pp_patternName()` in `party_patterns.cpp`.
+
+4. **Add context mapping** to `ctxForPattern()` in `src/main_pattern_test.cpp` using an explicit `case` (not range comparison — range breaks if IDs are ever added out of order).
+
+5. **Add to the family array** in `party_patterns.cpp` (`stdPatterns[]`, `brkPatterns[]`, or `drpPatterns[]`).
+
+6. **Test with pattern tester**: set `PATTERN_TEST=N`, upload, verify LED behavior at 120 BPM.
+
+7. **Ship**: pattern is automatically available in production — `mode_party.cpp` uses the same family arrays.
+
+For the full `pp_*` API reference, see `CLAUDE.md § Visual Pattern Development`.
+
+---
+
+## 17. References
 
 | Document | Content |
 |----------|---------|
 | `hardware-baseline.md` | I2S config (Section 9), MIDI config (Section 10) |
 | `SYSTEM_REQUIREMENTS.md` | Mode selection, boot sequence, failure handling |
 | `GAME_MODE_REQUIREMENTS.md` | Game Mode specific requirements |
+| `CLAUDE.md` | Full `pp_*` API, pattern tester usage, step-by-step pattern addition |
