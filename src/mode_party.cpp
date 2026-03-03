@@ -86,9 +86,9 @@ static constexpr float DROP_OVERLAP_FRAC = 0.10f;
 
 // ---------------- I2S ----------------
 static constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
-static constexpr int PIN_I2S_BCLK = 26;
+static constexpr int PIN_I2S_BCLK = 33;  // moved from GPIO26 Mar 2026
 static constexpr int PIN_I2S_LRCK = 25;
-static constexpr int PIN_I2S_DATA = 22;
+static constexpr int PIN_I2S_DATA = 32;  // moved from GPIO22 Mar 2026 (GPIO32 freed from BTN_BLUE)
 
 static constexpr int SAMPLE_RATE = 48000;
 static constexpr int I2S_READ_FRAMES = 256;

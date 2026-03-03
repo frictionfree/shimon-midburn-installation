@@ -83,11 +83,11 @@ PWM generation and fade behavior are handled in firmware; hardware provides low�
 - 60 mm illuminated arcade buttons (12 V LED)
 - Button contacts wired to ESP32 GPIOs using **INPUT_PULLUP** logic
 
-**GPIO Assignments** (Blue moved from GPIO 21 → GPIO 32 in Feb 2026 — right-header grouping):
+**GPIO Assignments** (Blue: GPIO 21 → GPIO 32 Feb 2026; GPIO 32 → GPIO 26 Mar 2026):
 
 | Wing   | GPIO |
 |--------|------|
-| Blue   | 32   |
+| Blue   | 26   |
 | Red    | 13   |
 | Green  | 14   |
 | Yellow | 27   |
@@ -202,19 +202,18 @@ ESP32 I2S peripheral (RX, slave mode)
 
 All analysis code assumes this format. Any change requires full re-validation.
 
-### ESP32 I2S Pin Mapping (Validated & Frozen)
+### ESP32 I2S Pin Mapping
 
 The ESP32 is configured as an I2S slave receiver with the following GPIO mapping:
 
-| Signal       | GPIO |
-|--------------|------|
-| BCLK (Bit Clock) | 26 |
-| LRCK / WS (Word Select) | 25 |
-| DATA IN      | 22   |
-| MCLK         | Not used |
+| Signal       | GPIO | Note |
+|--------------|------|------|
+| BCLK (Bit Clock) | 33 | moved from GPIO 26 Mar 2026 |
+| LRCK / WS (Word Select) | 25 | |
+| DATA IN      | 32   | moved from GPIO 22 Mar 2026 |
+| MCLK         | Not used | |
 
-This mapping has been validated in practice and is part of the stable hardware baseline.
-Any change requires full clocking and signal-integrity re-validation.
+**Rationale (Mar 2026):** BTN_BLUE moved from GPIO 32 → GPIO 26 for convenience, freeing GPIO 32 for I2S DATA. I2S BCLK moved from GPIO 26 → GPIO 33 (previously unused/reserved). Re-validate I2S clocking and signal integrity after rewiring.
 
 ### Critical: Correct 24-bit Right-Justified Decode
 

@@ -19,7 +19,7 @@ constexpr uint8_t LED_YELLOW = 5;   // Yellow strip gate (GPIO5)
 
 // Button inputs (to GND, use INPUT_PULLUP)
 // All four pins are on the right header, grouped together away from LED pins.
-constexpr uint8_t BTN_BLUE   = 32;  // Blue  button input (GPIO32) — moved from GPIO21 Feb 2026
+constexpr uint8_t BTN_BLUE   = 26;  // Blue  button input (GPIO26) — moved from GPIO32 Mar 2026
 constexpr uint8_t BTN_RED    = 13;  // Red   button input (GPIO13)
 constexpr uint8_t BTN_GREEN  = 14;  // Green button input (GPIO14)
 constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
@@ -28,11 +28,8 @@ constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 // NOTE: Button LEDs are hardwired to mirror LED strips via MOSFET channels.
 // These GPIO assignments are RESERVED but not actively used by firmware.
 // Button LEDs automatically turn on/off when LED strips do (hardware-controlled).
-// NOTE: GPIO32 was previously BTN_LED_GREEN; it is now BTN_BLUE (see above).
+// NOTE: GPIO26 is now BTN_BLUE; GPIO32 is now I2S DATA; GPIO33 is now I2S BCLK.
 constexpr uint8_t BTN_LED_BLUE   = 25;  // RESERVED (was: Blue  button LED)
-constexpr uint8_t BTN_LED_RED    = 26;  // RESERVED (was: Red   button LED)
-constexpr uint8_t BTN_LED_YELLOW = 33;  // RESERVED (was: Yellow button LED)
-// BTN_LED_GREEN previously on GPIO32 — that pin is now BTN_BLUE; no firmware GPIO for green btn LED
 
 // DFPlayer (Serial2)
 constexpr uint8_t DFP_RX2 = 16;   // ESP32 RX2  (optional)

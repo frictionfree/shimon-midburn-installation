@@ -24,8 +24,8 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
 - **Pin Configuration** (include/shimon.h):
   - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5 (all on right header)
-  - **Button Inputs**: BLUE=32, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND, with 10kΩ pull-up + 100nF + 1µF caps to GND; BLUE moved from GPIO21 → GPIO32 Feb 2026 — right-header grouping)
-  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (GPIOs unused/reserved — button LEDs hardwired to mirror LED strips; GPIO32 formerly BTN_LED_GREEN is now BTN_BLUE)
+  - **Button Inputs**: BLUE=26, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND, with 10kΩ pull-up + 100nF + 1µF caps to GND; BLUE: GPIO21→32 Feb 2026, GPIO32→26 Mar 2026)
+  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (GPIOs unused/reserved — button LEDs hardwired to mirror LED strips; GPIO26 is now BTN_BLUE; GPIO32/33 now used for I2S)
   - **DFPlayer Mini**: RX2=16, TX2=17 (Serial2)
   - **Service LED**: Pin 2 (heartbeat indicator)
 
@@ -265,8 +265,8 @@ The project includes complete Wokwi simulation setup:
 **Hardware Pin Assignments** (from include/shimon.h):
 ```
 LED Strips (MOSFET gates): BLUE=D23, RED=D19, GREEN=D18, YELLOW=D5
-Button Inputs:             BLUE=D32, RED=D13, GREEN=D14, YELLOW=D27
-Button LEDs:               BLUE=D25, RED=D26, YELLOW=D33  (no firmware GPIO for green btn LED; D32 is now BTN_BLUE)
+Button Inputs:             BLUE=D26, RED=D13, GREEN=D14, YELLOW=D27
+I2S (Party Mode):          BCLK=D33, LRCK=D25, DATA=D32
 DFPlayer Mini:             RX2=D16, TX2=D17 (Serial2)
 Service LED:               D2 (heartbeat)
 ```
