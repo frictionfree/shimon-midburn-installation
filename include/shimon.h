@@ -32,8 +32,17 @@ constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 constexpr uint8_t BTN_LED_BLUE   = 25;  // RESERVED (was: Blue  button LED)
 
 // DFPlayer (Serial2)
-constexpr uint8_t DFP_RX2 = 16;   // ESP32 RX2  (optional)
-constexpr uint8_t DFP_TX2 = 17;   // ESP32 TX2 → DF RX (via 1k resistor)
+// (DFP_RX2 / DFP_TX2 removed — use DFPLAYER_RX / DFPLAYER_TX below)
+
+// I2S audio input (SPDIF→I2S converter, slave mode)
+constexpr int     I2S_PIN_BCLK    = 33;   // Bit clock    (GPIO33) — moved from GPIO26 Mar 2026
+constexpr int     I2S_PIN_LRCK    = 25;   // Word select  (GPIO25)
+constexpr int     I2S_PIN_DATA    = 32;   // Data in      (GPIO32) — moved from GPIO22 Mar 2026
+constexpr int     I2S_SAMPLE_RATE = 48000; // Hz
+
+// MIDI clock input (DIN-5 via optocoupler, UART1)
+constexpr int      MIDI_PIN_RX   = 34;    // GPIO34 (input-only pin)
+constexpr uint32_t MIDI_BAUD_RATE = 31250; // Standard MIDI baud rate
 
 // --- Notes ---
 // - Button switches: connect to GND (use INPUT_PULLUP with 10kΩ pull-up + 100nF + 1µF caps to GND).

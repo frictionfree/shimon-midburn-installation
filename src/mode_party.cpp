@@ -86,16 +86,13 @@ static constexpr float DROP_OVERLAP_FRAC = 0.10f;
 
 // ---------------- I2S ----------------
 static constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
-static constexpr int PIN_I2S_BCLK = 33;  // moved from GPIO26 Mar 2026
-static constexpr int PIN_I2S_LRCK = 25;
-static constexpr int PIN_I2S_DATA = 32;  // moved from GPIO22 Mar 2026 (GPIO32 freed from BTN_BLUE)
+// I2S_PIN_BCLK / I2S_PIN_LRCK / I2S_PIN_DATA / I2S_SAMPLE_RATE defined in shimon.h
 
-static constexpr int SAMPLE_RATE = 48000;
 static constexpr int I2S_READ_FRAMES = 256;
 
 // -------------- MONITOR WINDOW (policy) --------------
 static constexpr uint32_t MONITOR_WIN_MS = 75;
-static constexpr uint32_t WIN_SAMPLES = (SAMPLE_RATE * MONITOR_WIN_MS) / 1000;
+static constexpr uint32_t WIN_SAMPLES = (I2S_SAMPLE_RATE * MONITOR_WIN_MS) / 1000;
 
 // -------------- FILTERS --------------
 static constexpr float LP_ENV_ALPHA = 0.010f;
@@ -1293,7 +1290,7 @@ static void processMidi() {
 static void i2sInit() {
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_SLAVE | I2S_MODE_RX);
-  cfg.sample_rate = SAMPLE_RATE;
+  cfg.sample_rate = I2S_SAMPLE_RATE;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
@@ -1303,10 +1300,10 @@ static void i2sInit() {
   cfg.use_apll = false;
 
   i2s_pin_config_t pins = {};
-  pins.bck_io_num = PIN_I2S_BCLK;
-  pins.ws_io_num = PIN_I2S_LRCK;
+  pins.bck_io_num = I2S_PIN_BCLK;
+  pins.ws_io_num = I2S_PIN_LRCK;
   pins.data_out_num = I2S_PIN_NO_CHANGE;
-  pins.data_in_num = PIN_I2S_DATA;
+  pins.data_in_num = I2S_PIN_DATA;
 
   ESP_ERROR_CHECK(i2s_driver_install(I2S_PORT, &cfg, 0, nullptr));
   ESP_ERROR_CHECK(i2s_set_pin(I2S_PORT, &pins));
@@ -1429,7 +1426,7 @@ void party_init() {
   uint8_t off4[4] = {0, 0, 0, 0};
   for (int f = 0; f < 2; f++) { hw_led_all_set(on); delay(150); hw_led_all_set(off4); delay(100); }
 
-  MidiSerial.begin(31250, SERIAL_8N1, 34, -1);
+  MidiSerial.begin(MIDI_BAUD_RATE, SERIAL_8N1, MIDI_PIN_RX, -1);
 
   i2sInit();
   resetBarAcc();

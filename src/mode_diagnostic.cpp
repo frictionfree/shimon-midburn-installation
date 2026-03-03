@@ -28,14 +28,10 @@ static constexpr uint32_t PHASE_C_LISTEN_MS  = 5000;
 static constexpr uint32_t DIAG_DONE_AUTO_MS  = 20000;
 static constexpr uint32_t PHASE_D_MEASURE_MS = 3000;
 static constexpr uint32_t PHASE_E_TIMEOUT_MS = 8000;
-static constexpr uint32_t MIDI_BAUD       = 31250;
-static constexpr uint8_t  MIDI_CLOCK_BYTE = 0xF8;
-static constexpr int      MIDI_RX_PIN     = 34;
+// MIDI_BAUD_RATE / MIDI_PIN_RX / I2S_PIN_BCLK / I2S_PIN_LRCK / I2S_PIN_DATA / I2S_SAMPLE_RATE
+// are all defined in shimon.h
+static constexpr uint8_t   MIDI_CLOCK_BYTE = 0xF8;
 static constexpr i2s_port_t DIAG_I2S_PORT  = I2S_NUM_0;
-static constexpr int        D_I2S_BCLK     = 26;
-static constexpr int        D_I2S_LRCK     = 25;
-static constexpr int        D_I2S_DATA     = 22;
-static constexpr int        D_SAMPLE_RATE  = 48000;
 static constexpr int        D_READ_FRAMES  = 256;
 static constexpr uint32_t   D_MIN_FRAMES   = 10000; // below this = no I2S clock (converter absent)
 static constexpr float      D_MUSIC_RMS    = 0.050f; // above this = music signal present (PASS)
@@ -180,9 +176,9 @@ static void phC_enter() {
   hw_led_all_off();
   diagTimer = millis();
   Serial.printf("[DIAG] Phase C: MIDI Clock - listening %lu s on GPIO%d.\n",
-                (unsigned long)(PHASE_C_LISTEN_MS / 1000), MIDI_RX_PIN);
+                (unsigned long)(PHASE_C_LISTEN_MS / 1000), MIDI_PIN_RX);
 #ifndef USE_WOKWI
-  DiagMidi.begin(MIDI_BAUD, SERIAL_8N1, MIDI_RX_PIN, -1);
+  DiagMidi.begin(MIDI_BAUD_RATE, SERIAL_8N1, MIDI_PIN_RX, -1);
 #else
   Serial.println("  [SIM] MIDI skipped.");
 #endif
@@ -229,7 +225,7 @@ static void phD_run() {
 #endif
   i2s_config_t cfg  = {};
   cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
-  cfg.sample_rate          = D_SAMPLE_RATE;
+  cfg.sample_rate          = I2S_SAMPLE_RATE;
   cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT;
   cfg.channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
@@ -239,10 +235,10 @@ static void phD_run() {
   cfg.use_apll             = false;
   i2s_driver_install(DIAG_I2S_PORT, &cfg, 0, nullptr);
   i2s_pin_config_t pins = {};
-  pins.bck_io_num    = D_I2S_BCLK;
-  pins.ws_io_num     = D_I2S_LRCK;
+  pins.bck_io_num    = I2S_PIN_BCLK;
+  pins.ws_io_num     = I2S_PIN_LRCK;
   pins.data_out_num  = I2S_PIN_NO_CHANGE;
-  pins.data_in_num   = D_I2S_DATA;
+  pins.data_in_num   = I2S_PIN_DATA;
   i2s_set_pin(DIAG_I2S_PORT, &pins);
   double sumSq = 0.0; uint32_t n = 0;
   int32_t buf[D_READ_FRAMES];
