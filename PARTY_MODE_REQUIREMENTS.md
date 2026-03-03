@@ -593,86 +593,91 @@ All STANDARD patterns: 8-bar window, 1-beat resolution, deterministic, minimal o
 
 | Phase | Bars | Motion |
 |-------|------|--------|
-| A | 1-4 | Counterclockwise: W1 → W2 → W3 → W4 |
-| B | 5-8 | Clockwise: W4 → W3 → W2 → W1 |
+| A | 1-4 | Clockwise: BLUE → RED → GREEN → YELLOW |
+| B | 5-8 | Counter-clockwise: BLUE → YELLOW → GREEN → RED |
+
+Both phases start from BLUE on beat 1.
 
 #### STD-02 — Edge Oscillation Walk
 
-**Identity:** Structured symmetry using opposite wings.
+**Identity:** Oscillating pair that walks through all four wings across bars.
 
-| Bars | Motion |
-|------|--------|
-| Odd (1,3,5,7) | W1 → W3 → W1 → W3 |
-| Even (2,4,6,8) | W2 → W4 → W2 → W4 |
+Each bar oscillates between two adjacent wings; the pair shifts by one step each bar, cycling every 4 bars:
+
+| Bar (mod 4) | Beat 1 | Beat 2 | Beat 3 | Beat 4 |
+|-------------|--------|--------|--------|--------|
+| 1           | RED    | BLUE   | RED    | BLUE   |
+| 2           | GREEN  | RED    | GREEN  | RED    |
+| 3           | YELLOW | GREEN  | YELLOW | GREEN  |
+| 4           | BLUE   | YELLOW | BLUE   | YELLOW |
 
 #### STD-03 — Diagonal Pairs
 
-**Identity:** Structured spatial travel with mirrored second half.
+**Identity:** Fixed diagonal pair alternation — BLUE/GREEN axis vs RED/YELLOW axis, beat-parity driven.
 
-| Phase | Bars | Motion |
-|-------|------|--------|
-| A | 1-4 | Progressive sweep forward |
-| B | 5-8 | Mirrored sweep back |
+- Odd bars: BLUE on beats 1 & 3, GREEN on beats 2 & 4
+- Even bars: RED on beats 1 & 3, YELLOW on beats 2 & 4
+- Pattern repeats identically across all 8 bars (no phase A/B distinction)
 
 ---
 
 ### 13.2 BREAK Patterns
 
-All BREAK patterns: 8-bar window, 1-2 beat transitions, smooth fades, visible overlap.
+All BREAK patterns: 8-bar window, beat-triggered transitions, smooth eased fades, visible overlap.
 
 #### BRK-01 — Slow Drift Relay
 
-**Identity:** Calm, flowing wing-to-wing relay with soft overlap.
+**Identity:** Calm, random wing-to-wing relay with soft crossfade overlap.
 
-- Each transition: 2 beats
-- Wing A fades out, Wing B fades in (overlap maintained)
-- Pseudo-random sequence (no immediate same-wing repeat)
+- Transition triggered on beats 1 and 3 (every 2 beats)
+- Old wing fades out, new wing fades in simultaneously (crossfade, both overlap during transition)
+- Next wing chosen randomly — guaranteed different from current wing (no immediate repeat)
 
 #### BRK-02 — Breathing Anchor
 
-**Identity:** Single-wing breathing pulses with slow cross transitions.
+**Identity:** Single-wing breath pulse per bar, sequential clockwise order, no crossfade between bars.
 
-- Each wing holds 1 full bar
-- Fade in over first 2 beats
-- Fade out over last 2 beats
+- Each bar selects the next wing clockwise (BLUE → RED → GREEN → YELLOW → …)
+- On beat 1: wing eases up to full brightness by beat 3, then eases back to dark by beat 4 (full-bar breath)
+- Each bar is independent — no crossfade between bars, one wing active at a time
 
 #### BRK-03 — Dual Flow Weave
 
-**Identity:** Soft dual-wing weave with continuous overlap.
+**Identity:** Identical crossfade mechanics to BRK-01 but deterministic — sequential clockwise walk instead of random.
 
-- Two wings partially active at any time
-- One fading out, one fading in
-- Transition every 2 beats
+- Transition triggered on beats 1 and 3 (every 2 beats)
+- Old wing fades out, new wing fades in simultaneously (crossfade, both overlap during transition)
+- Next wing is always the next one clockwise (BLUE → RED → GREEN → YELLOW → BLUE → …)
 
 ---
 
 ### 13.3 DROP Patterns
 
-All DROP patterns: 8-bar window, immediate start, half-beat allowed, fast transitions.
+All DROP patterns: 8-bar window, immediate start, half-beat resolution, fast transitions.
 
 #### DRP-01 — Impact Chase
 
-**Identity:** High-speed rotational drive.
+**Identity:** Half-beat rotational sweep with direction reversal at bar 5.
 
 | Phase | Bars | Motion |
 |-------|------|--------|
-| A | 1-4 | Half-beat rotational sweep forward |
-| B | 5-8 | Reverse half-beat sweep |
+| A | 1-4 | Clockwise rotation at half-beat speed |
+| B | 5-8 | Counter-clockwise rotation at half-beat speed |
 
-Strong Beat-1 emphasis each bar.
+Each step holds on one wing then crossfades briefly into the next. Beat 1 resets the step counter; no special brightness emphasis on beat 1.
 
 #### DRP-02 — Alternating Burst Drive
 
-**Identity:** Aggressive axis-based burst with 2-bar switching.
+**Identity:** Two-axis alternation every 2 bars with continuous half-beat cross-pulse.
 
 | Bars | Primary Axis |
 |------|--------------|
-| 1-2 | W1 + W3 |
-| 3-4 | W2 + W4 |
-| 5-6 | W1 + W3 |
-| 7-8 | W2 + W4 |
+| 1-2  | BLUE + GREEN |
+| 3-4  | RED + YELLOW |
+| 5-6  | BLUE + GREEN |
+| 7-8  | RED + YELLOW |
 
-Within each bar: Strong dual-wing hit on beats 1,3; half-beat pulses on 2,4.
+On every beat: primary axis fires at full brightness. On every half-beat: the opposite axis pulses dimly (40–60%). Both brightness levels pulse slightly within each half-beat interval, creating a continuous double-axis flicker.
 
 #### DRP-03 — Expanding Impact Wave
 
