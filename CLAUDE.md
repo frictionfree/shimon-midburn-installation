@@ -22,11 +22,13 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Platform**: ESP32 DevKitC-V4 (espressif32)
 - **Framework**: Arduino
 - **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
-- **Pin Configuration** (include/shimon.h):
-  - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5 (all on right header)
-  - **Button Inputs**: BLUE=26, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP, connected to GND, with 10kΩ pull-up + 100nF + 1µF caps to GND; BLUE: GPIO21→32 Feb 2026, GPIO32→26 Mar 2026)
-  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (GPIOs unused/reserved — button LEDs hardwired to mirror LED strips; GPIO26 is now BTN_BLUE; GPIO32/33 now used for I2S)
-  - **DFPlayer Mini**: RX2=16, TX2=17 (Serial2)
+- **Pin Configuration** (`include/shimon.h` is the single source of truth for all pin/hw constants):
+  - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5
+  - **Button Inputs**: BLUE=26, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP; BLUE: GPIO21→32 Feb 2026, GPIO32→26 Mar 2026)
+  - **Button LEDs**: ~~BLUE=25, RED=26, GREEN=32, YELLOW=33~~ **HARDWARE-CONTROLLED** (hardwired to mirror LED strips; GPIO26=BTN_BLUE, GPIO32/33 now used for I2S)
+  - **I2S audio input**: BCLK=33, LRCK=25, DATA=32 (BCLK: GPIO26→33; DATA: GPIO22→32, Mar 2026)
+  - **MIDI clock input**: RX=34, 31250 bps (UART1)
+  - **DFPlayer Mini**: RX=16, TX=17 (Serial2)
   - **Service LED**: Pin 2 (heartbeat indicator)
 
 ### Circuit Design
@@ -266,7 +268,8 @@ The project includes complete Wokwi simulation setup:
 ```
 LED Strips (MOSFET gates): BLUE=D23, RED=D19, GREEN=D18, YELLOW=D5
 Button Inputs:             BLUE=D26, RED=D13, GREEN=D14, YELLOW=D27
-I2S (Party Mode):          BCLK=D33, LRCK=D25, DATA=D32
+I2S audio input:           BCLK=D33, LRCK=D25, DATA=D32
+MIDI clock input:          RX=D34 (UART1, 31250 bps)
 DFPlayer Mini:             RX2=D16, TX2=D17 (Serial2)
 Service LED:               D2 (heartbeat)
 ```
@@ -683,6 +686,19 @@ bar=1 beat=2
     - Redesigned: 16-step half-beat cycle `{1,2,3,4,4,3,2,1, 1,2,3,4,4,3,2,1}` — one full expansion + contraction per 8-bar window
     - Hard LED clear (`clearRequests` + `commitRequests`) before each step transition to prevent smearing
 
+### Hardware Pin Consolidation + I2S Bug Fix (March 2026, Branch: `feat/party-mode-poc`)
+
+17. **ESP32 pin changes**
+    - `BTN_BLUE`: GPIO 32 → GPIO 26
+    - `I2S BCLK`: GPIO 26 → GPIO 33 (freed by BTN_BLUE move)
+    - `I2S DATA`: GPIO 22 → GPIO 32 (freed by BTN_BLUE move)
+
+18. **`shimon.h` — single source of truth for all hardware constants**
+    - Added `I2S_PIN_BCLK`, `I2S_PIN_LRCK`, `I2S_PIN_DATA`, `I2S_SAMPLE_RATE`, `MIDI_PIN_RX`, `MIDI_BAUD_RATE`
+    - Removed redundant `DFP_RX2` / `DFP_TX2` (unused duplicates of `DFPLAYER_RX` / `DFPLAYER_TX`)
+    - Both `mode_party.cpp` and `mode_diagnostic.cpp` now reference `shimon.h` constants — no more per-mode hardcoded pins
+    - Fixed diagnostic I2S WARN bug: `mode_diagnostic.cpp` had stale GPIO 26/22 that were never updated after the Mar 2026 pin move
+
 ### Known Issues (Resolved)
 - ✅ Audio messages getting cut off (fixed with finish detection)
 - ✅ No post-game prompt (fixed with POST_GAME_INVITE state)
@@ -692,6 +708,7 @@ bar=1 beat=2
 - ✅ `selConfirmAnimation` and diag PASS exceeding PSU limit (fixed with `hw_led_all_set()`)
 - ✅ Redundant hw init calls in every mode (cleaned up — now only in `setup()`)
 - ✅ Pattern tester switching patterns after 8 bars (fixed with `ppPatternLocked` flag)
+- ✅ Diagnostic I2S Phase D WARN with music playing (stale pin constants fixed by shimon.h centralization)
 
 ### PlatformIO Access
 PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`
@@ -701,7 +718,7 @@ Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
 
 - `src/main.cpp`: Top-level mode selection FSM and loop dispatcher
 - `include/hw.h` + `src/hw.cpp`: **Shared hardware abstraction layer** — Color enum, LED PWM, button debounce
-- `include/shimon.h`: Configuration header with all tunable parameters
+- `include/shimon.h`: **Single source of truth** for all hardware pin assignments and tunable parameters — LED, button, I2S, MIDI, DFPlayer, PWM, game timing
 - `src/mode_game.cpp`: Simon Says game logic (~1050 lines)
 - `src/mode_party.cpp`: Party mode — I2S audio analysis, MIDI clock, beat-sync visuals
 - `src/mode_diagnostic.cpp`: 5-phase hardware diagnostic (LED / Buttons / MIDI / I2S / DFPlayer)

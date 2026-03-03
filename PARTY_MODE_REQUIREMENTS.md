@@ -98,7 +98,8 @@ Some mixers emit continuous clock without reliable START/STOP messages.
 
 ### Hardware Reference
 
-See `hardware-baseline.md` Section 10 for MIDI input configuration (GPIO 34, 31250 bps, optocoupler circuit).
+Pin and baud constants: `MIDI_PIN_RX = 34`, `MIDI_BAUD_RATE = 31250` in `shimon.h`.
+See `hardware-baseline.md` Section 10 for optocoupler circuit details.
 
 ---
 
@@ -136,7 +137,8 @@ After `CLOCK_HOLD_RESUME_BEATS` (8) consecutive beats whose IIR-candidate BPM is
 
 ### Hardware Reference
 
-See `hardware-baseline.md` Section 9 for I2S configuration:
+Pin constants: `I2S_PIN_BCLK = 33`, `I2S_PIN_LRCK = 25`, `I2S_PIN_DATA = 32`, `I2S_SAMPLE_RATE = 48000` in `shimon.h`.
+See `hardware-baseline.md` Section 9 for converter wiring and signal format:
 - 48 kHz sample rate
 - 24-bit right-justified in 32-bit words
 - Critical decode: `int32_t sample = raw >> 8; float x = sample / 8388608.0f;`
