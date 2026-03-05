@@ -587,6 +587,22 @@ Guarantees: No PSU overload, no brownouts.
 
 All STANDARD patterns: 8-bar window, 1-beat resolution, deterministic, minimal overlap.
 
+**Physical Wing Mapping (validated):**
+
+| Index | Color | Position |
+|-------|-------|----------|
+| W0 | BLUE | Top Left |
+| W1 | RED | Top Right |
+| W2 | GREEN | Bottom Right |
+| W3 | YELLOW | Bottom Left |
+
+**STD Beat Activation Model:**
+- Pattern functions declare only which wings are active via `setWing()` — no LED writes inside pattern functions
+- Framework calls `clearRequests()` before and `commitRequests()` after every beat callback
+- At the half-beat: `hw_led_all_off()` — hard cut dark gap between every beat
+- Result: each beat is a hard-cut flash (on for half-beat, dark for half-beat)
+- To change transition style (e.g. add fade-out): only `pp_onHalfBeat()` and `pp_render()` need updating — pattern functions unchanged
+
 #### STD-01 — Groove Rotation
 
 **Identity:** Classic directional motion with mid-window reversal.
@@ -619,6 +635,43 @@ Each bar oscillates between two adjacent wings; the pair shifts by one step each
 - Even bars: RED on beats 1 & 3, YELLOW on beats 2 & 4
 - Pattern repeats identically across all 8 bars (no phase A/B distinction)
 
+#### STD-04 — Corner Chase
+
+**Identity:** High-speed diagonal axis alternation — switches between the two diagonal pairs on every beat.
+
+- Odd beats (1, 3): BLUE + GREEN (W0 + W2, top-left + bottom-right)
+- Even beats (2, 4): RED + YELLOW (W1 + W3, top-right + bottom-left)
+- Same across all 8 bars (no phase distinction)
+- Combined with half-beat dark gap: creates a fast strobe feel on the diagonal axes
+
+#### STD-05 — Symmetrical Flutter
+
+**Identity:** Simulates biological wing movement using vertical and horizontal symmetry across two phases.
+
+| Phase | Bars | Beats 1 & 3 | Beats 2 & 4 |
+|-------|------|-------------|-------------|
+| A | 1-4 | BLUE + RED (top) | GREEN + YELLOW (bottom) |
+| B | 5-8 | BLUE + YELLOW (left) | RED + GREEN (right) |
+
+Phase switch is bar-aligned — 4 complete bars of vertical flap, then 4 complete bars of horizontal flap.
+
+#### STD-06 — Pulsing Cross
+
+**Identity:** Perimeter sweep combined with diagonal axis flip and a mandatory all-off reset every 2 bars.
+
+| Bar Parity | Beat | Wings |
+|------------|------|-------|
+| Odd | 1 | BLUE + RED (top edge) |
+| Odd | 2 | RED + GREEN (right edge) |
+| Odd | 3 | GREEN + YELLOW (bottom edge) |
+| Odd | 4 | YELLOW + BLUE (left edge) |
+| Even | 1 | BLUE + GREEN (diagonal A) |
+| Even | 2 | RED + YELLOW (diagonal B) |
+| Even | 3 | ALL ON (impact beat) |
+| Even | 4 | ALL OFF (mandatory visual reset) |
+
+The 2-bar unit (odd + even) repeats 4 times in the 8-bar window.
+
 ---
 
 ### 13.2 BREAK Patterns
@@ -639,7 +692,7 @@ All BREAK patterns: 8-bar window, beat-triggered transitions, smooth eased fades
 
 - Each bar selects the next wing clockwise (BLUE → RED → GREEN → YELLOW → …)
 - On beat 1: wing eases up to full brightness by beat 3, then eases back to dark by beat 4 (full-bar breath)
-- Each bar is independent — no crossfade between bars, one wing active at a time
+- Each bar is independent — no crossfade between1 bars, one wing active at a time
 
 #### BRK-03 — Dual Flow Weave
 
@@ -725,7 +778,7 @@ Each step is a hard cut (LEDs not in the new set are immediately off). Step brig
 - ✅ MIDI clock integration (USB-MIDI and DIN-MIDI)
 - ✅ Basic visual pattern per state (1 each)
 - ✅ Power-aware PWM brightness control
-- ✅ Full pattern catalog (9 patterns — 3 STD / 3 BRK / 3 DRP)
+- ✅ Full pattern catalog (12 patterns — 6 STD / 3 BRK / 3 DRP)
 - ✅ Pattern switching logic (round-robin, 8-bar windows)
 - ✅ Pattern execution framework (`party_patterns.h/cpp` shared module)
 - ✅ Standalone pattern tester (`[env:pattern_test]`, 120 BPM, pattern-selectable via build flag)
@@ -743,6 +796,9 @@ Each step is a hard cut (LEDs not in the new set are immediately off). Step brig
 - ✅ Pattern catalog implementation — all 9 patterns in `party_patterns.cpp`
 - ✅ DRP-03 redesign — half-beat 16-step symmetrical cycle (field-tested)
 - ✅ Standalone pattern tester — `[env:pattern_test]` with `ppPatternLocked` flag
+- ✅ STD patterns expanded to 6 (added STD-04 Corner Chase, STD-05 Symmetrical Flutter, STD-06 Pulsing Cross)
+- ✅ STD beat activation model refactored — pattern fns declare wings only (`setWing()`); framework owns clear/commit and half-beat dark gap
+- ✅ DRP-02 refactored — pattern fns set state only; `pp_render()` owns all LED output (consistent with DRP-01/03)
 
 ---
 
@@ -767,7 +823,10 @@ PatternID integers are defined in `include/party_patterns.h`.
 
 ### 16.3 Adding a New Pattern
 
-1. **Write the pattern function** in `src/party_patterns.cpp` using `setWing()`, `clearRequests()`, `commitRequests()`. Patterns receive `pp_onBeat(bar, beat)` and `pp_onHalfBeat()` callbacks.
+1. **Write the pattern function** in `src/party_patterns.cpp`:
+   - **STD**: call `setWing()` only — framework owns `clearRequests()`/`commitRequests()` and the half-beat dark gap
+   - **BRK**: set crossfade state variables only — `pp_render()` drives all LED output
+   - **DRP**: set step/timing state only — `pp_render()` drives all LED output
 
 2. **Add the `PatternID`** to the enum in `include/party_patterns.h`. Increment `PAT_COUNT`.
 

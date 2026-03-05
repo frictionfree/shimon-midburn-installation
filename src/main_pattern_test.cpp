@@ -6,6 +6,7 @@
 //   S1=0  S2=1  S3=2  (STANDARD patterns)
 //   B1=3  B2=4  B3=5  (BREAK patterns)
 //   D1=6  D2=7  D3=8  (DROP patterns)
+//   S4=9  S5=10 S6=11 (STANDARD patterns)
 //
 // Usage:  pio run -e pattern_test -t upload && pio device monitor -e pattern_test
 
@@ -30,6 +31,7 @@ static uint8_t  beat        = 1;
 static ContextState ctxForPattern(PatternID p) {
   switch (p) {
     case PAT_STD_01: case PAT_STD_02: case PAT_STD_03:
+    case PAT_STD_04: case PAT_STD_05: case PAT_STD_06:
       return STANDARD;
     case PAT_BRK_01: case PAT_BRK_02: case PAT_BRK_03:
       return BREAK_CONFIRMED;

@@ -21,7 +21,10 @@ enum PatternID : uint8_t {
   PAT_DRP_01 = 6,   // Impact Chase
   PAT_DRP_02 = 7,   // Alternating Burst Drive
   PAT_DRP_03 = 8,   // Expanding Impact Wave
-  PAT_COUNT  = 9
+  PAT_STD_04 = 9,   // Corner Chase
+  PAT_STD_05 = 10,  // Symmetrical Flutter
+  PAT_STD_06 = 11,  // Pulsing Cross
+  PAT_COUNT  = 12
 };
 
 // ---- Info ----

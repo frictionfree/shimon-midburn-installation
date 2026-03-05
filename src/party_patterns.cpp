@@ -98,7 +98,7 @@ static uint8_t   brkPatternIdx    = 0;
 static uint8_t   drpPatternIdx    = 0;
 static bool      ppPatternLocked  = false;  // true = pp_setPattern(); suppresses round-robin switching
 
-static const PatternID STD_PATTERNS[3] = { PAT_STD_01, PAT_STD_02, PAT_STD_03 };
+static const PatternID STD_PATTERNS[6] = { PAT_STD_01, PAT_STD_02, PAT_STD_03, PAT_STD_04, PAT_STD_05, PAT_STD_06 };
 static const PatternID BRK_PATTERNS[3] = { PAT_BRK_01, PAT_BRK_02, PAT_BRK_03 };
 static const PatternID DRP_PATTERNS[3] = { PAT_DRP_01, PAT_DRP_02, PAT_DRP_03 };
 
@@ -140,7 +140,6 @@ static ContextState prevStateForPat = STANDARD;
 
 // --- STD-01: Groove Rotation ---
 static void patStd01OnBeat(uint8_t bar, uint8_t beat) {
-  clearRequests();
   bool forward = (bar <= 4);
   uint8_t totalBeats = ((bar - 1) * 4) + (beat - 1);
   uint8_t pos;
@@ -150,12 +149,10 @@ static void patStd01OnBeat(uint8_t bar, uint8_t beat) {
     pos = (4 - (totalBeats % 4)) % 4;
   }
   setWing(CW_ORDER[pos], 1.0f);
-  commitRequests();
 }
 
 // --- STD-02: Edge Oscillation Walk ---
 static void patStd02OnBeat(uint8_t bar, uint8_t beat) {
-  clearRequests();
   static const Color EDGE_PATTERN[4][4] = {
     { RED,    BLUE,   RED,    BLUE   },
     { GREEN,  RED,    GREEN,  RED    },
@@ -165,18 +162,15 @@ static void patStd02OnBeat(uint8_t bar, uint8_t beat) {
   uint8_t barIdx  = (bar - 1) % 4;
   uint8_t beatIdx = beat - 1;
   setWing(EDGE_PATTERN[barIdx][beatIdx], 1.0f);
-  commitRequests();
 }
 
 // --- STD-03: Diagonal Pairs ---
 static void patStd03OnBeat(uint8_t bar, uint8_t beat) {
-  clearRequests();
   bool oddBar = (bar % 2) == 1;
   Color pair[2];
   if (oddBar) { pair[0] = BLUE;  pair[1] = GREEN;  }
   else         { pair[0] = RED;   pair[1] = YELLOW; }
   setWing(((beat % 2) == 1) ? pair[0] : pair[1], 1.0f);
-  commitRequests();
 }
 
 // --- BRK-01: Slow Drift Relay ---
@@ -237,27 +231,15 @@ static void patDrp01OnHalfBeat() {
 
 // --- DRP-02: Alternating Burst Drive ---
 static void patDrp02OnBeat(uint8_t bar, uint8_t beat) {
-  clearRequests();
+  (void)beat;
   drp02Axis13 = (bar == 1 || bar == 2 || bar == 5 || bar == 6);
-  if (drp02Axis13) { setWing(BLUE, 1.0f); setWing(GREEN, 1.0f); }
-  else              { setWing(RED,  1.0f); setWing(YELLOW, 1.0f); }
   dropStep = 0;
   lastHalfBeatUs = micros();
-  commitRequests();
 }
 
 static void patDrp02OnHalfBeat() {
-  clearRequests();
   dropStep = (dropStep + 1) % 2;
-  if (dropStep == 1) {
-    if (!drp02Axis13) { setWing(BLUE, 0.6f); setWing(GREEN, 0.6f); }
-    else               { setWing(RED,  0.6f); setWing(YELLOW, 0.6f); }
-  } else {
-    if (drp02Axis13)   { setWing(BLUE, 1.0f); setWing(GREEN, 1.0f); }
-    else               { setWing(RED,  1.0f); setWing(YELLOW, 1.0f); }
-  }
   lastHalfBeatUs = micros();
-  commitRequests();
 }
 
 // --- DRP-03: Expanding Impact Wave ---
@@ -283,10 +265,64 @@ static void patDrp03OnHalfBeat() {
   lastHalfBeatUs = micros();
 }
 
+// --- STD-04: Corner Chase ---
+// Alternates between the two diagonal axes every beat.
+// Odd beats: BLUE+GREEN (W0+W2); Even beats: RED+YELLOW (W1+W3).
+// Same across all 8 bars — no phase distinction.
+static void patStd04OnBeat(uint8_t bar, uint8_t beat) {
+  (void)bar;
+  if ((beat % 2) == 1) {
+    setWing(BLUE,   1.0f);
+    setWing(GREEN,  1.0f);
+  } else {
+    setWing(RED,    1.0f);
+    setWing(YELLOW, 1.0f);
+  }
+}
+
+// --- STD-05: Symmetrical Flutter ---
+// Phase A (bars 1-4): top/bottom flap — beats 1&3 = top (BLUE+RED), beats 2&4 = bottom (GREEN+YELLOW).
+// Phase B (bars 5-8): left/right flap — beats 1&3 = left (BLUE+YELLOW), beats 2&4 = right (RED+GREEN).
+static void patStd05OnBeat(uint8_t bar, uint8_t beat) {
+  bool phaseA = (bar <= 4);
+  if ((beat % 2) == 1) {
+    if (phaseA) { setWing(BLUE,   1.0f); setWing(RED,    1.0f); }  // top
+    else         { setWing(BLUE,   1.0f); setWing(YELLOW, 1.0f); }  // left
+  } else {
+    if (phaseA) { setWing(GREEN,  1.0f); setWing(YELLOW, 1.0f); }  // bottom
+    else         { setWing(RED,    1.0f); setWing(GREEN,  1.0f); }  // right
+  }
+}
+
+// --- STD-06: Pulsing Cross ---
+// Odd bars:  perimeter sweep — each beat lights an adjacent edge pair (CW rotation).
+// Even bars: diagonal axis flip, then ALL ON (beat 3), then ALL OFF reset (beat 4).
+static void patStd06OnBeat(uint8_t bar, uint8_t beat) {
+  bool oddBar = (bar % 2) == 1;
+  if (oddBar) {
+    switch (beat) {
+      case 1: setWing(BLUE,   1.0f); setWing(RED,    1.0f); break;  // top
+      case 2: setWing(RED,    1.0f); setWing(GREEN,  1.0f); break;  // right
+      case 3: setWing(GREEN,  1.0f); setWing(YELLOW, 1.0f); break;  // bottom
+      case 4: setWing(YELLOW, 1.0f); setWing(BLUE,   1.0f); break;  // left
+    }
+  } else {
+    switch (beat) {
+      case 1: setWing(BLUE,   1.0f); setWing(GREEN,  1.0f); break;  // diag A
+      case 2: setWing(RED,    1.0f); setWing(YELLOW, 1.0f); break;  // diag B
+      case 3: setWing(BLUE,   1.0f); setWing(RED,    1.0f);         // all on
+               setWing(GREEN,  1.0f); setWing(YELLOW, 1.0f); break;
+      case 4: break;  // all off — framework committed zero requests
+    }
+  }
+}
+
 // ============================================================
 // PATTERN DISPATCH
 // ============================================================
 static void patternOnBeat(uint8_t bar, uint8_t beat) {
+  // STD: framework owns clear/commit so transition logic can change without touching pattern fns
+  if (visMode == VIS_STD) clearRequests();
   switch (activePattern) {
     case PAT_STD_01: patStd01OnBeat(bar, beat); break;
     case PAT_STD_02: patStd02OnBeat(bar, beat); break;
@@ -297,8 +333,12 @@ static void patternOnBeat(uint8_t bar, uint8_t beat) {
     case PAT_DRP_01: patDrp01OnBeat(bar, beat); break;
     case PAT_DRP_02: patDrp02OnBeat(bar, beat); break;
     case PAT_DRP_03: patDrp03OnBeat(bar, beat); break;
+    case PAT_STD_04: patStd04OnBeat(bar, beat); break;
+    case PAT_STD_05: patStd05OnBeat(bar, beat); break;
+    case PAT_STD_06: patStd06OnBeat(bar, beat); break;
     default: break;
   }
+  if (visMode == VIS_STD) commitRequests();
 }
 
 static void patternOnHalfBeat() {
@@ -349,6 +389,9 @@ const char* pp_patternName(PatternID p) {
     case PAT_DRP_01: return "D-1";
     case PAT_DRP_02: return "D-2";
     case PAT_DRP_03: return "D-3";
+    case PAT_STD_04: return "S-4";
+    case PAT_STD_05: return "S-5";
+    case PAT_STD_06: return "S-6";
     default: return "?";
   }
 }
@@ -388,7 +431,7 @@ void pp_selectForState(ContextState s) {
     case STANDARD:
     case BREAK_CANDIDATE:
       activePattern = STD_PATTERNS[stdPatternIdx];
-      stdPatternIdx = (stdPatternIdx + 1) % 3;
+      stdPatternIdx = (stdPatternIdx + 1) % 6;
       break;
     case BREAK_CONFIRMED:
       activePattern = BRK_PATTERNS[brkPatternIdx];
@@ -456,7 +499,13 @@ void pp_onBeat(uint8_t bar, uint8_t beat) {
 
 void pp_onHalfBeat() {
   refreshVisualMode();
-  if (visMode == VIS_DROP) patternOnHalfBeat();
+  if (visMode == VIS_STD) {
+    // Generic STD dark gap: hard cut off between every beat.
+    // To add fade-out later, replace this with an envelope in pp_render() — no pattern fns need changing.
+    hw_led_all_off();
+  } else if (visMode == VIS_DROP) {
+    patternOnHalfBeat();
+  }
 }
 
 void pp_render() {
