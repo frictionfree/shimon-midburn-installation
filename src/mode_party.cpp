@@ -912,8 +912,11 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
 
   // Compact bar-level format (when DEBUG_BEAT_LOG is off)
   if (isBarStart && !DEBUG_BEAT_LOG) {
-    Serial.printf("bar=%lu state=%s rR=%.2f tR=%.2f kR=%.2f",
-                  (unsigned long)barCount, ctxName(last_stateForBar),
+    Serial.printf("bar=%lu state=%s bpm=%.1f pat=%s rR=%.2f tR=%.2f kR=%.2f",
+                  (unsigned long)barCount,
+                  ctxName(last_stateForBar),
+                  60000000.0f / (float)lastBeatIntervalUs,
+                  pp_patternName(pp_activePattern()),
                   last_rR, last_tR, last_kR);
 
     if (baseInited) {
@@ -1277,7 +1280,7 @@ static void processMidi() {
         if (barCount == 0) { barCount = 1; beatInBar = 0; }
       }
 
-      if (tickInBeat == 0) { onMidiBeat(); onMidiHalfBeat(); }
+      if (tickInBeat == 0)  { onMidiBeat(); }
       if (tickInBeat == 12) { onMidiHalfBeat(); }
 
       tickInBeat = (uint8_t)((tickInBeat + 1) % 24);

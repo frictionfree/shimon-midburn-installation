@@ -96,6 +96,7 @@ static PatternID activePattern    = PAT_STD_01;
 static uint8_t   stdPatternIdx    = 0;
 static uint8_t   brkPatternIdx    = 0;
 static uint8_t   drpPatternIdx    = 0;
+static uint8_t   savedDrpPatternIdx = 0;  // saved on DROP entry; restored if DROP is cancelled back to BREAK
 static bool      ppPatternLocked  = false;  // true = pp_setPattern(); suppresses round-robin switching
 
 static const PatternID STD_PATTERNS[6] = { PAT_STD_01, PAT_STD_02, PAT_STD_03, PAT_STD_04, PAT_STD_05, PAT_STD_06 };
@@ -438,6 +439,7 @@ void pp_selectForState(ContextState s) {
       brkPatternIdx = (brkPatternIdx + 1) % 3;
       break;
     case DROP:
+      savedDrpPatternIdx = drpPatternIdx;  // save so cancellation can roll back
       activePattern = DRP_PATTERNS[drpPatternIdx];
       drpPatternIdx = (drpPatternIdx + 1) % 3;
       break;
@@ -462,6 +464,7 @@ void pp_onBeat(uint8_t bar, uint8_t beat) {
 
   // Pattern selection on state transition
   bool shouldSelect = false;
+  ContextState oldPrevState = prevStateForPat;
   if (ppState != prevStateForPat) {
     if (ppState == BREAK_CONFIRMED || ppState == DROP) {
       shouldSelect = true;
@@ -472,10 +475,15 @@ void pp_onBeat(uint8_t bar, uint8_t beat) {
     prevStateForPat = ppState;
   }
   if (shouldSelect && !ppPatternLocked) {
+    // DROP cancelled back to BREAK: roll back drop index so next DROP re-uses the same pattern
+    if (ppState == BREAK_CONFIRMED && oldPrevState == DROP) {
+      drpPatternIdx = savedDrpPatternIdx;
+    }
     pp_selectForState(ppState);
     patWindowBar = 0;
-    Serial.printf("PATTERN_SELECT pat=%s state=%s\n",
-                  pp_patternName(activePattern), pp_ctxName(ppState));
+    Serial.printf("PATTERN_SELECT pat=%s state=%s bpm=%.1f\n",
+                  pp_patternName(activePattern), pp_ctxName(ppState),
+                  60000000.0f / (float)ppBeatIntervalUs);
   }
 
   // Advance pattern window
@@ -484,7 +492,9 @@ void pp_onBeat(uint8_t bar, uint8_t beat) {
     if (patWindowBar > PATTERN_LEN_BARS) {
       if (!ppPatternLocked) {
         pp_selectForState(ppState);
-        Serial.printf("PATTERN_SWITCH pat=%s\n", pp_patternName(activePattern));
+        Serial.printf("PATTERN_SWITCH pat=%s bpm=%.1f\n",
+                      pp_patternName(activePattern),
+                      60000000.0f / (float)ppBeatIntervalUs);
       }
       patWindowBar = 1;
     }
