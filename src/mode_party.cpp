@@ -34,6 +34,10 @@
 #include "mode_party.h"
 #include "hw.h"
 #include "party_patterns.h"
+#ifndef USE_WOKWI
+#include <DFRobotDFPlayerMini.h>
+#include "shimon.h"   // DFPLAYER_RX / DFPLAYER_TX
+#endif
 
 // ---------- FAILURE TYPES (MUST BE ABOVE ANY FUNCTIONS) ----------
 enum SystemMode : uint8_t { SYS_OK=0, SYS_FAIL=1 };
@@ -1159,6 +1163,10 @@ static void clearStopLatches() {
 }
 
 static void processFailureWatchdog() {
+  // Already in FAIL — nothing more to classify. Clear stale latches so they
+  // don't cause a spurious re-trigger on recovery, then bail out.
+  if (sysMode == SYS_FAIL) { clearStopLatches(); return; }
+
   const uint32_t nowUs = micros();
 
   const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
@@ -1249,6 +1257,9 @@ static void onMidiBeat() {
     logTransition(prev, state, "DROP_TIMEOUT_FROM_ONSET");
   }
 
+  // In FAIL state: suppress all audio analysis and visual output driven by beats.
+  if (sysMode == SYS_FAIL) { ticksSinceBeat = 0; return; }
+
   // finalize previous bar at start of current bar (barCount >= 2)
   if (isBarStart && barCount >= 2) {
     finalizeBarNow(nowUs, barCount - 1);
@@ -1261,7 +1272,7 @@ static void onMidiBeat() {
   ticksSinceBeat = 0;
 }
 
-static void onMidiHalfBeat() { pp_onHalfBeat(); }
+static void onMidiHalfBeat() { if (sysMode != SYS_FAIL) pp_onHalfBeat(); }
 
 static void processMidi() {
   while (MidiSerial.available() > 0) {
@@ -1429,6 +1440,18 @@ void party_init() {
   uint8_t off4[4] = {0, 0, 0, 0};
   for (int f = 0; f < 2; f++) { hw_led_all_set(on); delay(150); hw_led_all_set(off4); delay(100); }
 
+#ifndef USE_WOKWI
+  // DFPlayer unused in party mode but draws ~45 mA. Sleep it before MIDI
+  // takes UART1. isACK=false, doReset=false avoids any blocking handshake.
+  {
+    DFRobotDFPlayerMini tmpDfp;
+    MidiSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
+    tmpDfp.begin(MidiSerial, false, false);
+    tmpDfp.stop(); delay(50); tmpDfp.sleep(); delay(100);
+    MidiSerial.end();
+    Serial.println("[PARTY] DFPlayer sleeping.");
+  }
+#endif
   MidiSerial.begin(MIDI_BAUD_RATE, SERIAL_8N1, MIDI_PIN_RX, -1);
 
   i2sInit();

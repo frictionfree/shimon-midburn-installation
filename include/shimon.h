@@ -203,9 +203,9 @@ constexpr unsigned long DIFFICULTY_INSTRUCTIONS_DURATION_MS = 8000;  // Difficul
 constexpr unsigned long MY_TURN_DURATION_MS = 3000;                  // "My Turn" audio duration (increased fallback)
 constexpr unsigned long YOUR_TURN_DURATION_MS = 3000;                // "Your Turn" audio duration (increased fallback)
 constexpr unsigned long FEEDBACK_DURATION_MS = 5000;                 // Correct/Wrong feedback duration (5 sec fallback, DFPlayer notification preferred)
-constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message duration (increased fallback)
-constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 6000;            // Delay before playing post-game invite (pause after general game over)
-constexpr unsigned long GAME_OVER_MESSAGE_DELAY_MS = 1000;           // Delay between personalized and general game over messages (increased to prevent overlap)
+constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message fallback timeout (primary: DFPlayer finish event)
+constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 6000;            // Pause after general game over message before invite
+constexpr unsigned long GAME_OVER_MESSAGE_DELAY_MS = 1000;           // Gap between personalized and general game over messages
 
 // Visual Effect Durations (for blocking sequences like boot, invite, instructions)
 constexpr unsigned long BOOT_WAVE_DELAY_MS = 150;           // Boot rainbow wave speed

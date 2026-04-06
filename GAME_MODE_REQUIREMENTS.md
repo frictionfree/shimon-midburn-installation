@@ -119,6 +119,15 @@ The game uses DFPlayer's `DFPlayerPlayFinished` event:
 - Guarded playback calls prevent re-entrancy
 - Centralized helper function for all audio
 
+### DFPlayer Power Lifecycle
+
+| Event | Action |
+|-------|--------|
+| `game_init()` | `audio.begin()` → full `dfPlayer.begin()` init (wakes from sleep if applicable) |
+| `game_stop()` | `dfPlayer.sleep()` before `dfPlayerSerial.end()` — standby reduces heat in party/diagnostic modes |
+
+DFPlayer draws ~45 mA in active/idle state. Sleeping it on exit is mandatory to prevent thermal issues when the system runs in party or diagnostic mode after game mode. See `SYSTEM_REQUIREMENTS.md §11` for the full cross-mode policy.
+
 ---
 
 ## 5. Audio File Structure

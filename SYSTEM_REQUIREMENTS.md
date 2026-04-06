@@ -122,6 +122,8 @@ This gesture is **always active** — detected in the `MODE_SELECTION` loop and 
 #### Action
 
 When the reboot gesture is detected:
+- The active mode's `*_stop()` function is called before restart (Game: `game_stop()`, Party: `party_stop()`, Diagnostic: `diag_stop()`)
+- `game_stop()` must sleep the DFPlayer (`dfPlayer.sleep()`) before releasing its UART, to prevent the chip remaining active and generating heat in the next mode
 - The system performs an immediate reboot (`ESP.restart()`)
 - No attempt is made to gracefully transition between modes
 - After reboot, the system returns to the boot sequence and enters `MODE_SELECTION`
@@ -391,7 +393,24 @@ Enter selected mode (Game / Party / Diagnostic)
 
 ---
 
-## 11. Configuration Constants
+## 11. DFPlayer Power Management
+
+DFPlayer Mini draws ~45 mA in its active/idle state (chip powered, no playback). Over a long party session or diagnostic run, this causes thermal issues. The chip supports a standby command (`sleep()`) that reduces consumption to ~5 mA.
+
+### Policy
+
+| Scenario | Action |
+|----------|--------|
+| Game mode exit (`game_stop()`) | `dfPlayer.sleep()` → `delay(100)` → `dfPlayerSerial.end()` |
+| Party mode entry (`party_init()`) | UART1 briefly mapped to DFPlayer pins → `sleep()` → UART1 released to MIDI |
+| Diagnostic mode entry (`diag_init()`) | `DiagDfpSer` briefly opened → `sleep()` → `DiagDfpSer.end()` (Phase E re-opens with full init) |
+| Game mode entry (`game_init()`) | `audio.begin()` → `dfPlayer.begin()` serves as wake-up (full re-initialization) |
+
+**Implementation note:** Sleep commands in `party_init()` and `diag_init()` use `begin(stream, isACK=false, doReset=false)` to avoid any blocking handshake — the command bytes are sent immediately without waiting for chip acknowledgement.
+
+---
+
+## 12. Configuration Constants
 
 ### System-Level Constants
 

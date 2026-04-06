@@ -388,6 +388,15 @@ sub-bass-heavy tracks where kMeanR stays near baseline while kR remains low.
 
 **MUSIC_STOP** is not a failure - it represents coordinated stop of timing and audio.
 
+### FAIL State Behavior
+
+When `SYS_FAIL` is active:
+- **Beat callbacks suppressed**: `onMidiBeat()` returns immediately after bar/beat position maintenance and DROP timeout handling — no audio analysis (`finalizeBarNow`), no pattern updates (`pp_onBeat`), no logging.
+- **Half-beat callbacks suppressed**: `onMidiHalfBeat()` is a no-op — no `pp_onHalfBeat()` call, no LED output.
+- **Watchdog short-circuits**: `processFailureWatchdog()` returns immediately, clearing any stale latches. This prevents the re-latch spam loop that would occur if `clearStopLatches()` ran after a no-op `enterFailure()`.
+- **Visual render suppressed**: `visualsRender()` skips `pp_render()` and emits a periodic serial heartbeat instead.
+- **Recovery**: Automatic on `AUTO_RESYNC_BOTH_PRESENT`; manual via RED button press.
+
 ---
 
 ## 8. Visual System

@@ -276,7 +276,7 @@ static void phE_enter() {
 #ifndef USE_WOKWI
   DiagDfpSer.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
   if (!diagDfp.begin(DiagDfpSer)) {
-    Serial.println("  DFPlayer init FAILED.");
+    Serial.println("  DFPlayer init FAILED. Possible causes: chip not powered, wiring fault, SD card missing or corrupt.");
     resultE = DR_FAIL;
   } else {
     phE_dfpOk = true;
@@ -297,7 +297,12 @@ static bool phE_tick() {
     if (phE_dfpOk) diagDfp.stop();
 #endif
     resultE = DR_PASS; return true; }
-  if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) { hw_led_all_off(); resultE = DR_WARN; return true; }
+  if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) {
+    hw_led_all_off();
+    Serial.println("  No BLUE press within timeout — audio not confirmed. Check: speaker connected, SD card inserted, DFPlayer wired correctly.");
+    resultE = DR_WARN;
+    return true;
+  }
   return false;
 }
 static void printSummary() {
@@ -336,6 +341,8 @@ void diag_init() {
   Serial.println("  YELLOW hold 5s exits to Mode Selection at any time.");
   // Diag mode splash: BLUE blinks 2× (matches BLUE=select-diag button)
   for (int b = 0; b < 2; b++) { hw_led_duty(BLUE, 200); delay(200); hw_led_duty(BLUE, 0); delay(150); }
+
+  // DFPlayer already sleeping from mode selection — Phase E will wake it.
   resultA = resultB = resultC = resultD = resultE = DR_NONE;
   diagState = DS_PHASE_A;
   phA_enter();
