@@ -1,10 +1,11 @@
 /*
   Diagnostic Mode - 5-phase hardware verification
-  A: LED PWM      - cycle each wing at 3 brightness levels, operator confirms
-  B: Buttons      - light each wing, wait for corresponding button press
-  C: MIDI Clock   - prompt to start music, then listen 10 s; PASS/WARN/FAIL
-  D: I2S Audio    - 3 s RMS; PASS=music signal, WARN=connected/no music, FAIL=no I2S clock
-  E: DFPlayer     - play track 001, press BLUE within 8 s to confirm heard
+  A:   LED PWM   - cycle each wing at 3 brightness levels, operator confirms
+  B:   Buttons   - light each wing, wait for corresponding button press
+  C+D: MIDI+I2S  - concurrent 8 s listen; bar-level BPM/RMS/TR/kVar output;
+                   visual result: GREEN=full stack OK, YELLOW=I2S weak,
+                   RED=no I2S; slow RED blink + 30 s wait if no MIDI
+  E:   DFPlayer  - play track 1, press BLUE within 8 s to confirm heard
 */
 
 #include <Arduino.h>
@@ -19,45 +20,75 @@
 #include <DFRobotDFPlayerMini.h>
 #endif
 
-static constexpr uint32_t PHASE_A_LEVEL_MS   = 800;
-static constexpr uint32_t PHASE_A_TIMEOUT_MS = 15000;
-static constexpr uint32_t PHASE_B_BTN_TOUT   = 5000;
-static constexpr uint32_t PHASE_B_MIN_VIS_MS = 300;  // min LED-on time before accepting press
-static constexpr uint32_t PHASE_C_PROMPT_MS  = 30000;
-static constexpr uint32_t PHASE_C_LISTEN_MS  = 5000;
-static constexpr uint32_t DIAG_DONE_AUTO_MS  = 20000;
-static constexpr uint32_t PHASE_D_MEASURE_MS = 3000;
-static constexpr uint32_t PHASE_E_TIMEOUT_MS = 8000;
-// MIDI_BAUD_RATE / MIDI_PIN_RX / I2S_PIN_BCLK / I2S_PIN_LRCK / I2S_PIN_DATA / I2S_SAMPLE_RATE
-// are all defined in shimon.h
-static constexpr uint8_t   MIDI_CLOCK_BYTE = 0xF8;
+// ---- Timing constants ----
+static constexpr uint32_t PHASE_A_LEVEL_MS       = 800;
+static constexpr uint32_t PHASE_A_TIMEOUT_MS      = 15000;
+static constexpr uint32_t PHASE_B_BTN_TOUT        = 5000;
+static constexpr uint32_t PHASE_B_MIN_VIS_MS      = 300;
+static constexpr uint32_t PHASE_C_PROMPT_MS       = 30000;
+static constexpr uint32_t PHASE_CD_LISTEN_MS      = 8000;
+static constexpr uint32_t PHASE_CD_NOMIDI_TOUT_MS = 30000;
+static constexpr uint32_t DIAG_DONE_AUTO_MS       = 20000;
+static constexpr uint32_t PHASE_E_TIMEOUT_MS      = 8000;
+
+// ---- MIDI ----
+static constexpr uint8_t MIDI_CLOCK_BYTE    = 0xF8;
+static constexpr uint8_t MIDI_TICKS_PER_BAR = 96;   // 24 ticks/beat × 4 beats/bar
+
+// ---- I2S ----
 static constexpr i2s_port_t DIAG_I2S_PORT  = I2S_NUM_0;
-static constexpr int        D_READ_FRAMES  = 256;
-static constexpr uint32_t   D_MIN_FRAMES   = 10000; // below this = no I2S clock (converter absent)
-static constexpr float      D_MUSIC_RMS    = 0.050f; // above this = music signal present (PASS)
-static constexpr uint8_t PHASE_E_TRACK  = 1;
-static constexpr uint8_t PHASE_E_VOL    = 20;
+static constexpr int        CD_READ_FRAMES = 128;    // samples per non-blocking read
+static constexpr uint32_t   D_MIN_FRAMES   = 10000;  // below = no I2S clock (converter absent)
+static constexpr float      D_MUSIC_RMS    = 0.050f; // above = music signal present
+
+// ---- Signal processing (mirrors party mode) ----
+static constexpr float LP_ENV_ALPHA = 0.010f;  // low-pass envelope coefficient
+static constexpr float HP_COEFF     = 0.95f;   // high-pass coefficient (removes DC/sub)
+
+// ---- Phase E ----
+static constexpr uint8_t PHASE_E_TRACK = 1;
+static constexpr uint8_t PHASE_E_VOL   = 20;
+
+// ---- Hardware objects ----
 #ifndef USE_WOKWI
 static HardwareSerial      DiagMidi(1);
 static HardwareSerial      DiagDfpSer(1);
 static DFRobotDFPlayerMini diagDfp;
 #endif
-enum DiagResult : uint8_t { DR_NONE=0, DR_PASS, DR_WARN, DR_FAIL };
-enum DiagState : uint8_t {
-  DS_PHASE_A, DS_PHASE_A_CONFIRM, DS_PHASE_B,
-  DS_PHASE_C_PROMPT, DS_PHASE_C, DS_PHASE_E, DS_DONE
+
+// ---- Welford online variance (same algorithm as party mode) ----
+struct DiagWelford {
+  double mean = 0.0, m2 = 0.0;
+  uint32_t n = 0;
+  void reset() { mean = 0.0; m2 = 0.0; n = 0; }
+  void update(double x) {
+    n++;
+    double d = x - mean;
+    mean += d / (double)n;
+    m2   += d * (x - mean);
+  }
+  float var() const { return (n < 2) ? 0.0f : (float)(m2 / (double)(n - 1)); }
 };
-static DiagState  diagState;
+
+// ---- Result / State enums ----
+enum DiagResult : uint8_t { DR_NONE=0, DR_PASS, DR_WARN, DR_FAIL };
+enum DiagState  : uint8_t {
+  DS_PHASE_A, DS_PHASE_A_CONFIRM, DS_PHASE_B,
+  DS_PHASE_C_PROMPT, DS_PHASE_CD, DS_PHASE_CD_RESULT, DS_PHASE_E, DS_DONE
+};
+
+static DiagState diagState;
 static const char* diagStateName() {
   switch (diagState) {
-    case DS_PHASE_A:        return "A";
-    case DS_PHASE_A_CONFIRM:return "A_CONFIRM";
-    case DS_PHASE_B:        return "B";
-    case DS_PHASE_C_PROMPT: return "C_PROMPT";
-    case DS_PHASE_C:        return "C";
-    case DS_PHASE_E:        return "E";
-    case DS_DONE:           return "DONE";
-    default:                return "?";
+    case DS_PHASE_A:         return "A";
+    case DS_PHASE_A_CONFIRM: return "A_CONFIRM";
+    case DS_PHASE_B:         return "B";
+    case DS_PHASE_C_PROMPT:  return "C_PROMPT";
+    case DS_PHASE_CD:        return "CD";
+    case DS_PHASE_CD_RESULT: return "CD_RESULT";
+    case DS_PHASE_E:         return "E";
+    case DS_DONE:            return "DONE";
+    default:                 return "?";
   }
 }
 static const char* drStr(DiagResult r) {
@@ -68,20 +99,57 @@ static const char* drStr(DiagResult r) {
     default:      return "NONE";
   }
 }
-static DiagResult resultA, resultB, resultC, resultD, resultE;
+
+// ---- Shared state ----
+static DiagResult    resultA, resultB, resultC, resultD, resultE;
 static DiagResult    diagOverallResult;
 static bool          diagBlinkOn;
 static unsigned long diagTimer;
 static unsigned long diagDoneStart;
+
+// ---- Phase A ----
 static uint8_t phA_wing, phA_level;
 static const uint8_t PH_A_DUTIES[3] = {64, 140, 235};
+
+// ---- Phase B ----
 static uint8_t phB_wing, phB_failed;
-static uint32_t phC_ticks;
-static uint32_t phC_totalBytes;
-static float    phC_bpm;
-static uint32_t phC_lastUs;
+
+// ---- Phase CD: MIDI ----
+static uint32_t phCD_midiTicks;
+static uint32_t phCD_totalBytes;
+static float    phCD_bpm;
+static uint32_t phCD_lastTickUs;
+static uint8_t  phCD_ticksInBar;
+static uint8_t  phCD_barCount;
+
+// ---- Phase CD: I2S (global accumulators) ----
+static double      phCD_sumSq;
+static double      phCD_trSum;
+static uint32_t    phCD_frames;
+static float       phCD_envLP;
+static float       phCD_hp_y;
+static float       phCD_hp_xPrev;
+static DiagWelford phCD_kickW;
+
+// ---- Phase CD: I2S (per-bar accumulators) ----
+static double      phCD_barSumSq;
+static double      phCD_barTrSum;
+static uint32_t    phCD_barFrames;
+static DiagWelford phCD_barKickW;
+
+// ---- Phase CD: result blink ----
+static Color         phCD_resultColor;
+static uint8_t       phCD_beatsShown;
+static unsigned long phCD_nextBeatMs;
+static unsigned long phCD_beatOffMs;
+static bool          phCD_beatLedOn;
+
+// ---- Phase E ----
 static bool phE_dfpOk;
 
+// =============================================================================
+// PHASE A — LED PWM
+// =============================================================================
 static void phA_enter() {
   phA_wing = 0; phA_level = 0;
   hw_led_all_off();
@@ -91,10 +159,10 @@ static void phA_enter() {
   Serial.printf("  BLUE @ %u%%\n", (unsigned)(PH_A_DUTIES[0] * 100 / 255));
 }
 static bool phA_tick() {
-  if (millis() - diagTimer > 200UL) {  // debounce: ignore presses in first 200ms
+  if (millis() - diagTimer > 200UL) {
     if (hw_btn_any_edge(nullptr)) {
       Serial.println("  Skipped.");
-      hw_led_duty((Color)phA_wing, 0); hw_led_all_off(); return true;
+      hw_led_all_off(); return true;
     }
   }
   if (millis() - diagTimer < PHASE_A_LEVEL_MS) return false;
@@ -110,10 +178,13 @@ static bool phA_tick() {
   diagTimer = millis();
   return false;
 }
+
+// =============================================================================
+// PHASE B — Buttons
+// =============================================================================
 static void phB_enter() {
   phB_wing = 0; phB_failed = 0;
   hw_led_all_off();
-  // Wait for any button held from Phase A confirm to release (up to 500 ms)
   unsigned long releaseStart = millis();
   bool anyHeld;
   do {
@@ -127,8 +198,8 @@ static void phB_enter() {
   hw_led_duty(BLUE, 200);
 }
 static bool phB_tick() {
-  if (millis() - diagTimer < PHASE_B_MIN_VIS_MS) return false;  // wait for LED to be visible
-  bool confirmed = hw_btn_pressed((Color)phB_wing);  // hw layer handles ghost rejection
+  if (millis() - diagTimer < PHASE_B_MIN_VIS_MS) return false;
+  bool confirmed = hw_btn_pressed((Color)phB_wing);
   bool timeout   = (millis() - diagTimer >= PHASE_B_BTN_TOUT);
   if (!confirmed && !timeout) return false;
   hw_led_duty((Color)phB_wing, 0);
@@ -147,18 +218,21 @@ static bool phB_tick() {
   hw_led_duty((Color)phB_wing, 200);
   return false;
 }
+
+// =============================================================================
+// PHASE C_PROMPT — wait for operator to start music
+// =============================================================================
 static void phCPrompt_enter() {
   hw_led_all_off();
   diagTimer = millis();
   Serial.printf("[DIAG] Start music on mixer. Press BLUE when ready (auto in %lus).\n",
                 (unsigned long)(PHASE_C_PROMPT_MS / 1000));
-  hw_led_duty(BLUE, 80);  // dim blue: waiting for operator
+  hw_led_duty(BLUE, 80);
 }
 static bool phCPrompt_tick() {
-  // Pulse blue gently while waiting
   uint8_t duty = (uint8_t)(40.0f + 40.0f * sinf((float)(millis() % 1500) * 6.2832f / 1500.0f));
   hw_led_duty(BLUE, duty);
-  // BUG FIX #1: use edge (not raw) so a BLUE still held from Phase B cannot confirm instantly
+  // Edge detection: BLUE held from Phase B cannot confirm instantly (bug fix)
   if (hw_btn_edge(BLUE)) {
     hw_led_all_off();
     Serial.println("  BLUE pressed - starting music phases.");
@@ -171,59 +245,51 @@ static bool phCPrompt_tick() {
   }
   return false;
 }
-static void phC_enter() {
-  phC_ticks = 0; phC_totalBytes = 0; phC_bpm = 0.0f; phC_lastUs = 0;
+
+// =============================================================================
+// PHASE CD — concurrent MIDI + I2S (8 s)
+// =============================================================================
+static void phCD_processBar() {
+  phCD_barCount++;
+  float barRms  = (phCD_barFrames > 0)
+                  ? sqrtf((float)(phCD_barSumSq / (double)phCD_barFrames)) : 0.0f;
+  float barTr   = (phCD_barFrames > 0)
+                  ? (float)(phCD_barTrSum / (double)phCD_barFrames) : 0.0f;
+  float barKVar = phCD_barKickW.var();
+  Serial.printf("  Bar %u | BPM=%.1f | RMS=%.4f | TR=%.5f | kVar=%.6f\n",
+                (unsigned)phCD_barCount, phCD_bpm, barRms, barTr, barKVar);
+  phCD_barSumSq = 0.0; phCD_barTrSum = 0.0; phCD_barFrames = 0;
+  phCD_barKickW.reset();
+}
+
+static void phCD_stopDrivers() {
+#ifndef USE_WOKWI
+  DiagMidi.end();
+  i2s_driver_uninstall(DIAG_I2S_PORT);
+#endif
+}
+
+static void phCD_enter() {
+  // MIDI
+  phCD_midiTicks = 0; phCD_totalBytes = 0; phCD_bpm = 0.0f;
+  phCD_lastTickUs = 0; phCD_ticksInBar = 0; phCD_barCount = 0;
+  // I2S global
+  phCD_sumSq = 0.0; phCD_trSum = 0.0; phCD_frames = 0;
+  phCD_envLP = 0.0f; phCD_hp_y = 0.0f; phCD_hp_xPrev = 0.0f;
+  phCD_kickW.reset();
+  // I2S per-bar
+  phCD_barSumSq = 0.0; phCD_barTrSum = 0.0; phCD_barFrames = 0;
+  phCD_barKickW.reset();
+
   hw_led_all_off();
   diagTimer = millis();
-  Serial.printf("[DIAG] Phase C: MIDI Clock - listening %lu s on GPIO%d.\n",
-                (unsigned long)(PHASE_C_LISTEN_MS / 1000), MIDI_PIN_RX);
+  Serial.printf("[DIAG] Phase C+D: MIDI+I2S — listening %lus. BLUE to skip early.\n",
+                (unsigned long)(PHASE_CD_LISTEN_MS / 1000));
+
 #ifndef USE_WOKWI
   DiagMidi.begin(MIDI_BAUD_RATE, SERIAL_8N1, MIDI_PIN_RX, -1);
-#else
-  Serial.println("  [SIM] MIDI skipped.");
-#endif
-}
-static bool phC_tick() {
-  // BUG FIX #2: use edge so a button still held from C_PROMPT cannot skip Phase C immediately
-  if (hw_btn_any_edge(nullptr)) {
-#ifndef USE_WOKWI
-    DiagMidi.end();
-#endif
-    Serial.println("  Skipped.");
-    return true;
-  }
-  if (millis() - diagTimer >= PHASE_C_LISTEN_MS) {
-#ifndef USE_WOKWI
-    DiagMidi.end();
-#endif
-    return true;
-  }
-#ifndef USE_WOKWI
-  while (DiagMidi.available()) {
-    uint8_t b = DiagMidi.read();
-    phC_totalBytes++;
-    if (b == MIDI_CLOCK_BYTE) {
-      uint32_t us = micros();
-      if (phC_lastUs > 0) {
-        uint32_t dt = us - phC_lastUs;
-        if (dt > 0) phC_bpm = 60000000.0f / ((float)dt * 24.0f);
-      }
-      phC_lastUs = us; phC_ticks++;
-    }
-  }
-#endif
-  return false;
-}
-static void phD_run() {
-  hw_led_all_off();
-  Serial.printf("[DIAG] Phase D: I2S Audio - measuring RMS for %lu s.\n",
-                (unsigned long)(PHASE_D_MEASURE_MS / 1000));
-#ifdef USE_WOKWI
-  resultD = DR_WARN;
-  Serial.println("  [SIM] I2S skipped - WARN.");
-  return;
-#endif
-  i2s_config_t cfg  = {};
+
+  i2s_config_t cfg = {};
   cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
   cfg.sample_rate          = I2S_SAMPLE_RATE;
   cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT;
@@ -231,47 +297,176 @@ static void phD_run() {
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_buf_count        = 4;
-  cfg.dma_buf_len          = D_READ_FRAMES;
+  cfg.dma_buf_len          = 256;
   cfg.use_apll             = false;
   i2s_driver_install(DIAG_I2S_PORT, &cfg, 0, nullptr);
   i2s_pin_config_t pins = {};
-  pins.bck_io_num    = I2S_PIN_BCLK;
-  pins.ws_io_num     = I2S_PIN_LRCK;
-  pins.data_out_num  = I2S_PIN_NO_CHANGE;
-  pins.data_in_num   = I2S_PIN_DATA;
+  pins.bck_io_num   = I2S_PIN_BCLK;
+  pins.ws_io_num    = I2S_PIN_LRCK;
+  pins.data_out_num = I2S_PIN_NO_CHANGE;
+  pins.data_in_num  = I2S_PIN_DATA;
   i2s_set_pin(DIAG_I2S_PORT, &pins);
-  double sumSq = 0.0; uint32_t n = 0;
-  int32_t buf[D_READ_FRAMES];
-  uint32_t start = millis();
-  while (millis() - start < PHASE_D_MEASURE_MS) {
-    size_t bytes = 0;
-    i2s_read(DIAG_I2S_PORT, buf, sizeof(buf), &bytes, pdMS_TO_TICKS(200));
-    uint32_t frames = bytes / 4;
-    for (uint32_t i = 0; i < frames; i++) {
-      float s = (float)buf[i] / 2147483647.0f;
-      sumSq += (double)(s * s); n++;
+#else
+  Serial.println("  [SIM] MIDI+I2S skipped.");
+#endif
+}
+
+// Returns true when listen phase is done.
+// While MIDI is present, flashes the result-color LED on every beat (live feedback).
+// Color re-evaluated each beat from running I2S data:
+//   GREEN=music signal OK, YELLOW=I2S connected/no music, RED=no I2S frames.
+static bool phCD_tick() {
+  bool bluePressed = hw_btn_edge(BLUE);
+  bool timeout     = (millis() - diagTimer >= PHASE_CD_LISTEN_MS);
+
+  if (bluePressed || timeout) {
+    phCD_stopDrivers();
+    hw_led_all_off();
+    if (phCD_midiTicks == 0) {
+      Serial.printf(
+        "  Skipped/timeout — no MIDI input on GPIO%d. Check mixer clock output and cable.\n",
+        MIDI_PIN_RX);
+      resultC = DR_FAIL;
+      resultD = DR_NONE;
+    }
+    return true;
+  }
+
+#ifndef USE_WOKWI
+  // --- MIDI reads ---
+  bool newBeat = false;
+  while (DiagMidi.available()) {
+    uint8_t b = DiagMidi.read();
+    phCD_totalBytes++;
+    if (b == MIDI_CLOCK_BYTE) {
+      uint32_t us = micros();
+      if (phCD_lastTickUs > 0) {
+        uint32_t dt = us - phCD_lastTickUs;
+        if (dt > 0) phCD_bpm = 60000000.0f / ((float)dt * 24.0f);
+      }
+      phCD_lastTickUs = us;
+      phCD_midiTicks++;
+      phCD_ticksInBar++;
+      if (phCD_midiTicks % 24 == 0) newBeat = true;          // every beat
+      if (phCD_ticksInBar >= MIDI_TICKS_PER_BAR) {
+        phCD_processBar();
+        phCD_ticksInBar = 0;
+      }
     }
   }
-  i2s_driver_uninstall(DIAG_I2S_PORT);
-  float rms = (n > 0) ? sqrtf((float)(sumSq / (double)n)) : 0.0f;
-  if (n < D_MIN_FRAMES) {
+
+  // --- I2S reads (non-blocking) ---
+  int32_t buf[CD_READ_FRAMES];
+  size_t  bytes = 0;
+  i2s_read(DIAG_I2S_PORT, buf, sizeof(buf), &bytes, 0);
+  uint32_t frames = bytes / 4;
+  for (uint32_t i = 0; i < frames; i++) {
+    float x  = (float)buf[i] / 2147483647.0f;
+    float hp = HP_COEFF * (phCD_hp_y + x - phCD_hp_xPrev);
+    phCD_hp_y     = hp;
+    phCD_hp_xPrev = x;
+    float ax = fabsf(x);
+    phCD_envLP += LP_ENV_ALPHA * (ax - phCD_envLP);
+    phCD_sumSq += (double)(x * x);
+    phCD_trSum += (double)fabsf(hp);
+    phCD_frames++;
+    phCD_kickW.update((double)phCD_envLP);
+    phCD_barSumSq += (double)(x * x);
+    phCD_barTrSum += (double)fabsf(hp);
+    phCD_barFrames++;
+    phCD_barKickW.update((double)phCD_envLP);
+  }
+
+  // --- Live beat flash ---
+  if (newBeat) {
+    // Re-evaluate I2S color from running data
+    if (phCD_frames < 100) {
+      phCD_resultColor = RED;
+    } else {
+      float runRms = sqrtf((float)(phCD_sumSq / (double)phCD_frames));
+      phCD_resultColor = (runRms >= D_MUSIC_RMS) ? GREEN : YELLOW;
+    }
+    float beatMs = (phCD_bpm > 0.0f) ? (60000.0f / phCD_bpm) : 500.0f;
+    uint32_t onDur = max(80UL, (unsigned long)(beatMs * 0.25f));
+    hw_led_duty(phCD_resultColor, 235);
+    phCD_beatLedOn = true;
+    phCD_beatOffMs = millis() + onDur;
+  }
+  if (phCD_beatLedOn && millis() >= phCD_beatOffMs) {
+    hw_led_all_off();
+    phCD_beatLedOn = false;
+  }
+#endif
+  return false;
+}
+
+// Evaluate I2S result and set phCD_resultColor. Called only when MIDI present.
+static void phCD_evaluateAndLog() {
+  float rms  = (phCD_frames > 0)
+               ? sqrtf((float)(phCD_sumSq / (double)phCD_frames)) : 0.0f;
+  float tr   = (phCD_frames > 0)
+               ? (float)(phCD_trSum / (double)phCD_frames) : 0.0f;
+  float kvar = phCD_kickW.var();
+
+  Serial.printf("  MIDI: PASS (%lu ticks, BPM=%.1f)\n",
+                (unsigned long)phCD_midiTicks, phCD_bpm);
+  resultC = DR_PASS;
+
+  if (phCD_frames < D_MIN_FRAMES) {
     resultD = DR_FAIL;
-    Serial.printf("  frames=%lu  RMS=%.4f  Result: FAIL (no I2S clock - converter absent?)\n",
-                  (unsigned long)n, rms);
+    phCD_resultColor = RED;
+    Serial.printf("  I2S: FAIL  frames=%lu — no clock, converter absent?\n",
+                  (unsigned long)phCD_frames);
   } else if (rms < D_MUSIC_RMS) {
     resultD = DR_WARN;
-    Serial.printf("  frames=%lu  RMS=%.4f  Result: WARN (connected, no music signal)\n",
-                  (unsigned long)n, rms);
+    phCD_resultColor = YELLOW;
+    Serial.printf("  I2S: WARN  frames=%lu RMS=%.4f TR=%.5f kVar=%.6f — connected, no music\n",
+                  (unsigned long)phCD_frames, rms, tr, kvar);
   } else {
     resultD = DR_PASS;
-    Serial.printf("  frames=%lu  RMS=%.4f  Result: PASS\n", (unsigned long)n, rms);
+    phCD_resultColor = GREEN;
+    Serial.printf("  I2S: PASS  frames=%lu RMS=%.4f TR=%.5f kVar=%.6f\n",
+                  (unsigned long)phCD_frames, rms, tr, kvar);
   }
 }
+
+// MIDI present: blink at result color, press BLUE to continue.
+// No MIDI:      slow RED blink, press BLUE or wait 30s to continue.
+static void phCD_result_enter() {
+  hw_led_all_off();
+  diagTimer = millis();
+  if (resultC == DR_PASS) {
+    Serial.printf("  C+D done — %s result color. Press BLUE to continue to Phase E.\n",
+                  phCD_resultColor == GREEN ? "GREEN" : phCD_resultColor == YELLOW ? "YELLOW" : "RED");
+  } else {
+    Serial.printf("  No MIDI — slow RED blink. Press BLUE or wait %lus to continue to Phase E.\n",
+                  (unsigned long)(PHASE_CD_NOMIDI_TOUT_MS / 1000));
+  }
+}
+
+static bool phCD_result_tick() {
+  if (resultC == DR_PASS) {
+    hw_led_duty(phCD_resultColor, ((millis() / 400) & 1) ? 235 : 0);
+    if (hw_btn_edge(BLUE)) { hw_led_all_off(); return true; }
+    return false;
+  }
+  // No MIDI: slow red blink with auto-timeout
+  hw_led_duty(RED, ((millis() / 500) & 1) ? 200 : 0);
+  if (hw_btn_edge(BLUE) || millis() - diagTimer >= PHASE_CD_NOMIDI_TOUT_MS) {
+    hw_led_all_off();
+    return true;
+  }
+  return false;
+}
+
+// =============================================================================
+// PHASE E — DFPlayer audio confirmation
+// =============================================================================
 static void phE_enter() {
   phE_dfpOk = false;
   hw_led_all_off();
   diagTimer = millis();
-  Serial.printf("[DIAG] Phase E: DFPlayer - track %u. Press BLUE within %lu s to confirm.\n",
+  Serial.printf("[DIAG] Phase E: DFPlayer - track %u. Press BLUE within %lus to confirm.\n",
                 (unsigned)PHASE_E_TRACK, (unsigned long)(PHASE_E_TIMEOUT_MS / 1000));
 #ifndef USE_WOKWI
   DiagDfpSer.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
@@ -291,12 +486,14 @@ static void phE_enter() {
 }
 static bool phE_tick() {
   if (resultE != DR_NONE) return true;
-  hw_led_duty(BLUE, ((millis() / 400) & 1) ? 180 : 0);  // blink BLUE: "press to confirm"
-  if (hw_btn_edge(BLUE)) { hw_led_all_off();
+  hw_led_duty(BLUE, ((millis() / 400) & 1) ? 180 : 0);
+  if (hw_btn_edge(BLUE)) {
+    hw_led_all_off();
 #ifndef USE_WOKWI
     if (phE_dfpOk) diagDfp.stop();
 #endif
-    resultE = DR_PASS; return true; }
+    resultE = DR_PASS; return true;
+  }
   if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) {
     hw_led_all_off();
     Serial.println("  No BLUE press within timeout — audio not confirmed. Check: speaker connected, SD card inserted, DFPlayer wired correctly.");
@@ -305,6 +502,10 @@ static bool phE_tick() {
   }
   return false;
 }
+
+// =============================================================================
+// SUMMARY
+// =============================================================================
 static void printSummary() {
   bool anyFail = (resultA==DR_FAIL||resultB==DR_FAIL||resultC==DR_FAIL||
                   resultD==DR_FAIL||resultE==DR_FAIL);
@@ -334,21 +535,24 @@ static void printSummary() {
   diagTimer = millis();
   diagBlinkOn = false;
 }
+
+// =============================================================================
+// MODE INTERFACE
+// =============================================================================
 void diag_init() {
   Serial.println("\n=== DIAGNOSTIC MODE ===");
-  Serial.println("  Phases: A=LED  B=Buttons  C=MIDI  D=I2S  E=DFPlayer");
-  Serial.println("  Any button skips phases; BLUE confirms checkpoints and exits.");
-  Serial.println("  YELLOW hold 5s exits to Mode Selection at any time.");
-  // Diag mode splash: BLUE blinks 2× (matches BLUE=select-diag button)
+  Serial.println("  Phases: A=LED  B=Buttons  C+D=MIDI+I2S  E=DFPlayer");
+  Serial.println("  BLUE skips/confirms; YELLOW hold 5s exits to Mode Selection.");
   for (int b = 0; b < 2; b++) { hw_led_duty(BLUE, 200); delay(200); hw_led_duty(BLUE, 0); delay(150); }
 
-  // DFPlayer already sleeping from mode selection — Phase E will wake it.
   resultA = resultB = resultC = resultD = resultE = DR_NONE;
   diagState = DS_PHASE_A;
   phA_enter();
 }
+
 void diag_tick() {
   switch (diagState) {
+
     case DS_PHASE_A:
       if (phA_tick()) {
         hw_led_all_off();
@@ -358,8 +562,8 @@ void diag_tick() {
         diagState = DS_PHASE_A_CONFIRM;
       }
       break;
+
     case DS_PHASE_A_CONFIRM:
-      // Blink BLUE to signal "press BLUE to confirm"
       hw_led_duty(BLUE, ((millis() / 400) & 1) ? 180 : 0);
       if (hw_btn_edge(BLUE) || millis() - diagTimer >= PHASE_A_TIMEOUT_MS) {
         hw_led_all_off();
@@ -369,6 +573,7 @@ void diag_tick() {
         phB_enter();
       }
       break;
+
     case DS_PHASE_B:
       if (phB_tick()) {
         resultB = (phB_failed == 0) ? DR_PASS : (phB_failed < 4 ? DR_WARN : DR_FAIL);
@@ -377,31 +582,29 @@ void diag_tick() {
         phCPrompt_enter();
       }
       break;
+
     case DS_PHASE_C_PROMPT:
       if (phCPrompt_tick()) {
-        diagState = DS_PHASE_C;
-        phC_enter();
+        diagState = DS_PHASE_CD;
+        phCD_enter();
       }
       break;
-    case DS_PHASE_C:
-      if (phC_tick()) {
-        if (phC_ticks > 0) {
-          resultC = DR_PASS;
-          Serial.printf("  Phase C: PASS  (%lu ticks, BPM=%.1f)\n",
-                        (unsigned long)phC_ticks, phC_bpm);
-        } else if (phC_totalBytes > 0) {
-          resultC = DR_WARN;
-          Serial.printf("  Phase C: WARN  (device present, %lu bytes, no clock)\n",
-                        (unsigned long)phC_totalBytes);
-        } else {
-          resultC = DR_FAIL;
-          Serial.println("  Phase C: FAIL  (no signal - cable disconnected?)");
-        }
-        phD_run();
+
+    case DS_PHASE_CD:
+      if (phCD_tick()) {
+        if (phCD_midiTicks > 0) phCD_evaluateAndLog();
+        diagState = DS_PHASE_CD_RESULT;
+        phCD_result_enter();
+      }
+      break;
+
+    case DS_PHASE_CD_RESULT:
+      if (phCD_result_tick()) {
         diagState = DS_PHASE_E;
         phE_enter();
       }
       break;
+
     case DS_PHASE_E:
       if (phE_tick()) {
         Serial.printf("  Phase E: %s\n", drStr(resultE));
@@ -414,8 +617,9 @@ void diag_tick() {
         diagState = DS_DONE;
       }
       break;
+
     case DS_DONE: {
-      // BUG FIX #3: edge only (prevents PWM ghost clicks); any button exits
+      // Edge detection prevents PWM ghost clicks from restarting
       if (hw_btn_any_edge(nullptr)) {
         hw_led_all_off();
         Serial.println("[DIAG] Returning to Mode Selection...");
@@ -429,19 +633,15 @@ void diag_tick() {
       if (millis() - diagTimer >= 750UL) {
         diagTimer = millis();
         diagBlinkOn = !diagBlinkOn;
-        if (diagBlinkOn) {
-          Color wing = (diagOverallResult == DR_FAIL) ? RED :
-                       (diagOverallResult == DR_WARN) ? YELLOW :
-                       GREEN;
-          hw_led_duty(wing, 200);
-        } else {
-          hw_led_all_off();
-        }
+        Color wing = (diagOverallResult == DR_FAIL) ? RED :
+                     (diagOverallResult == DR_WARN) ? YELLOW : GREEN;
+        hw_led_duty(wing, diagBlinkOn ? 200 : 0);
       }
       break;
     }
   }
 }
+
 void diag_stop() {
   hw_led_all_off();
 #ifndef USE_WOKWI
