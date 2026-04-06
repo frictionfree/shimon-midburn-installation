@@ -763,16 +763,20 @@ void game_init() {
   // Play boot sequence
   Serial.println("Starting boot sequence...");
   bootSequence();
-  
-  // Initialize game state
+
+  // Initialize ambient/invite timers (used when returning to IDLE after game-over)
   scheduleNextInvite();
-  
-  // Initialize ambient effects
   unsigned long now = millis();
   ambientTimer = now;
   effectChangeTimer = now;
-  
-  Serial.println("Press any button to start, or wait for invite...");
+
+  // Go straight to instructions — no IDLE wait after boot
+  audioFinished = false;
+  audio.playInstructions();
+  instructionsSequence();
+  stateTimer = millis();
+  gameState = INSTRUCTIONS;
+  Serial.println("Instructions playing...");
 }
 
 void game_tick() {
