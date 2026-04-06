@@ -204,6 +204,14 @@ static constexpr float   CLOCK_HOLD_JUMP_BPM     = 8.0f;  // enter hold if jump 
 static constexpr float   CLOCK_HOLD_RESUME_BPM   = 4.0f;  // stable = within this of hold ref
 static constexpr uint8_t CLOCK_HOLD_RESUME_BEATS = 8;     // consecutive stable beats to release
 
+// -------------- BPM RANGE + SPIKE GUARDS (D1 / D2) --------------
+// D1: reject any beat whose smoothed BPM lands outside the expected DJ range.
+// D2: reject a single-beat spike larger than BPM_SPIKE_MAX regardless of state.
+// Both guards fire before CLOCK_HOLD; lastBeatIntervalUs is left unchanged on reject.
+static constexpr float BPM_RANGE_MIN = 80.0f;   // D1: below this = corrupt clock
+static constexpr float BPM_RANGE_MAX = 160.0f;  // D1: above this = corrupt clock
+static constexpr float BPM_SPIKE_MAX = 20.0f;   // D2: max single-beat delta (BPM)
+
 static bool     clockHoldActive      = false;
 static uint32_t bpmHoldIntervalUs    = 0;   // frozen timing reference (us/beat)
 static uint8_t  clockHoldStableBeats = 0;   // consecutive beats stable toward release
@@ -845,7 +853,29 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
   const uint32_t dtUs = (lastBeatUs == 0) ? 0 : (nowUs - lastBeatUs);
   if (dtUs > 0) {
     const uint32_t candidateUs = (uint32_t)(0.85f * (float)lastBeatIntervalUs + 0.15f * (float)dtUs);
+    const float candBpm = 60000000.0f / (float)candidateUs;
 
+    // D1: range guard — reject smoothed BPM outside [BPM_RANGE_MIN, BPM_RANGE_MAX]
+    bool rejectTick = false;
+    if (candBpm < BPM_RANGE_MIN || candBpm > BPM_RANGE_MAX) {
+      Serial.printf("EVENT BPM_RANGE_REJECT pos=%lu.%u bpm=%.1f (range [%.0f,%.0f])\n",
+                    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                    candBpm, BPM_RANGE_MIN, BPM_RANGE_MAX);
+      rejectTick = true;
+    }
+    // D2: spike guard — reject single-beat jump > BPM_SPIKE_MAX
+    else if (lastBeatIntervalUs > 0) {
+      const float curBpm = 60000000.0f / (float)lastBeatIntervalUs;
+      const float delta  = fabsf(candBpm - curBpm);
+      if (delta > BPM_SPIKE_MAX) {
+        Serial.printf("EVENT BPM_SPIKE_REJECT pos=%lu.%u candBpm=%.1f curBpm=%.1f delta=%.1f\n",
+                      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+                      candBpm, curBpm, delta);
+        rejectTick = true;
+      }
+    }
+
+    if (!rejectTick) {
     if (clockHoldActive) {
       // Hold active: count toward release in STANDARD or DROP once clock re-stabilises.
       // BREAK/CAND remain fully frozen. The stability gate (within CLOCK_HOLD_RESUME_BPM)
@@ -899,6 +929,7 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
       // STANDARD / CAND / no hold reference: normal IIR update
       lastBeatIntervalUs = candidateUs;
     }
+    } // if (!rejectTick)
   }
   lastBeatUs = nowUs;
 
