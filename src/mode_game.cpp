@@ -103,7 +103,8 @@ struct Audio {
   void playYourTurn()  { uint8_t f=selectVariationWithFallback(YOURTURN_BASE,YOURTURN_COUNT,lastYourTurn,"YourTurn"); Serial.printf("[AUDIO] Your Turn -> /mp3/%04d.mp3\n",f); _start(5000); }
   void playColorName(Color c) {
     uint8_t f[]={AUDIO_COLOR_BLUE,AUDIO_COLOR_RED,AUDIO_COLOR_GREEN,AUDIO_COLOR_YELLOW};
-    Serial.printf("[AUDIO] Color %s -> /mp3/%04d.mp3\n",c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",f[c]); _start(3000);
+    Serial.printf("[AUDIO] Color %s -> /mp3/%04d.mp3\n",c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",f[c]);
+    // Fire-and-forget: no _start() — SEQ_DISPLAY is timer-driven, not completion-driven.
   }
   void playCorrect()   { uint8_t f=selectVariationWithFallback(POSITIVE_BASE,POSITIVE_COUNT,lastPositive,"Correct"); Serial.printf("[AUDIO] Correct -> /mp3/%04d.mp3\n",f);   _start(5000); }
   void playWrong()     { Serial.printf("[AUDIO] Wrong -> /mp3/%04d.mp3\n",AUDIO_WRONG);     _start(5000); }
@@ -223,9 +224,13 @@ struct Audio {
     Serial.printf("[AUDIO] Your Turn -> /mp3/%04d.mp3\n", f);
   }
   void playColorName(Color c) {
-    uint8_t f[] = {AUDIO_COLOR_BLUE,AUDIO_COLOR_RED,AUDIO_COLOR_GREEN,AUDIO_COLOR_YELLOW};
-    _stopAndStart(3000);
+    // Fire-and-forget: SEQ_DISPLAY is timer-driven, not completion-driven.
+    // Do NOT call _stopAndStart() — it issues dfPlayer.stop() which kills the
+    // previous color name mid-playback and triggers a stale PlayFinished event
+    // that would corrupt _ignoreUntilMs for the next tracked audio call.
+    // DFPlayer handles track interruption natively when a new play command arrives.
     if (!initialized) return;
+    uint8_t f[] = {AUDIO_COLOR_BLUE,AUDIO_COLOR_RED,AUDIO_COLOR_GREEN,AUDIO_COLOR_YELLOW};
     dfPlayer.playMp3Folder(f[c]);
     Serial.printf("[AUDIO] Color %s -> /mp3/%04d.mp3\n",
                   c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow", f[c]);
