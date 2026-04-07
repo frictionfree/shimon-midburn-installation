@@ -15,6 +15,7 @@ struct BtnState {
 };
 
 static BtnState btn[4] = {};
+static bool s_fastInput = false;
 
 void hw_led_init() {
   for (int i = 0; i < 4; i++) {
@@ -61,8 +62,11 @@ const char* hw_led_name(Color c) {
   }
 }
 
+void hw_btn_set_fast(bool fast) { s_fastInput = fast; }
+
 void hw_btn_update() {
   uint32_t now = (uint32_t)millis();
+  uint32_t ghostMs = s_fastInput ? HW_BTN_GHOST_MS_FAST : HW_BTN_GHOST_MS_STANDARD;
   for (int i = 0; i < 4; i++) {
     // Clear edge from previous tick
     btn[i].edge = false;
@@ -86,7 +90,7 @@ void hw_btn_update() {
     if (btn[i].consistCount >= HW_BTN_CONSISTENT) {
       if (btn[i].candidate) {
         // Candidate = pressed: confirm after ghost filter time
-        if (!btn[i].pressed && (now - btn[i].candidateMs >= HW_BTN_GHOST_MS)) {
+        if (!btn[i].pressed && (now - btn[i].candidateMs >= ghostMs)) {
           btn[i].pressed   = true;
           btn[i].edge      = true;
           btn[i].pressedMs = now;

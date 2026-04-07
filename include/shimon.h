@@ -165,10 +165,14 @@ constexpr bool ENABLE_ANTI_REPETITION = true;    // Avoid playing same variation
 constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must differ from LED color
 // Note: ENABLE_AUDIO_CONFUSER is configured automatically based on selected difficulty level
 
-// Button Input Settings
-constexpr unsigned long BUTTON_DEBOUNCE_MS = 15;        // Button debounce time
-constexpr unsigned long BUTTON_GUARD_MS = 50;           // Post-press guard time
-constexpr unsigned long MIN_BUTTON_INTERVAL_MS = 200;   // Minimum time between button detections during input
+// Button Debounce Settings
+// HW_BTN_GHOST_MS_STANDARD: minimum hold time for press confirmation in normal states.
+// 15 ms is safe given hardware RC debouncing (10kΩ + 100nF per button); electrical
+// ghosts from MOSFET switching are sub-ms and are filtered by the RC network.
+// HW_BTN_GHOST_MS_FAST: hold time used in active-input states (SEQ_INPUT, diag Phase B).
+// 0 ms means only 3 consistent reads (~5-10 ms) are required — allows quick taps.
+constexpr uint32_t HW_BTN_GHOST_MS_STANDARD = 15;  // Normal debounce hold (ms)
+constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 0;   // Fast-input debounce hold (ms)
 
 // Visual Effects Settings
 constexpr unsigned long AMBIENT_EFFECT_DURATION_SEC = 30;  // Time per ambient effect

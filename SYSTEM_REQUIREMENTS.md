@@ -260,19 +260,33 @@ A shared hardware abstraction layer was introduced to eliminate duplicated LED/b
 |----------|-------------|
 | `hw_btn_init()` | Configure INPUT_PULLUP on all four button pins |
 | `hw_btn_update()` | Called **once per loop tick** (in `loop()` before mode dispatch) |
+| `hw_btn_set_fast(bool)` | `true` = fast-input mode (0 ms ghost hold); `false` = standard (15 ms) |
 | `hw_btn_edge(Color)` | True for exactly one tick after a confirmed press |
 | `hw_btn_pressed(Color)` | True while button is confirmed held |
-| `hw_btn_raw(Color)` | Fresh `digitalRead` — for blocking release-wait loops only |
+| `hw_btn_raw(Color)` | Fresh `digitalRead` — for release-wait checks only |
 | `hw_btn_any_edge(Color*)` | Returns first edge this tick; writes color to pointer |
 | `hw_btn_held_ms(Color)` | Milliseconds since press confirmed (0 if not pressed) |
 | `hw_btn_reset_edges()` | Clear all edge flags |
 
 ### Ghost-Press Filter
 
-The hw layer requires **3 consecutive matching reads** (≈30 ms at 10 ms loop) **plus a minimum hold time of 50 ms** before a PRESS is confirmed. This filters:
+The hw layer requires **3 consecutive matching reads** before a PRESS is confirmed, plus a minimum hold time that varies by context:
 
-- PWM-switching transients on the MOSFET gate (12.5 kHz bursts much shorter than 50 ms)
-- Mechanical bounce on button contacts
+| Mode | `hw_btn_set_fast` | Ghost hold | Total confirm time |
+|------|-------------------|------------|--------------------|
+| Standard (idle, menu, ambient) | `false` | 15 ms | ~25 ms |
+| Fast input (SEQ_INPUT, diag Phase B) | `true` | 0 ms | ~5–10 ms |
+
+**Why 15 ms is safe in standard mode:** Hardware RC debouncing (10 kΩ + 100 nF per button) eliminates sub-ms electrical transients and MOSFET switching artifacts. 15 ms is well above any real noise floor while being short enough that taps ≥ 20 ms are reliably detected.
+
+**Why fast mode uses 0 ms:** During active player input, the hardware filter alone (3 consistent reads ≈ 5–10 ms) is sufficient. The extra hold time is not needed and would cause missed presses for quick players.
+
+**Fast mode usage:**
+- `hw_btn_set_fast(true)` called when entering `SEQ_INPUT` in game mode
+- `hw_btn_set_fast(false)` called on every exit from `SEQ_INPUT` (correct, wrong, timeout)
+- `hw_btn_set_fast(true/false)` bracketing Phase B in diagnostic mode
+
+**SEQ_INPUT non-blocking release:** After a correct mid-sequence press, the wing LED stays on while the button is held and the input timeout is frozen. A non-blocking `awaitingRelease` flag replaces the former `while(hw_btn_raw()) { delay(10) }` loop — `hw_btn_update()` continues to run every tick so presses on other buttons are never missed.
 
 Releases are confirmed after 3 consistent reads with no hold-time requirement (no delay on release).
 

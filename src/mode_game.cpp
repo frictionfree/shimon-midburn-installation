@@ -1024,6 +1024,7 @@ void game_tick() {
             // Sequence complete - play "Your Turn" and immediately allow input
             audio.playYourTurn(); // Play in background (non-blocking)
             hw_btn_reset_edges(); // Reset at start of input phase
+            hw_btn_set_fast(true); // Enable fast debounce for player input
             stateTimer = now;
             currentStep = 0;
             gameState = SEQ_INPUT; // Skip SEQ_DISPLAY_YOURTURN - go directly to input
@@ -1040,74 +1041,66 @@ void game_tick() {
     // to allow player to start responding immediately after sequence display
 
     case SEQ_INPUT: {
-      // Prevent double-detection with minimum time between button presses
-      static unsigned long lastButtonDetectionTime = 0;
+      // Non-blocking release wait: keep LED on while player holds the button,
+      // then reset the per-step timeout once they release. No new input accepted
+      // until the previous button is fully released.
+      static bool   awaitingRelease = false;
+      static Color  releaseColor    = BLUE;
 
-      // Debug: Raw button states - commented out to reduce clutter
-      // static unsigned long lastButtonDebug = 0;
-      // if (now - lastButtonDebug > 500) {
-      //   Serial.printf("RAW BUTTONS: R=%d B=%d G=%d Y=%d (pins %d,%d,%d,%d)\n",
-      //                 digitalRead(btnPins[RED]), digitalRead(btnPins[BLUE]),
-      //                 digitalRead(btnPins[GREEN]), digitalRead(btnPins[YELLOW]),
-      //                 btnPins[RED], btnPins[BLUE], btnPins[GREEN], btnPins[YELLOW]);
-      //   lastButtonDebug = now;
-      // }
+      if (awaitingRelease) {
+        if (!hw_btn_raw(releaseColor)) {
+          setLed(releaseColor, false);
+          stateTimer = millis(); // reset input timeout after release
+          awaitingRelease = false;
+          Serial.printf("INPUT DEBUG: Released, timer reset for step %d\n", currentStep);
+        }
+        break;
+      }
 
       // Check for timeout
       unsigned long elapsed = now - stateTimer;
       if (elapsed > getCurrentInputTimeout(game.level)) {
         Serial.printf("TIMEOUT DEBUG: now=%lu, stateTimer=%lu, elapsed=%lu, timeout=%lu\n",
                       now, stateTimer, elapsed, getCurrentInputTimeout(game.level));
+        hw_btn_set_fast(false);
         audio.playTimeout();
         stateTimer = now;
         gameState = TIMEOUT_FEEDBACK;
         Serial.println("Input timeout!");
         break;
       }
-      
-            // Check for button press (with minimum interval to prevent double-detection)
-      if (anyButtonPressed()) {
-        if (now - lastButtonDetectionTime > MIN_BUTTON_INTERVAL_MS) {
-          lastButtonDetectionTime = now;
-          Color expectedColor = (Color)game.seq[currentStep];
-          Serial.printf("BUTTON DEBUG: Pressed %d, Expected %d (step %d)\n", 
-                        lastButtonPressed, expectedColor, currentStep);
-          
-          if (lastButtonPressed == expectedColor) {
-            // Correct! Provide visual feedback only (audio too slow for rapid input)
-            setLed(lastButtonPressed, true); // Brief wing LED feedback
-            currentStep++;
 
-            if (currentStep >= game.level) {
-              // Level complete!
-              audioFinished = false; // Reset flag before playing
-              audio.playCorrect();
-              game.score++; // Score = number of levels successfully completed
-              stateTimer = now;
-              gameState = CORRECT_FEEDBACK;
-              Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
-            } else {
-              // Continue with next input - keep button LED on while button is held
-              // Wait for button release before proceeding
-              while (hw_btn_raw(lastButtonPressed)) {
-                delay(10); // Small delay to prevent tight loop
-              }
-              setLed(lastButtonPressed, false);
-              // Reset timeout with fresh timestamp (after button release)
-              stateTimer = millis();
-              Serial.printf("INPUT DEBUG: Timer reset at %lu ms for next step %d\n", stateTimer, currentStep);
-            }
-          } else {
-            // Wrong!
-            audioFinished = false; // Reset flag before playing
-            audio.playWrong();
+      if (anyButtonPressed()) {
+        Color expectedColor = (Color)game.seq[currentStep];
+        Serial.printf("BUTTON DEBUG: Pressed %d, Expected %d (step %d)\n",
+                      lastButtonPressed, expectedColor, currentStep);
+
+        if (lastButtonPressed == expectedColor) {
+          setLed(lastButtonPressed, true); // wing LED on while held
+          currentStep++;
+
+          if (currentStep >= game.level) {
+            // Level complete — no need to wait for release
+            hw_btn_set_fast(false);
+            audioFinished = false;
+            audio.playCorrect();
+            game.score++;
             stateTimer = now;
-            gameState = WRONG_FEEDBACK;
-            Serial.printf("Wrong! Expected %d, got %d\n", expectedColor, lastButtonPressed);
+            gameState = CORRECT_FEEDBACK;
+            Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
+          } else {
+            // Mid-sequence: wait for release non-blocking before accepting next press
+            awaitingRelease = true;
+            releaseColor    = lastButtonPressed;
           }
         } else {
-          Serial.printf("TIMING DEBUG: Button press ignored (too soon: %lums since last)\n", 
-                        now - lastButtonDetectionTime);
+          // Wrong!
+          hw_btn_set_fast(false);
+          audioFinished = false;
+          audio.playWrong();
+          stateTimer = now;
+          gameState = WRONG_FEEDBACK;
+          Serial.printf("Wrong! Expected %d, got %d\n", expectedColor, lastButtonPressed);
         }
       }
       break;

@@ -192,6 +192,7 @@ static void phB_enter() {
     for (int i = 0; i < 4; i++) anyHeld |= hw_btn_raw((Color)i);
   } while (anyHeld && millis() - releaseStart < 500UL);
   delay(50);
+  hw_btn_set_fast(true); // Quick taps are sufficient for button test
   diagTimer = millis();
   Serial.println("[DIAG] Phase B: Buttons - press each lit button.");
   Serial.printf("  Press %s...\n", hw_led_name(BLUE));
@@ -199,7 +200,7 @@ static void phB_enter() {
 }
 static bool phB_tick() {
   if (millis() - diagTimer < PHASE_B_MIN_VIS_MS) return false;
-  bool confirmed = hw_btn_pressed((Color)phB_wing);
+  bool confirmed = hw_btn_edge((Color)phB_wing); // edge: quick tap is enough
   bool timeout   = (millis() - diagTimer >= PHASE_B_BTN_TOUT);
   if (!confirmed && !timeout) return false;
   hw_led_duty((Color)phB_wing, 0);
@@ -576,6 +577,7 @@ void diag_tick() {
 
     case DS_PHASE_B:
       if (phB_tick()) {
+        hw_btn_set_fast(false); // Restore standard debounce after button test
         resultB = (phB_failed == 0) ? DR_PASS : (phB_failed < 4 ? DR_WARN : DR_FAIL);
         Serial.printf("  Phase B: %s  (%u/4 ok)\n", drStr(resultB), 4 - phB_failed);
         diagState = DS_PHASE_C_PROMPT;

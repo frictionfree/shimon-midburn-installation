@@ -16,7 +16,7 @@ static constexpr uint8_t  HW_PWM_BITS     = 8;
 static constexpr uint8_t  HW_PWM_MIN_DUTY = PWM_MIN_EFFECTIVE_DUTY; // 70
 
 static constexpr uint8_t  HW_BTN_CONSISTENT = 3;   // consecutive matching reads required
-static constexpr uint32_t HW_BTN_GHOST_MS   = 50;  // minimum hold time for valid press
+// Ghost hold times defined in shimon.h: HW_BTN_GHOST_MS_STANDARD / HW_BTN_GHOST_MS_FAST
 
 void hw_led_init();                       // ledcSetup + ledcAttachPin channels 0-3
 void hw_btn_init();                       // INPUT_PULLUP all 4 button pins
@@ -28,8 +28,9 @@ const char* hw_led_name(Color c);                        // "BLUE"/"RED"/"GREEN"
 
 // Call hw_btn_update() ONCE per loop tick before any query
 void     hw_btn_update();
+void     hw_btn_set_fast(bool fast); // true = fast-input mode (0 ms ghost hold); false = standard (15 ms)
 bool     hw_btn_raw(Color c);        // instantaneous digitalRead — only for release-wait loops
-bool     hw_btn_pressed(Color c);    // debounced: held >= HW_BTN_GHOST_MS
+bool     hw_btn_pressed(Color c);    // debounced: held >= current ghost threshold
 bool     hw_btn_edge(Color c);       // true on first tick after confirmed press
 bool     hw_btn_any_edge(Color* out);// any button edge; writes color to *out (may be nullptr)
 uint32_t hw_btn_held_ms(Color c);    // ms since confirmed press (0 if not pressed)
