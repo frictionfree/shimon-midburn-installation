@@ -107,17 +107,19 @@ See `hardware-baseline.md` Section 6 for electrical details.
 
 ### Audio Finish Detection
 
-The game uses DFPlayer's `DFPlayerPlayFinished` event:
-- `audioFinished` flag set when playback completes
-- `isAudioComplete()` helper checks flag OR timeout fallback
-- States wait for actual completion, not fixed timeouts
+The `Audio` class owns all playback state. Callers follow one rule: **call `audio.play*()` to start, call `audio.isDone()` to wait.**
+
+- **`play*()`** — stops any active track (`dfPlayer.stop()` + 20 ms), starts the new track, records `_playStartMs` and a per-message `_fallbackMs` timeout. Resets the finished flag internally. Callers never touch `audioFinished`.
+- **`audio.isDone()`** — returns `true` when `DFPlayerPlayFinished` is received (primary path) OR when the fallback timeout expires (logged as a warning — should be rare). No timeout constant needed at call sites.
+- **`audio.update()`** — called once per `game_tick()` to consume DFPlayer events. Accepts any `DFPlayerPlayFinished` event (track-ID matching removed — it silently dropped valid events when DFPlayer reported folder index instead of playback number).
+- **`audio.stop()`** — called on user interaction or mode exit to interrupt playback cleanly.
 
 ### Playback Rules
 
-- Stop previous playback before starting new audio
-- Short inter-command delays for stability
-- Guarded playback calls prevent re-entrancy
-- Centralized helper function for all audio
+- Every `play*()` calls `dfPlayer.stop()` internally before the new command — no inter-state `delay()` needed for audio transitions.
+- FSM states do not pass timeout constants — fallback timeouts live inside `play*()` and are set generously (5–15 s) as a safety net, not as tuned estimates.
+- No blocking `delay()` calls in FSM states for audio purposes.
+- `POST_GAME_INVITE` plays its invite immediately upon entry — `GENERAL_GAME_OVER` already waited for `audio.isDone()` before transitioning.
 
 ### DFPlayer Power Lifecycle
 

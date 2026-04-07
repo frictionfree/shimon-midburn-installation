@@ -44,37 +44,19 @@ struct GameState {
 // --- Runtime Configurable Features ---
 bool ENABLE_AUDIO_CONFUSER = false; // Default: confuser mode OFF (configured automatically based on difficulty level)
 
-// ---- Audio Playback Tracking ----
-// Audio playback tracking (declared here for global access)
-bool audioFinished = false;
-unsigned long audioStartTime = 0;
-int currentPlayingTrack = -1;  // Track which file is currently playing (-1 = none)
+// --- Audio variation tracking (255 = none played yet) ---
+uint8_t lastMyTurn   = 255;
+uint8_t lastYourTurn = 255;
+uint8_t lastPositive = 255;
 
-// --- Multiple Audio Variations Tracking ---
-// Global variables for variation tracking (255 = none played yet)
-uint8_t lastMyTurn = 255;      // Track last "My Turn" variation
-uint8_t lastYourTurn = 255;    // Track last "Your Turn" variation  
-uint8_t lastPositive = 255;    // Track last positive feedback variation
-
-// --- Variation Selection Helper Function ---
 uint8_t selectVariationWithFallback(uint8_t base, uint8_t count, uint8_t& lastPlayed, const char* category) {
-    if (count == 0) {
-        Serial.printf("[AUDIO] No variations available for %s, using base file %d\n", category, base);
-        return base;
-    }
-    
-    uint8_t selection;
-    do {
-        selection = random(0, count);
-    } while (ENABLE_ANTI_REPETITION && count > 1 && selection == lastPlayed);
-    
-    lastPlayed = selection;
-    uint8_t fileNumber = base + selection;
-    
-    Serial.printf("[AUDIO] Selected %s variation %d (file %04d.mp3), avoiding last: %d\n", 
-                  category, selection, fileNumber, (lastPlayed == 255) ? -1 : (int)(lastPlayed));
-    
-    return fileNumber;
+  if (count == 0) { Serial.printf("[AUDIO] No variations for %s\n", category); return base; }
+  uint8_t sel;
+  do { sel = random(0, count); } while (ENABLE_ANTI_REPETITION && count > 1 && sel == lastPlayed);
+  lastPlayed = sel;
+  uint8_t f = base + sel;
+  Serial.printf("[AUDIO] %s variation %d -> /mp3/%04d.mp3\n", category, sel, f);
+  return f;
 }
 
 // ---- Forward Declarations for Visual Pattern Functions ----
@@ -83,274 +65,205 @@ void sparkleBurstSequence(uint8_t sparkleCount, uint8_t delayMs);
 void diagonalCrossPattern(uint8_t cycles, uint16_t delayMs);
 void acceleratingChaseSequence();
 
-// ---- Enhanced Audio System ----
+// ---- Audio System ----
+// Design contract:
+//   play*()   — stop any active track, start new one, record fallback timeout internally
+//   isDone()  — true when DFPlayer signals completion OR fallback timeout expires (logged)
+//   update()  — call once per game_tick() to consume DFPlayer events (no-op in sim)
+//   stop()    — interrupt playback on user interaction or mode exit
+//
+// Callers never touch finished state or pass timeouts — just call audio.isDone().
+
 #ifdef USE_WOKWI
-// Simulation version - prints to Serial
 struct Audio {
-  void begin() {
-    Serial.println("[AUDIO] DFPlayer initialized (simulation)");
-  }
-  
-  void playInvite() {
-    uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
-    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3\n", inviteNum, inviteNum);
-  }
-  
-  void playInstructions() {
-    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
-    audioFinished = false;
-  }
+  bool          _finished    = true;
+  unsigned long _playStartMs = 0;
+  unsigned long _fallbackMs  = 0;
 
-  void playDifficultyInstructions(DifficultyLevel difficulty) {
-    uint8_t instructionFiles[] = {
-      AUDIO_INSTRUCTIONS_BLUE,    // 12
-      AUDIO_INSTRUCTIONS_RED,     // 13
-      AUDIO_INSTRUCTIONS_GREEN,   // 14
-      AUDIO_INSTRUCTIONS_YELLOW   // 15
-    };
-    const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
-    Serial.printf("[AUDIO] Difficulty instructions (%s) from /mp3/%04d.mp3\n",
-                  difficultyNames[difficulty], instructionFiles[difficulty]);
-    audioFinished = false;
+  void _start(unsigned long fallbackMs) {
+    _finished    = false;
+    _playStartMs = millis();
+    _fallbackMs  = fallbackMs;
   }
-
-  void playMyTurn() {
-    uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
-    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
-    audioFinished = false;
+  bool isDone() {
+    if (_finished) return true;
+    if (millis() - _playStartMs > _fallbackMs) { _finished = true; return true; }
+    return false;
   }
-  
-  void playYourTurn() {
-    uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
-    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
-    audioFinished = false;
+  void update() {}
+  void begin()    { Serial.println("[AUDIO] DFPlayer initialized (simulation)"); }
+  void playInvite()                      { uint8_t n=random(1,AUDIO_INVITE_COUNT+1); Serial.printf("[AUDIO] Invite %d -> /mp3/%04d.mp3\n",n,n); _start(10000); }
+  void playInstructions()                { Serial.printf("[AUDIO] Instructions -> /mp3/%04d.mp3\n",AUDIO_INSTRUCTIONS); _start(15000); }
+  void playDifficultyInstructions(DifficultyLevel d) {
+    uint8_t f[]={AUDIO_INSTRUCTIONS_BLUE,AUDIO_INSTRUCTIONS_RED,AUDIO_INSTRUCTIONS_GREEN,AUDIO_INSTRUCTIONS_YELLOW};
+    const char* nm[]={"Blue/Novice","Red/Intermediate","Green/Advanced","Yellow/Pro"};
+    Serial.printf("[AUDIO] Difficulty (%s) -> /mp3/%04d.mp3\n",nm[d],f[d]); _start(12000);
   }
-  
+  void playMyTurn()    { uint8_t f=selectVariationWithFallback(MYTURN_BASE,MYTURN_COUNT,lastMyTurn,"My Turn");       Serial.printf("[AUDIO] My Turn -> /mp3/%04d.mp3\n",f);   _start(5000); }
+  void playYourTurn()  { uint8_t f=selectVariationWithFallback(YOURTURN_BASE,YOURTURN_COUNT,lastYourTurn,"YourTurn"); Serial.printf("[AUDIO] Your Turn -> /mp3/%04d.mp3\n",f); _start(5000); }
   void playColorName(Color c) {
-    uint8_t colorFileNumbers[] = {AUDIO_COLOR_BLUE, AUDIO_COLOR_RED, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
-    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3\n",
-                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
-                  colorFileNumbers[c]);
+    uint8_t f[]={AUDIO_COLOR_BLUE,AUDIO_COLOR_RED,AUDIO_COLOR_GREEN,AUDIO_COLOR_YELLOW};
+    Serial.printf("[AUDIO] Color %s -> /mp3/%04d.mp3\n",c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",f[c]); _start(3000);
   }
-
-  void playCorrect() {
-    uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
-    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (simulation)\n", fileNumber);
-    audioFinished = false;
-  }
-
-  void playWrong() {
-    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3\n", AUDIO_WRONG);
-  }
-
-  void playTimeout() {
-    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3\n", AUDIO_TIMEOUT);
-  }
-
-  void playGameOver(uint8_t messageFile) {
-    Serial.printf("[AUDIO] Personalized Game Over from /mp3/%04d.mp3\n", messageFile);
-    audioFinished = false;
-  }
-
-  void playGeneralGameOver() {
-    Serial.printf("[AUDIO] General Game Over from /mp3/%04d.mp3\n", AUDIO_GAME_OVER_GENERAL);
-    audioFinished = false;
-  }
-
-  void playScore(uint8_t score) {
-    Serial.printf("[AUDIO] Score: %d from /02/%03d.mp3\n", score, score);
-  }
-
-  void stop() {
-    Serial.println("[AUDIO] Stop called (simulation)");
-    audioFinished = true;
-    currentPlayingTrack = -1;
-  }
+  void playCorrect()   { uint8_t f=selectVariationWithFallback(POSITIVE_BASE,POSITIVE_COUNT,lastPositive,"Correct"); Serial.printf("[AUDIO] Correct -> /mp3/%04d.mp3\n",f);   _start(5000); }
+  void playWrong()     { Serial.printf("[AUDIO] Wrong -> /mp3/%04d.mp3\n",AUDIO_WRONG);     _start(5000); }
+  void playTimeout()   { Serial.printf("[AUDIO] Timeout -> /mp3/%04d.mp3\n",AUDIO_TIMEOUT); _start(5000); }
+  void playGameOver(uint8_t msg) { Serial.printf("[AUDIO] Game over msg -> /mp3/%04d.mp3\n",msg);               _start(10000); }
+  void playGeneralGameOver()     { Serial.printf("[AUDIO] General game over -> /mp3/%04d.mp3\n",AUDIO_GAME_OVER_GENERAL); _start(10000); }
+  void playScore(uint8_t score)  { Serial.printf("[AUDIO] Score %d -> /mp3/%04d.mp3\n",score,AUDIO_SCORE_BASE+score); _start(5000); }
+  void stop() { Serial.println("[AUDIO] Stop (simulation)"); _finished = true; }
 } audio;
 
 #else
-// Real hardware version - uses DFPlayer Mini
-HardwareSerial dfPlayerSerial(1); // Use UART1
+// Real hardware — DFPlayer Mini via UART1
+HardwareSerial dfPlayerSerial(1);
 DFRobotDFPlayerMini dfPlayer;
 
 struct Audio {
-  bool initialized = false;
-  
+  bool          initialized  = false;
+  bool          _finished    = true;
+  unsigned long _playStartMs = 0;
+  unsigned long _fallbackMs  = 0;
+
+  // Stop active playback and arm a new track's state.
+  // Called by every play*() before issuing the DFPlayer command.
+  void _stopAndStart(unsigned long fallbackMs) {
+    if (initialized) { dfPlayer.stop(); delay(20); }
+    _finished    = false;
+    _playStartMs = millis();
+    _fallbackMs  = fallbackMs;
+  }
+
+  bool isDone() {
+    if (_finished) return true;
+    if (millis() - _playStartMs > _fallbackMs) {
+      Serial.printf("[AUDIO] WARNING: timeout fallback fired after %lu ms — DFPlayer did not signal completion\n",
+                    millis() - _playStartMs);
+      _finished = true;
+      return true;
+    }
+    return false;
+  }
+
+  // Call once per game_tick() to consume DFPlayer events.
+  void update() {
+    if (!initialized || !dfPlayer.available()) return;
+    uint8_t type = dfPlayer.readType();
+    int     val  = dfPlayer.read();
+    switch (type) {
+      case DFPlayerPlayFinished:
+        // Accept any completion event — track-ID matching was silently dropping
+        // events when DFPlayer reported folder index instead of playback number.
+        Serial.printf("[AUDIO] Playback finished (track %d, elapsed %lu ms)\n",
+                      val, millis() - _playStartMs);
+        _finished = true;
+        break;
+      case DFPlayerError:          Serial.printf("[AUDIO] Error: %d\n", val);  break;
+      case DFPlayerCardInserted:   Serial.println("[AUDIO] SD card inserted");  break;
+      case DFPlayerCardRemoved:    Serial.println("[AUDIO] SD card removed");   break;
+    }
+  }
+
   void begin() {
     dfPlayerSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
     Serial.println("Initializing DFPlayer Mini...");
-    
     if (!dfPlayer.begin(dfPlayerSerial)) {
-      Serial.println("DFPlayer Mini initialization failed!");
-      Serial.println("Check connections and SD card");
+      Serial.println("DFPlayer Mini initialization failed! Check connections and SD card.");
       return;
     }
-    
     Serial.println("DFPlayer Mini initialized successfully");
-    
-    // Configure DFPlayer
-    dfPlayer.volume(DFPLAYER_VOLUME);  // Set volume from config
-    dfPlayer.EQ(DFPLAYER_EQ);         // Set EQ from config
-    delay(100); // DFPlayer init delay
-    
+    dfPlayer.volume(DFPLAYER_VOLUME);
+    dfPlayer.EQ(DFPLAYER_EQ);
+    delay(100);
     initialized = true;
   }
-  
-  bool isReady() {
-    return initialized && dfPlayer.available();
-  }
-  
+
   void playInvite() {
+    uint8_t n = random(1, AUDIO_INVITE_COUNT + 1);
+    _stopAndStart(10000);
     if (!initialized) return;
-    uint8_t inviteNum = random(1, AUDIO_INVITE_COUNT + 1); // Files 0001-000X.mp3
-    currentPlayingTrack = inviteNum;
-    dfPlayer.playMp3Folder(inviteNum);
-    Serial.printf("[AUDIO] Playing invite %d from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", inviteNum, inviteNum, inviteNum);
+    dfPlayer.playMp3Folder(n);
+    Serial.printf("[AUDIO] Invite %d -> /mp3/%04d.mp3\n", n, n);
   }
-
   void playInstructions() {
+    _stopAndStart(15000);
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_INSTRUCTIONS;
     dfPlayer.playMp3Folder(AUDIO_INSTRUCTIONS);
-    Serial.printf("[AUDIO] Playing instructions from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_INSTRUCTIONS, AUDIO_INSTRUCTIONS);
-    audioFinished = false;
+    Serial.printf("[AUDIO] Instructions -> /mp3/%04d.mp3\n", AUDIO_INSTRUCTIONS);
   }
-
-  void playDifficultyInstructions(DifficultyLevel difficulty) {
+  void playDifficultyInstructions(DifficultyLevel d) {
+    uint8_t f[] = {AUDIO_INSTRUCTIONS_BLUE,AUDIO_INSTRUCTIONS_RED,AUDIO_INSTRUCTIONS_GREEN,AUDIO_INSTRUCTIONS_YELLOW};
+    const char* nm[] = {"Blue/Novice","Red/Intermediate","Green/Advanced","Yellow/Pro"};
+    _stopAndStart(12000);
     if (!initialized) return;
-    uint8_t instructionFiles[] = {
-      AUDIO_INSTRUCTIONS_BLUE,    // 12
-      AUDIO_INSTRUCTIONS_RED,     // 13
-      AUDIO_INSTRUCTIONS_GREEN,   // 14
-      AUDIO_INSTRUCTIONS_YELLOW   // 15
-    };
-    const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
-    uint8_t fileNumber = instructionFiles[difficulty];
-    currentPlayingTrack = fileNumber;
-    dfPlayer.playMp3Folder(fileNumber);
-    Serial.printf("[AUDIO] Difficulty instructions (%s) from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
-                  difficultyNames[difficulty], fileNumber, fileNumber);
-    audioFinished = false;
+    dfPlayer.playMp3Folder(f[d]);
+    Serial.printf("[AUDIO] Difficulty (%s) -> /mp3/%04d.mp3\n", nm[d], f[d]);
   }
-
   void playMyTurn() {
+    uint8_t f = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
+    _stopAndStart(5000);
     if (!initialized) return;
-    uint8_t fileNumber = selectVariationWithFallback(MYTURN_BASE, MYTURN_COUNT, lastMyTurn, "My Turn");
-    currentPlayingTrack = fileNumber;
-    dfPlayer.playMp3Folder(fileNumber);
-    Serial.printf("[AUDIO] My Turn variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
-    audioFinished = false;
+    dfPlayer.playMp3Folder(f);
+    Serial.printf("[AUDIO] My Turn -> /mp3/%04d.mp3\n", f);
   }
-
   void playYourTurn() {
+    uint8_t f = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
+    _stopAndStart(5000);
     if (!initialized) return;
-    uint8_t fileNumber = selectVariationWithFallback(YOURTURN_BASE, YOURTURN_COUNT, lastYourTurn, "Your Turn");
-    currentPlayingTrack = fileNumber;
-    dfPlayer.playMp3Folder(fileNumber);
-    Serial.printf("[AUDIO] Your Turn variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
-    audioFinished = false;
+    dfPlayer.playMp3Folder(f);
+    Serial.printf("[AUDIO] Your Turn -> /mp3/%04d.mp3\n", f);
   }
-
   void playColorName(Color c) {
+    uint8_t f[] = {AUDIO_COLOR_BLUE,AUDIO_COLOR_RED,AUDIO_COLOR_GREEN,AUDIO_COLOR_YELLOW};
+    _stopAndStart(3000);
     if (!initialized) return;
-    uint8_t colorFileNumbers[] = {AUDIO_COLOR_BLUE, AUDIO_COLOR_RED, AUDIO_COLOR_GREEN, AUDIO_COLOR_YELLOW};
-    uint8_t fileNumber = colorFileNumbers[c];
-    currentPlayingTrack = fileNumber;
-    dfPlayer.playMp3Folder(fileNumber);
-    Serial.printf("[AUDIO] Color name: %s from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n",
-                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",
-                  fileNumber, fileNumber);
+    dfPlayer.playMp3Folder(f[c]);
+    Serial.printf("[AUDIO] Color %s -> /mp3/%04d.mp3\n",
+                  c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow", f[c]);
   }
-
   void playCorrect() {
+    uint8_t f = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Correct");
+    _stopAndStart(5000);
     if (!initialized) return;
-    uint8_t fileNumber = selectVariationWithFallback(POSITIVE_BASE, POSITIVE_COUNT, lastPositive, "Positive Feedback");
-    currentPlayingTrack = fileNumber;
-    dfPlayer.playMp3Folder(fileNumber);
-    Serial.printf("[AUDIO] Positive feedback variation from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", fileNumber, fileNumber);
-    audioFinished = false;
+    dfPlayer.playMp3Folder(f);
+    Serial.printf("[AUDIO] Correct -> /mp3/%04d.mp3\n", f);
   }
-
   void playWrong() {
+    _stopAndStart(5000);
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_WRONG;
     dfPlayer.playMp3Folder(AUDIO_WRONG);
-    Serial.printf("[AUDIO] Wrong from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_WRONG, AUDIO_WRONG);
+    Serial.printf("[AUDIO] Wrong -> /mp3/%04d.mp3\n", AUDIO_WRONG);
   }
-
   void playTimeout() {
+    _stopAndStart(5000);
     if (!initialized) return;
-    currentPlayingTrack = AUDIO_TIMEOUT;
     dfPlayer.playMp3Folder(AUDIO_TIMEOUT);
-    Serial.printf("[AUDIO] Timeout from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_TIMEOUT, AUDIO_TIMEOUT);
+    Serial.printf("[AUDIO] Timeout -> /mp3/%04d.mp3\n", AUDIO_TIMEOUT);
   }
-
-  void playGameOver(uint8_t messageFile) {
+  void playGameOver(uint8_t msg) {
+    _stopAndStart(10000);
     if (!initialized) return;
-    currentPlayingTrack = messageFile;
-    audioFinished = false;
-    dfPlayer.playMp3Folder(messageFile);
-    Serial.printf("[AUDIO] Personalized Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", messageFile, messageFile);
+    dfPlayer.playMp3Folder(msg);
+    Serial.printf("[AUDIO] Game over msg -> /mp3/%04d.mp3\n", msg);
   }
-
   void playGeneralGameOver() {
+    _stopAndStart(10000);
     if (!initialized) return;
-    // Stop any currently playing track to ensure clean transition
-    dfPlayer.stop();
-    delay(100);  // Brief pause after stop
-    currentPlayingTrack = AUDIO_GAME_OVER_GENERAL;
-    audioFinished = false;
     dfPlayer.playMp3Folder(AUDIO_GAME_OVER_GENERAL);
-    Serial.printf("[AUDIO] General Game Over from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", AUDIO_GAME_OVER_GENERAL, AUDIO_GAME_OVER_GENERAL);
+    Serial.printf("[AUDIO] General game over -> /mp3/%04d.mp3\n", AUDIO_GAME_OVER_GENERAL);
   }
-
   void playScore(uint8_t score) {
+    if (score > 100) return;
+    uint8_t f = AUDIO_SCORE_BASE + score;
+    _stopAndStart(5000);
     if (!initialized) return;
-    if (score <= 100) {
-      uint8_t fileNumber = AUDIO_SCORE_BASE + score;  // 70 + score
-      currentPlayingTrack = fileNumber;
-      dfPlayer.playMp3Folder(fileNumber);
-      Serial.printf("[AUDIO] Score: %d from /mp3/%04d.mp3 (DFPlayer.playMp3Folder(%d))\n", score, fileNumber, fileNumber);
-    }
+    dfPlayer.playMp3Folder(f);
+    Serial.printf("[AUDIO] Score %d -> /mp3/%04d.mp3\n", score, f);
   }
-  
-  // Check DFPlayer status and handle errors
-  void handleStatus() {
-    if (!initialized) return;
-
-    if (dfPlayer.available()) {
-      uint8_t type = dfPlayer.readType();
-      int value = dfPlayer.read();
-
-      switch (type) {
-        case DFPlayerPlayFinished:
-          // Only set finished flag if this matches the track we're expecting
-          if (value == currentPlayingTrack || currentPlayingTrack == -1) {
-            Serial.printf("Audio finished: track %d\n", value);
-            audioFinished = true;
-            currentPlayingTrack = -1;  // Clear the expected track
-          }
-          // Silently ignore stale notifications - DFPlayer sends late completion events
-          break;
-        case DFPlayerError:
-          Serial.printf("DFPlayer error: %d\n", value);
-          break;
-        case DFPlayerCardInserted:
-          Serial.println("SD card inserted");
-          break;
-        case DFPlayerCardRemoved:
-          Serial.println("SD card removed");
-          break;
-      }
-    }
-  }
-
   void stop() {
-    if (!initialized) return;
-    Serial.println("[AUDIO] Stop called - stopping DFPlayer playback");
-    dfPlayer.stop();
-    audioFinished = true;
-    currentPlayingTrack = -1;
+    Serial.println("[AUDIO] Stop");
+    if (initialized) dfPlayer.stop();
+    _finished = true;
   }
 } audio;
 #endif
@@ -399,26 +312,6 @@ unsigned long effectChangeTimer = 0;
 uint8_t ambientStep = 0;
 
 // ---- Utility Functions ----
-// Helper function to check if audio playback is complete (with timeout fallback)
-bool isAudioComplete(unsigned long startTime, unsigned long timeoutMs) {
-  unsigned long elapsed = millis() - startTime;
-
-  #ifdef USE_WOKWI
-    // Simulation: just use timeout
-    return elapsed > timeoutMs;
-  #else
-    // Real hardware: check audio finished flag OR timeout
-    if (audioFinished) {
-      Serial.printf("Audio complete via DFPlayer notification (%lu ms)\n", elapsed);
-      return true;
-    }
-    if (elapsed > timeoutMs) {
-      Serial.printf("Audio complete via timeout fallback (%lu ms)\n", elapsed);
-      return true;
-    }
-    return false;
-  #endif
-}
 
 static inline void setLed(Color c, bool on) {
   hw_led_duty(c, on ? 255 : 0);
@@ -780,9 +673,7 @@ void game_tick() {
 
   digitalWrite(LED_SERVICE, (millis() >> 9) & 1); // Heartbeat LED
 
-#ifndef USE_WOKWI
-  audio.handleStatus(); // Handle DFPlayer status/errors for real hardware
-#endif
+  audio.update(); // Consume DFPlayer events and update isDone() state
 
   unsigned long now = millis();
 
@@ -830,7 +721,6 @@ void game_tick() {
         // Clear ambient effects
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
-        audioFinished = false; // Reset flag before playing
         audio.playInstructions();
         instructionsSequence(); // Visual instructions!
         stateTimer = now;
@@ -845,7 +735,7 @@ void game_tick() {
       const unsigned long INSTRUCTIONS_MIN_DURATION_MS = 2000;
       bool minTimeElapsed = (now - stateTimer) >= INSTRUCTIONS_MIN_DURATION_MS;
       bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
-      bool audioComplete = isAudioComplete(stateTimer, MAIN_INSTRUCTIONS_DURATION_MS);
+      bool audioComplete = audio.isDone();
 
       // Check if user pressed button after minimum time OR audio completed
       if ((minTimeElapsed && buttonPressed) || audioComplete) {
@@ -861,7 +751,6 @@ void game_tick() {
           Serial.printf("Instructions skipped - Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
 
           // Play difficulty-specific instructions
-          audioFinished = false;
           audio.playDifficultyInstructions(selectedDifficulty);
           stateTimer = now;
           gameState = DIFFICULTY_INSTRUCTIONS;
@@ -902,7 +791,6 @@ void game_tick() {
         const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
         Serial.printf("Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
 
-        audioFinished = false;
         audio.playDifficultyInstructions(selectedDifficulty);
         stateTimer = now;
         gameState = DIFFICULTY_INSTRUCTIONS;
@@ -913,7 +801,7 @@ void game_tick() {
     case DIFFICULTY_INSTRUCTIONS: {
       // Allow user to skip instructions by pressing any button, OR wait for audio completion
       bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
-      bool audioComplete = isAudioComplete(stateTimer, DIFFICULTY_INSTRUCTIONS_DURATION_MS);
+      bool audioComplete = audio.isDone();
 
       if (buttonPressed || audioComplete) {
         if (buttonPressed) {
@@ -957,10 +845,7 @@ void game_tick() {
       // Turn off all LEDs
       for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
-      // Small delay to let DFPlayer finish previous audio
-      delay(250);
-      audioFinished = false; // Reset flag before playing
-      audio.playMyTurn();
+      audio.playMyTurn(); // _stopAndStart() inside handles any prior playback cleanly
       stateTimer = now;
       gameState = SEQ_DISPLAY_MYTURN;
       Serial.printf("Displaying sequence level %d\n", game.level);
@@ -968,10 +853,7 @@ void game_tick() {
     }
 
     case SEQ_DISPLAY_MYTURN: {
-      // Wait for "My Turn" audio to complete (no skip - message is short and important)
-      if (isAudioComplete(stateTimer, MY_TURN_DURATION_MS)) {
-        // Small delay to let DFPlayer switch from /mp3/ to /01/ folder playback
-        delay(200);
+      if (audio.isDone()) {
         stateTimer = now;
         gameState = SEQ_DISPLAY;
       }
@@ -1079,7 +961,6 @@ void game_tick() {
           if (currentStep >= game.level) {
             // Level complete — no need to wait for release
             hw_btn_set_fast(false);
-            audioFinished = false;
             audio.playCorrect();
             game.score++;
             stateTimer = now;
@@ -1093,7 +974,6 @@ void game_tick() {
         } else {
           // Wrong!
           hw_btn_set_fast(false);
-          audioFinished = false;
           audio.playWrong();
           stateTimer = now;
           gameState = WRONG_FEEDBACK;
@@ -1111,7 +991,7 @@ void game_tick() {
         celebrationPlayed = true;
       }
 
-      if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
+      if (audio.isDone()) {
         celebrationPlayed = false;  // Reset for next time
         // Turn off all feedback LEDs
         for (int i = 0; i < COLOR_COUNT; i++) {
@@ -1142,19 +1022,10 @@ void game_tick() {
     }
 
     case WRONG_FEEDBACK: {
-      if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
-        // Clear all LED feedback
-        for (int i = 0; i < COLOR_COUNT; i++) {
-          setLed((Color)i, false);
-        }
-
-        // Calculate personalized game over message based on difficulty and score
+      if (audio.isDone()) {
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
         uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
-
-        // Add delay to allow DFPlayer to finish previous audio before playing Game Over
-        delay(400);
-        audioFinished = false; // Reset flag before playing
-        audio.playGameOver(gameOverMsg);
+        audio.playGameOver(gameOverMsg); // _stopAndStart() inside handles clean transition
         stateTimer = now;
         gameState = GAME_OVER;
         Serial.printf("Game over! Difficulty: %d, Score: %d, Message: %d\n",
@@ -1164,18 +1035,9 @@ void game_tick() {
     }
 
     case TIMEOUT_FEEDBACK: {
-      if (isAudioComplete(stateTimer, FEEDBACK_DURATION_MS)) {
-        // Clear all LEDs before game over
-        for (int i = 0; i < COLOR_COUNT; i++) {
-          setLed((Color)i, false);
-        }
-
-        // Calculate personalized game over message based on difficulty and score
+      if (audio.isDone()) {
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
         uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
-
-        // Add delay to allow DFPlayer to finish previous audio before playing Game Over
-        delay(400);
-        audioFinished = false; // Reset flag before playing
         audio.playGameOver(gameOverMsg);
         stateTimer = now;
         gameState = GAME_OVER;
@@ -1222,22 +1084,11 @@ void game_tick() {
         }
       }
 
-      // Allow user to skip game over message by pressing any button, OR wait for audio completion
-      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
-      bool audioComplete = isAudioComplete(stateTimer, GAME_OVER_DURATION_MS);
-
-      if (buttonPressed || audioComplete) {
-        if (buttonPressed) {
-          Serial.println("Game over message skipped by user");
-          audio.stop();  // Stop audio playback immediately
-        }
-
-        patternPlayed = false;  // Reset for next game
-
-        // Personalized message finished, play general game over
-        delay(GAME_OVER_MESSAGE_DELAY_MS);  // Short delay between messages
-        audioFinished = false;
-        audio.playGeneralGameOver();
+      bool buttonPressed = anyButtonPressed();
+      if (buttonPressed || audio.isDone()) {
+        if (buttonPressed) Serial.println("Game over message skipped by user");
+        patternPlayed = false;
+        audio.playGeneralGameOver(); // _stopAndStart() handles clean transition (stop if skipped)
         stateTimer = now;
         gameState = GENERAL_GAME_OVER;
         Serial.println("Playing general game over message...");
@@ -1256,19 +1107,13 @@ void game_tick() {
         generalPatternStarted = true;
       }
 
-      // Allow user to skip general game over message by pressing any button, OR wait for audio completion
-      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
-      bool audioComplete = isAudioComplete(stateTimer, GAME_OVER_DURATION_MS);
-
-      if (buttonPressed || audioComplete) {
+      bool buttonPressed = anyButtonPressed();
+      if (buttonPressed || audio.isDone()) {
         if (buttonPressed) {
           Serial.println("General game over message skipped by user");
-          audio.stop();  // Stop audio playback immediately
+          audio.stop();
         }
-
-        generalPatternStarted = false;  // Reset for next game
-
-        // General game over finished, move to post-game invite
+        generalPatternStarted = false;
         Serial.printf("Game over! Final score: %d\n", game.score);
         gameState = POST_GAME_INVITE;
         stateTimer = now;
@@ -1277,15 +1122,11 @@ void game_tick() {
     }
 
     case POST_GAME_INVITE: {
-      // Allow user to skip post-game invite entirely by pressing any button
+      // GENERAL_GAME_OVER already waited for audio.isDone(), so we arrive here
+      // with audio finished. Play invite immediately; skip on button press.
       if (anyButtonPressed()) {
         Serial.println("Post-game invite skipped by user");
-        audio.stop();  // Stop any audio playback
-
-        // Reset delay flag and return to idle immediately
-        static bool delayStarted = false;
-        delayStarted = false;
-
+        audio.stop();
         scheduleNextInvite();
         ambientTimer = now;
         effectChangeTimer = now;
@@ -1294,31 +1135,14 @@ void game_tick() {
         break;
       }
 
-      // Add delay to ensure Game Over audio completes before playing invite
-      static bool delayStarted = false;
-      if (!delayStarted) {
-        stateTimer = now;
-        delayStarted = true;
-        Serial.printf("Waiting %lu ms before post-game invite...\n", POST_GAME_INVITE_DELAY_MS);
-        break;
-      }
-
-      // Wait configured delay before playing invite to ensure Game Over audio finishes
-      if (now - stateTimer < POST_GAME_INVITE_DELAY_MS) {
-        break;
-      }
-
-      // Play an invite message to encourage replay
-      audioFinished = false; // Reset flag before playing
       audio.playInvite();
-      inviteSequence(); // Visual invite
+      inviteSequence(); // Visual invite (blocking)
       Serial.println("Post-game invite: encouraging player to play again");
 
       // Now return to idle with ambient effects
       scheduleNextInvite();
       ambientTimer = now;
       effectChangeTimer = now;
-      delayStarted = false; // Reset flag for next time
       gameState = IDLE;
       Serial.println("Back to idle mode");
       break;
