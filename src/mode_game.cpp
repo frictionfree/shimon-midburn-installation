@@ -120,18 +120,22 @@ HardwareSerial dfPlayerSerial(1);
 DFRobotDFPlayerMini dfPlayer;
 
 struct Audio {
-  bool          initialized  = false;
-  bool          _finished    = true;
-  unsigned long _playStartMs = 0;
-  unsigned long _fallbackMs  = 0;
+  bool          initialized    = false;
+  bool          _finished      = true;
+  unsigned long _playStartMs   = 0;
+  unsigned long _fallbackMs    = 0;
+  unsigned long _ignoreUntilMs = 0;  // suppress stale events after stop()/play*()
 
   // Stop active playback and arm a new track's state.
   // Called by every play*() before issuing the DFPlayer command.
+  // _ignoreUntilMs suppresses the PlayFinished event that DFPlayer emits
+  // in response to the stop() call (arrives ~5-50 ms later).
   void _stopAndStart(unsigned long fallbackMs) {
     if (initialized) { dfPlayer.stop(); delay(20); }
-    _finished    = false;
-    _playStartMs = millis();
-    _fallbackMs  = fallbackMs;
+    _finished      = false;
+    _playStartMs   = millis();
+    _fallbackMs    = fallbackMs;
+    _ignoreUntilMs = millis() + 300; // ignore stale stop-response events
   }
 
   bool isDone() {
@@ -152,8 +156,13 @@ struct Audio {
     int     val  = dfPlayer.read();
     switch (type) {
       case DFPlayerPlayFinished:
-        // Accept any completion event — track-ID matching was silently dropping
-        // events when DFPlayer reported folder index instead of playback number.
+        if (millis() < _ignoreUntilMs) {
+          // Stale event from stop() call — DFPlayer always emits PlayFinished
+          // when stop() is issued. Suppress it so the new track isn't falsely completed.
+          Serial.printf("[AUDIO] Suppressed stale completion event (track %d, %lu ms after play)\n",
+                        val, millis() - _playStartMs);
+          break;
+        }
         Serial.printf("[AUDIO] Playback finished (track %d, elapsed %lu ms)\n",
                       val, millis() - _playStartMs);
         _finished = true;
