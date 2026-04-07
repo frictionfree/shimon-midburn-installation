@@ -24,7 +24,9 @@
 static constexpr uint32_t PHASE_A_LEVEL_MS       = 800;
 static constexpr uint32_t PHASE_A_TIMEOUT_MS      = 15000;
 static constexpr uint32_t PHASE_B_BTN_TOUT        = 5000;
-static constexpr uint32_t PHASE_B_MIN_VIS_MS      = 300;
+// Order: GREEN→RED→BLUE→YELLOW avoids conflicts with the BLUE press used to
+// enter Phase B and the BLUE press used to confirm Phase C_PROMPT afterward.
+static const Color phB_ORDER[4] = { GREEN, RED, BLUE, YELLOW };
 static constexpr uint32_t PHASE_C_PROMPT_MS       = 30000;
 static constexpr uint32_t PHASE_CD_LISTEN_MS      = 8000;
 static constexpr uint32_t PHASE_CD_NOMIDI_TOUT_MS = 30000;
@@ -185,6 +187,8 @@ static bool phA_tick() {
 static void phB_enter() {
   phB_wing = 0; phB_failed = 0;
   hw_led_all_off();
+  // Wait for all buttons to be released before starting (clears any held
+  // navigation press from the previous phase transition).
   unsigned long releaseStart = millis();
   bool anyHeld;
   do {
@@ -192,31 +196,34 @@ static void phB_enter() {
     for (int i = 0; i < 4; i++) anyHeld |= hw_btn_raw((Color)i);
   } while (anyHeld && millis() - releaseStart < 500UL);
   delay(50);
+  hw_btn_reset_edges();
   hw_btn_set_fast(true); // Quick taps are sufficient for button test
   diagTimer = millis();
+  Color first = phB_ORDER[0];
   Serial.println("[DIAG] Phase B: Buttons - press each lit button.");
-  Serial.printf("  Press %s...\n", hw_led_name(BLUE));
-  hw_led_duty(BLUE, 200);
+  Serial.printf("  Press %s...\n", hw_led_name(first));
+  hw_led_duty(first, 200);
 }
 static bool phB_tick() {
-  if (millis() - diagTimer < PHASE_B_MIN_VIS_MS) return false;
-  bool confirmed = hw_btn_edge((Color)phB_wing); // edge: quick tap is enough
+  Color wing = phB_ORDER[phB_wing];
+  bool confirmed = hw_btn_edge(wing); // quick tap is enough; no MIN_VIS delay needed
   bool timeout   = (millis() - diagTimer >= PHASE_B_BTN_TOUT);
   if (!confirmed && !timeout) return false;
-  hw_led_duty((Color)phB_wing, 0);
+  hw_led_duty(wing, 0);
   if (confirmed) {
-    Serial.printf("  %s: PASS\n", hw_led_name((Color)phB_wing));
-    hw_led_duty((Color)phB_wing, 235); delay(150); hw_led_duty((Color)phB_wing, 0);
+    Serial.printf("  %s: PASS\n", hw_led_name(wing));
+    hw_led_duty(wing, 235); delay(150); hw_led_duty(wing, 0);
   } else {
-    Serial.printf("  %s: FAIL (timeout)\n", hw_led_name((Color)phB_wing));
+    Serial.printf("  %s: FAIL (timeout)\n", hw_led_name(wing));
     phB_failed++;
   }
   phB_wing++;
   if (phB_wing >= 4) return true;
   delay(300);
   diagTimer = millis();
-  Serial.printf("  Press %s...\n", hw_led_name((Color)phB_wing));
-  hw_led_duty((Color)phB_wing, 200);
+  Color next = phB_ORDER[phB_wing];
+  Serial.printf("  Press %s...\n", hw_led_name(next));
+  hw_led_duty(next, 200);
   return false;
 }
 

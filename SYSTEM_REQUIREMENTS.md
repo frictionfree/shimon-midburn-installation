@@ -286,6 +286,9 @@ The hw layer requires **3 consecutive matching reads** before a PRESS is confirm
 - `hw_btn_set_fast(false)` called on every exit from `SEQ_INPUT` (correct, wrong, timeout)
 - `hw_btn_set_fast(true/false)` bracketing Phase B in diagnostic mode
 
+**Phase B button test order: GREEN → RED → BLUE → YELLOW**
+Starting with GREEN avoids auto-passing BLUE (the button used to navigate into Phase B). Ending with YELLOW avoids the YELLOW press conflicting with the BLUE confirmation in Phase C_PROMPT. The `phB_enter()` release-wait loop (up to 500 ms) clears any held buttons before the first LED lights, removing the need for a per-button minimum visibility delay.
+
 **SEQ_INPUT non-blocking release:** After a correct mid-sequence press, the wing LED stays on while the button is held and the input timeout is frozen. A non-blocking `awaitingRelease` flag replaces the former `while(hw_btn_raw()) { delay(10) }` loop — `hw_btn_update()` continues to run every tick so presses on other buttons are never missed.
 
 Releases are confirmed after 3 consistent reads with no hold-time requirement (no delay on release).
@@ -461,7 +464,7 @@ Any button press skips the current phase and advances to the next:
 |-------|----------------|-------|
 | A (LED cycling) | ✅ Any button | 200 ms window at phase start where presses are ignored |
 | A_CONFIRM | ✅ Any button | Detected via edge (first new press after A completes) |
-| B (Buttons) | ❌ Not available | All four buttons are under test; Phase B waits ≥300 ms after LED lights before accepting a press |
+| B (Buttons) | ❌ Not available | All four buttons are under test; no neutral button available for skip |
 | C_PROMPT | ✅ BLUE (primary) | **Edge only** — a BLUE button still held from Phase B cannot confirm instantly |
 | C (MIDI listen) | ✅ Any button | **Edge only** — a button held from C_PROMPT cannot skip Phase C with 0 bytes (would falsely FAIL) |
 | D (I2S) | ❌ Not available | 3 s blocking measurement; too short to warrant skip |
