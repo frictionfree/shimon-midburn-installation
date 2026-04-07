@@ -764,19 +764,15 @@ void game_init() {
   Serial.println("Starting boot sequence...");
   bootSequence();
 
-  // Initialize ambient/invite timers (used when returning to IDLE after game-over)
-  scheduleNextInvite();
+  // Start IDLE with first invite firing immediately (no delay).
+  // Subsequent invites use the normal random interval via scheduleNextInvite().
   unsigned long now = millis();
-  ambientTimer = now;
+  lastInvite    = now;
+  nextInviteDelay = 0;   // triggers invite on first IDLE tick
+  ambientTimer    = now;
   effectChangeTimer = now;
-
-  // Go straight to instructions — no IDLE wait after boot
-  audioFinished = false;
-  audio.playInstructions();
-  instructionsSequence();
-  stateTimer = millis();
-  gameState = INSTRUCTIONS;
-  Serial.println("Instructions playing...");
+  gameState = IDLE;
+  Serial.println("Press any button to start, or wait for invite...");
 }
 
 void game_tick() {
@@ -804,7 +800,8 @@ void game_tick() {
       // Debug invite timing
       static unsigned long lastDebug = 0;
       if (now - lastDebug > DEBUG_INTERVAL_MS) {
-        unsigned long remaining = nextInviteDelay - (now - lastInvite);
+        unsigned long elapsed = now - lastInvite;
+        unsigned long remaining = (elapsed < nextInviteDelay) ? (nextInviteDelay - elapsed) : 0;
         Serial.printf("IDLE: Invite in %lu seconds (Effect: %d)\n",
                       remaining / 1000, currentAmbientEffect);
         // RAW BUTTON DEBUG: Commented out to reduce clutter
