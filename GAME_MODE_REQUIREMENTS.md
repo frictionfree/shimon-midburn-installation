@@ -112,25 +112,34 @@ See `hardware-baseline.md` Section 6 for electrical details.
 The `Audio` class owns all playback state. Callers follow one rule: **call `audio.play*()` to start, call `audio.isDone()` to wait.**
 
 - **`play*()`** — stops any active track (`dfPlayer.stop()` + 20 ms), starts the new track, records `_playStartMs` and a per-message `_fallbackMs` timeout. Resets the finished flag internally. Callers never touch `audioFinished`.
+  - Exception: `playColorName()` is fire-and-forget — no stop, no state reset. SEQ_DISPLAY is timer-driven; DFPlayer handles track interruption natively.
+  - If DFPlayer is not initialized, `play*()` returns immediately with `_finished` left `true` — FSM continues without stalling (no fallback timeout wait).
 - **`audio.isDone()`** — returns `true` when `DFPlayerPlayFinished` is received (primary path) OR when the fallback timeout expires (logged as a warning — should be rare). No timeout constant needed at call sites.
-- **`audio.update()`** — called once per `game_tick()` to consume DFPlayer events. Accepts any `DFPlayerPlayFinished` event (track-ID matching removed — it silently dropped valid events when DFPlayer reported folder index instead of playback number).
+- **`audio.update()`** — called once per `game_tick()` to consume DFPlayer events:
+  - Accepts any `DFPlayerPlayFinished` event (track-ID matching removed).
+  - Suppresses stale stop-response events via `_ignoreUntilMs` (300 ms window after each `play*()`).
+  - Suppresses duplicate `DFPlayerPlayFinished` events for the same track within 50 ms (known DFPlayer hardware quirk).
+  - Handles `DFPlayerCardOnline` / `DFPlayerUSBOnline` / `DFPlayerCardUSBOnline` (module reset): re-applies volume, sets `_finished = true` to unblock waiting states.
 - **`audio.stop()`** — called on user interaction or mode exit to interrupt playback cleanly.
 
 ### Playback Rules
 
-- Every `play*()` calls `dfPlayer.stop()` internally before the new command — no inter-state `delay()` needed for audio transitions.
+- Every tracked `play*()` calls `dfPlayer.stop()` internally before the new command — no inter-state `delay()` needed for audio transitions.
 - FSM states do not pass timeout constants — fallback timeouts live inside `play*()` and are set generously (5–15 s) as a safety net, not as tuned estimates.
 - No blocking `delay()` calls in FSM states for audio purposes.
-- `POST_GAME_INVITE` plays its invite immediately upon entry — `GENERAL_GAME_OVER` already waited for `audio.isDone()` before transitioning.
+- `POST_GAME_INVITE` waits 2500 ms after entry before playing the invite, then plays immediately.
+- Invite variations use anti-repetition tracking (`lastInviteVar`) matching the pattern used by My Turn, Your Turn, and Correct feedback variations.
 
 ### DFPlayer Power Lifecycle
 
 | Event | Action |
 |-------|--------|
-| `game_init()` | `audio.begin()` → full `dfPlayer.begin()` init (wakes from sleep if applicable) |
-| `game_stop()` | `dfPlayer.sleep()` before `dfPlayerSerial.end()` — standby reduces heat in party/diagnostic modes |
+| `game_init()` | `audio.begin()` → 200 ms pre-init delay → `dfPlayer.begin()` with one retry on failure (handles wake-from-sleep) |
+| `game_stop()` | `audio.shutdown()` → stop → sleep → `dfPlayerSerial.end()` — standby reduces heat in party/diagnostic modes |
 
 DFPlayer draws ~45 mA in active/idle state. Sleeping it on exit is mandatory to prevent thermal issues when the system runs in party or diagnostic mode after game mode. See `SYSTEM_REQUIREMENTS.md §11` for the full cross-mode policy.
+
+**Wake-from-sleep reliability:** `audio.begin()` adds a 200 ms delay after opening the serial port before sending the init sequence, giving DFPlayer time to fully wake. If `dfPlayer.begin()` fails, one retry follows after a further 500 ms. Both attempts are logged.
 
 ---
 
@@ -380,6 +389,11 @@ See `SYSTEM_REQUIREMENTS.md` for:
 - ✅ 6s stall before general game over (fixed: stale `now` replaced with `millis()` after blocking patterns)
 - ✅ Invite plays immediately after game over (fixed: 2500ms cooldown in POST_GAME_INVITE)
 - ✅ Novice starts at 1-color sequence (fixed: all difficulties start at 3)
+- ✅ DFPlayer not initialized stalls FSM for 5-12s (fixed: `_stopAndStart()` fast-fail, `_finished` stays true)
+- ✅ Same invite variation can repeat back-to-back (fixed: `selectVariationWithFallback()` with `lastInviteVar`)
+- ✅ Duplicate `DFPlayerPlayFinished` events (fixed: 50 ms dedup window per track)
+- ✅ DFPlayer volume lost after power glitch (fixed: re-apply on `DFPlayerCardOnline`/`USBOnline` events)
+- ✅ DFPlayer restart failure after sleep (fixed: 200 ms pre-init delay + retry in `audio.begin()`)
 
 ---
 

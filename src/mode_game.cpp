@@ -45,9 +45,10 @@ struct GameState {
 bool ENABLE_AUDIO_CONFUSER = false; // Default: confuser mode OFF (configured automatically based on difficulty level)
 
 // --- Audio variation tracking (255 = none played yet) ---
-uint8_t lastMyTurn   = 255;
-uint8_t lastYourTurn = 255;
-uint8_t lastPositive = 255;
+uint8_t lastInviteVar = 255;
+uint8_t lastMyTurn    = 255;
+uint8_t lastYourTurn  = 255;
+uint8_t lastPositive  = 255;
 
 uint8_t selectVariationWithFallback(uint8_t base, uint8_t count, uint8_t& lastPlayed, const char* category) {
   if (count == 0) { Serial.printf("[AUDIO] No variations for %s\n", category); return base; }
@@ -121,18 +122,23 @@ HardwareSerial dfPlayerSerial(1);
 DFRobotDFPlayerMini dfPlayer;
 
 struct Audio {
-  bool          initialized    = false;
-  bool          _finished      = true;
-  unsigned long _playStartMs   = 0;
-  unsigned long _fallbackMs    = 0;
-  unsigned long _ignoreUntilMs = 0;  // suppress stale events after stop()/play*()
+  bool          initialized      = false;
+  bool          _finished        = true;
+  unsigned long _playStartMs     = 0;
+  unsigned long _fallbackMs      = 0;
+  unsigned long _ignoreUntilMs   = 0;   // suppress stale events after stop()/play*()
+  uint8_t       _lastFinishedTrack = 255; // dedup: track number of last PlayFinished
+  unsigned long _lastFinishedMs  = 0;   // dedup: when last PlayFinished was accepted
 
   // Stop active playback and arm a new track's state.
-  // Called by every play*() before issuing the DFPlayer command.
+  // Called by every tracked play*() before issuing the DFPlayer command.
+  // Early-returns if !initialized so _finished stays true — FSM continues
+  // without stalling rather than waiting on a 5-12s fallback timeout.
   // _ignoreUntilMs suppresses the PlayFinished event that DFPlayer emits
   // in response to the stop() call (arrives ~5-50 ms later).
   void _stopAndStart(unsigned long fallbackMs) {
-    if (initialized) { dfPlayer.stop(); delay(20); }
+    if (!initialized) return; // _finished stays true; isDone() returns immediately
+    dfPlayer.stop(); delay(20);
     _finished      = false;
     _playStartMs   = millis();
     _fallbackMs    = fallbackMs;
@@ -164,8 +170,25 @@ struct Audio {
                         val, millis() - _playStartMs);
           break;
         }
+        // Deduplicate: DFPlayer hardware sometimes fires PlayFinished twice for
+        // the same track within ~10ms. Accept only the first occurrence.
+        if ((uint8_t)val == _lastFinishedTrack && millis() - _lastFinishedMs < 50) {
+          Serial.printf("[AUDIO] Suppressed duplicate completion event (track %d)\n", val);
+          break;
+        }
         Serial.printf("[AUDIO] Playback finished (track %d, elapsed %lu ms)\n",
                       val, millis() - _playStartMs);
+        _lastFinishedTrack = (uint8_t)val;
+        _lastFinishedMs    = millis();
+        _finished = true;
+        break;
+      case DFPlayerCardOnline:
+      case DFPlayerUSBOnline:
+      case DFPlayerCardUSBOnline:
+        // DFPlayer reset (power glitch / brownout). Re-apply volume so playback
+        // continues at the correct level. Unblock any waiting FSM state.
+        Serial.println("[AUDIO] WARNING: DFPlayer reset detected — re-applying volume");
+        dfPlayer.volume(DFPLAYER_VOLUME);
         _finished = true;
         break;
       case DFPlayerError:          Serial.printf("[AUDIO] Error: %d\n", val);  break;
@@ -176,12 +199,17 @@ struct Audio {
 
   void begin() {
     dfPlayerSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
+    delay(200); // allow DFPlayer to wake from sleep before sending init sequence
     Serial.println("Initializing DFPlayer Mini...");
     if (!dfPlayer.begin(dfPlayerSerial)) {
-      Serial.println("DFPlayer Mini initialization failed! Check connections and SD card.");
-      return;
+      Serial.println("[AUDIO] DFPlayer init failed, retrying in 500ms...");
+      delay(500);
+      if (!dfPlayer.begin(dfPlayerSerial)) {
+        Serial.println("[AUDIO] DFPlayer initialization failed! Check connections and SD card.");
+        return;
+      }
     }
-    Serial.println("DFPlayer Mini initialized successfully");
+    Serial.println("[AUDIO] DFPlayer initialized successfully");
     dfPlayer.volume(DFPLAYER_VOLUME);
     dfPlayer.EQ(DFPLAYER_EQ);
     delay(100);
@@ -189,7 +217,7 @@ struct Audio {
   }
 
   void playInvite() {
-    uint8_t n = random(1, AUDIO_INVITE_COUNT + 1);
+    uint8_t n = selectVariationWithFallback(1, AUDIO_INVITE_COUNT, lastInviteVar, "Invite");
     _stopAndStart(10000);
     if (!initialized) return;
     dfPlayer.playMp3Folder(n);
