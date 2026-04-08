@@ -24,7 +24,7 @@ struct DifficultySettings {
 };
 
 const DifficultySettings difficultyConfigs[4] = {
-  {1, false, false, false},  // NOVICE (Blue) - starts at 1, extends cumulatively
+  {3, false, false, false},  // NOVICE (Blue) - starts at 3, extends cumulatively
   {3, true, false, false},   // INTERMEDIATE (Red) - confuser mode, starts at 3
   {3, false, true, false},   // ADVANCED (Green) - new sequence each turn, starts at 3
   {3, false, false, true}    // PRO (Yellow) - alternating LED/audio, starts at 3
@@ -1085,16 +1085,17 @@ void game_tick() {
         }
 
         patternPlayed = true;
-        patternTimer = now;
+        patternTimer = millis(); // millis() not 'now' — 'now' is stale after blocking pattern
       }
 
       // Continue diagonal cross pattern periodically during audio for low scores
-      if (!patternPlayed || (now - patternTimer > 2000)) {  // Every 2 seconds
+      // Use millis() for elapsed check to account for time spent inside blocking pattern calls
+      if (millis() - patternTimer > 2000) {
         bool goodScore = ((selectedDifficulty <= INTERMEDIATE && game.score >= 8) ||
                           (selectedDifficulty >= ADVANCED && game.score >= 10));
         if (!goodScore) {
           diagonalCrossPattern(1, 500);  // Calm, mellow pattern
-          patternTimer = now;
+          patternTimer = millis(); // millis() not 'now' — update after blocking call
         }
       }
 
@@ -1115,9 +1116,9 @@ void game_tick() {
       static unsigned long generalPatternTimer = 0;
       static bool generalPatternStarted = false;
 
-      if (!generalPatternStarted || (now - generalPatternTimer > 2400)) {  // Every 2.4 seconds (full rotation)
+      if (!generalPatternStarted || (millis() - generalPatternTimer > 2400)) {  // Every 2.4 seconds (full rotation)
         clockwiseRotation(1, 600);  // One slow, calm rotation
-        generalPatternTimer = now;
+        generalPatternTimer = millis(); // millis() not 'now' — 'now' is stale after 2400ms block
         generalPatternStarted = true;
       }
 
@@ -1136,8 +1137,10 @@ void game_tick() {
     }
 
     case POST_GAME_INVITE: {
-      // GENERAL_GAME_OVER already waited for audio.isDone(), so we arrive here
-      // with audio finished. Play invite immediately; skip on button press.
+      // Brief silent pause before invite so it doesn't play right on the back
+      // of the general game over message. stateTimer was set on entry.
+      const unsigned long POST_GAME_COOLDOWN_MS = 2500;
+
       if (anyButtonPressed()) {
         Serial.println("Post-game invite skipped by user");
         audio.stop();
@@ -1148,6 +1151,8 @@ void game_tick() {
         Serial.println("Back to idle mode (skipped)");
         break;
       }
+
+      if (now - stateTimer < POST_GAME_COOLDOWN_MS) break; // silent wait
 
       audio.playInvite();
       inviteSequence(); // Visual invite (blocking)

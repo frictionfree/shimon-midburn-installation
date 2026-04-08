@@ -27,12 +27,14 @@ Game Mode implements an interactive Simon Says memory game where players memoriz
 
 During difficulty selection, players choose by pressing a colored button:
 
-| Button | Difficulty | Description |
-|--------|------------|-------------|
-| **Blue** | Novice | Slowest timing, standard gameplay |
-| **Red** | Intermediate | Faster timing, audio confuser enabled |
-| **Green** | Advanced | Faster timing, no speed acceleration |
-| **Yellow** | Pro | Fastest timing, maximum challenge |
+| Button | Difficulty | Starting Length | Description |
+|--------|------------|-----------------|-------------|
+| **Blue** | Novice | 3 | Slowest timing, standard gameplay |
+| **Red** | Intermediate | 3 | Faster timing, audio confuser enabled |
+| **Green** | Advanced | 3 | Faster timing, no speed acceleration |
+| **Yellow** | Pro | 3 | Fastest timing, maximum challenge |
+
+All difficulties start with a sequence of 3 colors. A sequence shorter than 3 is trivial and confusing — no difficulty starts below this floor.
 
 ### Audio Confuser (Intermediate Only)
 
@@ -297,6 +299,8 @@ Four rotating effects, 30 seconds each:
 
 Same as idle invite sequence. Encourages replay.
 
+**Cooldown:** 2500ms silent pause after `GENERAL_GAME_OVER` completes before the invite plays. This prevents the invite from sounding rushed immediately after the game over message. Button press during cooldown skips directly to `IDLE`.
+
 ---
 
 ## 7. Timing Parameters
@@ -322,6 +326,11 @@ Same as idle invite sequence. Encourages replay.
 |-----------|-------|
 | First invite | 5 seconds |
 | Subsequent | 20-45 seconds (random) |
+| Post-game cooldown | 2500ms (before first post-game invite) |
+
+### Blocking Visual Pattern Constraint
+
+Visual patterns that use `delay()` internally (e.g. `diagonalCrossPattern`, `clockwiseRotation`, `sparkleBurstSequence`) must record their end time using `millis()` — not the stale `now` captured at the top of `game_tick()`. Failure to do so causes immediate re-triggering on the next tick because `now - timer` already exceeds the repeat threshold.
 
 ---
 
@@ -367,6 +376,10 @@ See `SYSTEM_REQUIREMENTS.md` for:
 - ✅ Audio cutoff (fixed with finish detection)
 - ✅ Button LED flash-only (fixed with hold detection)
 - ✅ No post-game prompt (fixed with POST_GAME_INVITE)
+- ✅ Confuser color names only first plays (fixed: `playColorName()` fire-and-forget)
+- ✅ 6s stall before general game over (fixed: stale `now` replaced with `millis()` after blocking patterns)
+- ✅ Invite plays immediately after game over (fixed: 2500ms cooldown in POST_GAME_INVITE)
+- ✅ Novice starts at 1-color sequence (fixed: all difficulties start at 3)
 
 ---
 
