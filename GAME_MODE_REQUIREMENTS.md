@@ -135,7 +135,7 @@ The `Audio` class owns all playback state. Callers follow one rule: **call `audi
 | Event | Action |
 |-------|--------|
 | `game_init()` | `audio.begin()` → 200 ms pre-init delay → `dfPlayer.begin()` with one retry on failure (handles wake-from-sleep) |
-| `game_stop()` | `audio.shutdown()` → stop → sleep → `dfPlayerSerial.end()` — standby reduces heat in party/diagnostic modes |
+| `game_stop()` | `audio.shutdown()` → stop playback → `dfPlayer.sleep()` → `dfPlayerSerial.end()` → sets `initialized=false` — standby reduces heat in party/diagnostic modes |
 
 DFPlayer draws ~45 mA in active/idle state. Sleeping it on exit is mandatory to prevent thermal issues when the system runs in party or diagnostic mode after game mode. See `SYSTEM_REQUIREMENTS.md §11` for the full cross-mode policy.
 

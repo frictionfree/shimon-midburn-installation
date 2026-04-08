@@ -307,6 +307,21 @@ struct Audio {
     if (initialized) dfPlayer.stop();
     _finished = true;
   }
+
+  // Full shutdown: stop playback, sleep module, close serial.
+  // Called by game_stop() so DFPlayer doesn't draw ~45mA in party/diag modes.
+  // Sets initialized=false so any stale play*() calls after shutdown are safe.
+  void shutdown() {
+    if (!initialized) return;
+    dfPlayer.stop();
+    delay(50);
+    dfPlayer.sleep();
+    delay(100);
+    dfPlayerSerial.end();
+    initialized = false;
+    _finished   = true;
+    Serial.println("[AUDIO] DFPlayer sleeping, serial closed.");
+  }
 } audio;
 #endif
 
@@ -1199,7 +1214,7 @@ void game_tick() {
 
 // ---- Mode interface ----
 void game_stop() {
-  audio.stop();
+  audio.shutdown(); // stop + sleep + serial end; begin() handles wake-from-sleep on next game_init()
   for (int i = 0; i < COLOR_COUNT; i++) {
     setLed((Color)i, false);
   }
