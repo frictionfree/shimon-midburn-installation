@@ -478,7 +478,7 @@ static void phE_enter() {
                 (unsigned)PHASE_E_TRACK, (unsigned long)(PHASE_E_TIMEOUT_MS / 1000));
 #ifndef USE_WOKWI
   DiagDfpSer.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
-  if (!diagDfp.begin(DiagDfpSer)) {
+  if (!diagDfp.begin(DiagDfpSer, true, true)) {
     Serial.println("  DFPlayer init FAILED. Possible causes: chip not powered, wiring fault, SD card missing or corrupt.");
     resultE = DR_FAIL;
   } else {
@@ -497,10 +497,7 @@ static bool phE_tick() {
   hw_led_duty(BLUE, ((millis() / 400) & 1) ? 180 : 0);
   if (hw_btn_edge(BLUE)) {
     hw_led_all_off();
-#ifndef USE_WOKWI
-    if (phE_dfpOk) diagDfp.stop();
-#endif
-    resultE = DR_PASS; return true;
+    resultE = DR_PASS; return true;  // cleanup handled by DS_PHASE_E case in diag_tick()
   }
   if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) {
     hw_led_all_off();
@@ -618,7 +615,7 @@ void diag_tick() {
       if (phE_tick()) {
         Serial.printf("  Phase E: %s\n", drStr(resultE));
 #ifndef USE_WOKWI
-        if (phE_dfpOk) diagDfp.stop();
+        if (phE_dfpOk) { diagDfp.stop(); phE_dfpOk = false; }
         DiagDfpSer.end();
 #endif
         printSummary();
@@ -655,6 +652,7 @@ void diag_stop() {
   hw_led_all_off();
 #ifndef USE_WOKWI
   DiagMidi.end();
+  if (phE_dfpOk) diagDfp.stop();
   DiagDfpSer.end();
 #endif
   i2s_driver_uninstall(DIAG_I2S_PORT);

@@ -134,12 +134,10 @@ The `Audio` class owns all playback state. Callers follow one rule: **call `audi
 
 | Event | Action |
 |-------|--------|
-| `game_init()` | `audio.begin()` → 200 ms pre-init delay → `dfPlayer.begin()` with one retry on failure (handles wake-from-sleep) |
-| `game_stop()` | `audio.shutdown()` → stop playback → `dfPlayer.sleep()` → `dfPlayerSerial.end()` → sets `initialized=false` — standby reduces heat in party/diagnostic modes |
+| `game_init()` | `audio.begin()` → `dfPlayer.begin(stream, true, true)` → sets volume + EQ → `initialized=true` |
+| `game_stop()` | `audio.shutdown()` → `dfPlayer.stop()` → sets `initialized=false` |
 
-DFPlayer draws ~45 mA in active/idle state. Sleeping it on exit is mandatory to prevent thermal issues when the system runs in party or diagnostic mode after game mode. See `SYSTEM_REQUIREMENTS.md §11` for the full cross-mode policy.
-
-**Wake-from-sleep reliability:** `audio.begin()` adds a 200 ms delay after opening the serial port before sending the init sequence, giving DFPlayer time to fully wake. If `dfPlayer.begin()` fails, one retry follows after a further 500 ms. Both attempts are logged.
+DFPlayer draws ~45 mA in active/idle state and is left running across mode switches. Sleep mode was investigated but removed: the DFPlayer Mini's UART wake circuit is unreliable after `ESP.restart()` — a hardware MOSFET on VCC is required for reliable power-cycle-based sleep. A 10kΩ pull-up on GPIO17 (ESP32 TX → DFPlayer RX) is installed to keep the line HIGH during UART reassignment and restarts.
 
 ---
 
@@ -393,7 +391,7 @@ See `SYSTEM_REQUIREMENTS.md` for:
 - ✅ Same invite variation can repeat back-to-back (fixed: `selectVariationWithFallback()` with `lastInviteVar`)
 - ✅ Duplicate `DFPlayerPlayFinished` events (fixed: 50 ms dedup window per track)
 - ✅ DFPlayer volume lost after power glitch (fixed: re-apply on `DFPlayerCardOnline`/`USBOnline` events)
-- ✅ DFPlayer restart failure after sleep (fixed: 200 ms pre-init delay + retry in `audio.begin()`)
+- ✅ DFPlayer restart failure after mode switch (investigated sleep/wake — removed in favour of always-on; MOSFET on VCC needed for true power management)
 
 ---
 

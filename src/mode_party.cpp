@@ -1472,16 +1472,9 @@ void party_init() {
   for (int f = 0; f < 2; f++) { hw_led_all_set(on); delay(150); hw_led_all_set(off4); delay(100); }
 
 #ifndef USE_WOKWI
-  // DFPlayer unused in party mode but draws ~45 mA. Sleep it before MIDI
-  // takes UART1. isACK=false, doReset=false avoids any blocking handshake.
-  {
-    DFRobotDFPlayerMini tmpDfp;
-    MidiSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
-    tmpDfp.begin(MidiSerial, false, false);
-    tmpDfp.stop(); delay(50); tmpDfp.sleep(); delay(100);
-    MidiSerial.end();
-    Serial.println("[PARTY] DFPlayer sleeping.");
-  }
+  // DFPlayer is left running during party mode (~45mA).
+  // Sleep mode was removed — reliable wake-from-sleep via UART requires
+  // hardware investigation (MOSFET on VCC) before re-enabling.
 #endif
   MidiSerial.begin(MIDI_BAUD_RATE, SERIAL_8N1, MIDI_PIN_RX, -1);
 

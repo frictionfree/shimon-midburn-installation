@@ -199,21 +199,16 @@ struct Audio {
 
   void begin() {
     dfPlayerSerial.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
-    delay(200); // allow DFPlayer to wake from sleep before sending init sequence
-    Serial.println("Initializing DFPlayer Mini...");
-    if (!dfPlayer.begin(dfPlayerSerial)) {
-      Serial.println("[AUDIO] DFPlayer init failed, retrying in 500ms...");
-      delay(500);
-      if (!dfPlayer.begin(dfPlayerSerial)) {
-        Serial.println("[AUDIO] DFPlayer initialization failed! Check connections and SD card.");
-        return;
-      }
+    Serial.println("[AUDIO] Waiting for DFPlayer ready...");
+    if (!dfPlayer.begin(dfPlayerSerial, true, true)) {
+      Serial.println("[AUDIO] DFPlayer initialization failed! Check connections and SD card.");
+      return;
     }
-    Serial.println("[AUDIO] DFPlayer initialized successfully");
     dfPlayer.volume(DFPLAYER_VOLUME);
     dfPlayer.EQ(DFPLAYER_EQ);
     delay(100);
     initialized = true;
+    Serial.println("[AUDIO] DFPlayer initialized.");
   }
 
   void playInvite() {
@@ -308,19 +303,13 @@ struct Audio {
     _finished = true;
   }
 
-  // Full shutdown: stop playback, sleep module, close serial.
-  // Called by game_stop() so DFPlayer doesn't draw ~45mA in party/diag modes.
-  // Sets initialized=false so any stale play*() calls after shutdown are safe.
   void shutdown() {
     if (!initialized) return;
     dfPlayer.stop();
     delay(50);
-    dfPlayer.sleep();
-    delay(100);
-    dfPlayerSerial.end();
     initialized = false;
     _finished   = true;
-    Serial.println("[AUDIO] DFPlayer sleeping, serial closed.");
+    Serial.println("[AUDIO] DFPlayer stopped (mode exit).");
   }
 } audio;
 #endif
@@ -1214,7 +1203,7 @@ void game_tick() {
 
 // ---- Mode interface ----
 void game_stop() {
-  audio.shutdown(); // stop + sleep + serial end; begin() handles wake-from-sleep on next game_init()
+  audio.shutdown();
   for (int i = 0; i < COLOR_COUNT; i++) {
     setLed((Color)i, false);
   }
