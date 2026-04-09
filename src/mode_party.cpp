@@ -296,6 +296,7 @@ static FailReason failReason = FAIL_NONE;
 // Presence tracking
 static bool seenAnyClock = false;
 static uint32_t lastClockUs = 0;
+static uint32_t noMidiStartMs = 0;  // set at party_init(); used for 60s no-MIDI timeout
 
 static bool seenAnyAudio = false;
 static uint32_t lastAudioUs = 0;
@@ -1484,13 +1485,30 @@ void party_init() {
 
   curBarForEvents = 0;
   curBeatForEvents = 0;
+  noMidiStartMs = millis();
 
   Serial.println("Ready. Baseline learns only on qualified STD bars; transitions only after BASELINE_READY.");
   Serial.println("Policy v8.1: DROP=Return-Impact; sanity=post-DROP kick verification (window-level); cancel returns to BREAK.");
 }
 
 void party_tick() {
-  processMidi();
+  processMidi(); // always runs — detects first MIDI tick and sets seenAnyClock
+
+  if (!seenAnyClock) {
+    // Waiting for MIDI clock: flash GREEN slowly (500ms on/off)
+    const uint32_t ms = millis();
+    hw_led_duty(GREEN, ((ms / 500) & 1) ? 180 : 0);
+
+    // No MIDI for 60s → return to mode selection
+    if (ms - noMidiStartMs >= 60000UL) {
+      Serial.println("[PARTY] No MIDI detected for 60s — returning to mode selection.");
+      party_stop();
+      delay(200);
+      ESP.restart();
+    }
+    return;
+  }
+
   processAudio();
   processFailureWatchdog();
   processButtons();

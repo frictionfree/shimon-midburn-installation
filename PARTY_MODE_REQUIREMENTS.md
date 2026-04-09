@@ -378,7 +378,22 @@ sub-bass-heavy tracks where kMeanR stays near baseline while kR remains low.
 
 ---
 
-## 7. Signal Presence & Failure Handling
+## 7. Party Mode Entry Behavior
+
+### MIDI Present on Entry
+Party mode starts immediately: `processMidi()` begins counting ticks, baseline learning starts, and the state machine activates on the first beat. No special handling needed.
+
+### No MIDI on Entry (Waiting State)
+If no MIDI clock is detected after mode selection:
+- **Visual:** GREEN LED flashes slowly (500ms on / 500ms off) as a waiting indicator
+- **Timeout:** If MIDI does not arrive within **60 seconds**, party mode calls `party_stop()` and returns to mode selection via `ESP.restart()`
+- **On MIDI arrival:** `processMidi()` sets `seenAnyClock = true` on the first received tick. The next `party_tick()` exits the waiting state and flows into normal processing — no re-init required
+
+**Implementation:** `processMidi()` always runs first in `party_tick()`. If `!seenAnyClock`, all downstream processing is skipped and the waiting visual + timeout are handled instead. Once `seenAnyClock` is set, the gate opens and normal party mode operation begins.
+
+---
+
+## 8. Signal Presence & Failure Handling
 
 | Condition | Classification | Action |
 |-----------|----------------|--------|
