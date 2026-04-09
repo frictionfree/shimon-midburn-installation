@@ -127,6 +127,7 @@ The `Audio` class owns all playback state. Callers follow one rule: **call `audi
 - Every tracked `play*()` calls `dfPlayer.stop()` internally before the new command — no inter-state `delay()` needed for audio transitions.
 - FSM states do not pass timeout constants — fallback timeouts live inside `play*()` and are set generously (5–15 s) as a safety net, not as tuned estimates.
 - No blocking `delay()` calls in FSM states for audio purposes.
+- No blocking LED visual sequences during invite or instructions playback — all visual patterns that used `delay()` internally (`inviteSequence`, `instructionsSequence`) have been removed. Audio plays non-blocking; ambient effects provide visual engagement in IDLE.
 - `POST_GAME_INVITE` waits 2500 ms after entry before playing the invite, then plays immediately.
 - Invite variations use anti-repetition tracking (`lastInviteVar`) matching the pattern used by My Turn, Your Turn, and Correct feedback variations.
 
@@ -270,16 +271,13 @@ Four rotating effects, 30 seconds each:
 
 **Trigger:** Timer expires
 
-**Visual:**
-1. Double flash: All LEDs flash twice
-2. Spinning chase: 8 spins through colors
-3. Final flash: All LEDs bright
+**Visual:** None — ambient effects continue uninterrupted. The blocking LED pattern (`inviteSequence`) was removed; it caused a ~3s input blackout during every invite, preventing players from pressing to start.
 
 ### Instructions Sequence
 
 **Trigger:** Button press from idle
 
-**Visual:** Alternating pairs (Red+Green ↔ Blue+Yellow)
+**Visual:** None — audio plays non-blocking. The blocking LED pattern (`instructionsSequence`) was removed; it caused a ~3.6s input blackout, preventing players from pressing to skip instructions.
 
 ### Sequence Display
 
@@ -304,7 +302,7 @@ Four rotating effects, 30 seconds each:
 
 ### Post-Game Invite
 
-Same as idle invite sequence. Encourages replay.
+Audio-only invite after game over. Encourages replay. No blocking LED pattern.
 
 **Cooldown:** 2500ms silent pause after `GENERAL_GAME_OVER` completes before the invite plays. This prevents the invite from sounding rushed immediately after the game over message. Button press during cooldown skips directly to `IDLE`.
 
@@ -392,6 +390,7 @@ See `SYSTEM_REQUIREMENTS.md` for:
 - ✅ Duplicate `DFPlayerPlayFinished` events (fixed: 50 ms dedup window per track)
 - ✅ DFPlayer volume lost after power glitch (fixed: re-apply on `DFPlayerCardOnline`/`USBOnline` events)
 - ✅ DFPlayer restart failure after mode switch (investigated sleep/wake — removed in favour of always-on; MOSFET on VCC needed for true power management)
+- ✅ Invite and instructions skip lag (~3s blackout) — blocking `inviteSequence()` and `instructionsSequence()` removed; `INSTRUCTIONS_MIN_DURATION_MS` guard removed; `stateTimer` now set with `millis()` at transition point
 
 ---
 

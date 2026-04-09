@@ -752,7 +752,6 @@ void game_tick() {
       // Check for invite timing
       if (now - lastInvite >= nextInviteDelay) {
         audio.playInvite();
-        inviteSequence(); // Visual invite!
         scheduleNextInvite();
         
         // Reset ambient effects after invite
@@ -768,8 +767,7 @@ void game_tick() {
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
         audio.playInstructions();
-        instructionsSequence(); // Visual instructions!
-        stateTimer = now;
+        stateTimer = millis();
         gameState = INSTRUCTIONS;
         Serial.println("Instructions playing...");
       }
@@ -777,32 +775,28 @@ void game_tick() {
     }
 
     case INSTRUCTIONS: {
-      // After 2 seconds, allow button press to select difficulty directly
-      const unsigned long INSTRUCTIONS_MIN_DURATION_MS = 2000;
-      bool minTimeElapsed = (now - stateTimer) >= INSTRUCTIONS_MIN_DURATION_MS;
-      bool buttonPressed = anyButtonPressed();  // Call only once to avoid consuming edge detection
+      // Any button press skips immediately (edge from the initial press is already consumed),
+      // or wait for audio to complete naturally.
+      bool buttonPressed = anyButtonPressed();
       bool audioComplete = audio.isDone();
 
-      // Check if user pressed button after minimum time OR audio completed
-      if ((minTimeElapsed && buttonPressed) || audioComplete) {
-        // Turn off all LEDs
+      if (buttonPressed || audioComplete) {
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
 
-        if (minTimeElapsed && buttonPressed) {
-          // User pressed button - use it to select difficulty directly
+        if (buttonPressed) {
+          // User pressed button — use it to select difficulty directly
           selectedDifficulty = (DifficultyLevel)lastButtonPressed;
-          audio.stop();  // Stop audio playback immediately
+          audio.stop();
 
           const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
           Serial.printf("Instructions skipped - Difficulty selected: %d (%s)\n", selectedDifficulty, difficultyNames[selectedDifficulty]);
 
-          // Play difficulty-specific instructions
           audio.playDifficultyInstructions(selectedDifficulty);
-          stateTimer = now;
+          stateTimer = millis();
           gameState = DIFFICULTY_INSTRUCTIONS;
         } else {
-          // Audio completed naturally - go to difficulty selection
-          stateTimer = now;
+          // Audio completed naturally — go to difficulty selection
+          stateTimer = millis();
           gameState = DIFFICULTY_SELECTION;
           Serial.println("Select difficulty: Press Blue/Red/Green/Yellow button");
         }
@@ -1187,7 +1181,6 @@ void game_tick() {
       if (now - stateTimer < POST_GAME_COOLDOWN_MS) break; // silent wait
 
       audio.playInvite();
-      inviteSequence(); // Visual invite (blocking)
       Serial.println("Post-game invite: encouraging player to play again");
 
       // Now return to idle with ambient effects
