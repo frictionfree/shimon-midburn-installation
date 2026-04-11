@@ -495,9 +495,16 @@ static void phE_enter() {
 static bool phE_tick() {
   if (resultE != DR_NONE) return true;
   hw_led_duty(BLUE, ((millis() / 400) & 1) ? 180 : 0);
-  if (hw_btn_edge(BLUE)) {
+  Color pressed;
+  if (hw_btn_any_edge(&pressed)) {
     hw_led_all_off();
-    resultE = DR_PASS; return true;  // cleanup handled by DS_PHASE_E case in diag_tick()
+    if (pressed == BLUE) {
+      resultE = DR_PASS;  // confirmed heard
+    } else {
+      Serial.println("  Skipped.");
+      // resultE stays DR_NONE — not penalised in summary
+    }
+    return true;
   }
   if (millis() - diagTimer >= PHASE_E_TIMEOUT_MS) {
     hw_led_all_off();
@@ -521,7 +528,7 @@ static void printSummary() {
   Serial.printf("  B (Buttons):    %s\n", drStr(resultB));
   Serial.printf("  C (MIDI Clock): %s\n", drStr(resultC));
   Serial.printf("  D (I2S Audio):  %s\n", drStr(resultD));
-  Serial.printf("  E (DFPlayer):   %s\n", drStr(resultE));
+  Serial.printf("  E (DFPlayer):   %s\n", resultE == DR_NONE ? "SKIP" : drStr(resultE));
   Serial.println("-----------------------------------------");
   diagOverallResult = anyFail ? DR_FAIL : (anyWarn ? DR_WARN : DR_PASS);
   Serial.println(anyFail ? "  OVERALL: FAIL" : (anyWarn ? "  OVERALL: WARN" : "  OVERALL: PASS"));
