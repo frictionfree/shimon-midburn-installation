@@ -141,7 +141,7 @@ static constexpr float BASELINE_UPDATE_TR_MAX = 1.10f;
 
 // -------------- CAND / BREAK / RECOVERY (policy) --------------
 static constexpr float KICK_GONE_KR_MAX = 0.60f;    // kR < 0.60 triggers CAND
-static constexpr int   CAND_MIN_BARS    = 1;        // minimum bars in CAND before BREAK eval
+static constexpr int   CAND_MIN_BARS    = 0;        // minimum bars in CAND before BREAK eval (0 = allow deep eval on entry bar)
 
 static constexpr float DEEP_BREAK_TR_MAX  = 0.55f;
 static constexpr float DEEP_BREAK_RMS_MAX = 0.80f;

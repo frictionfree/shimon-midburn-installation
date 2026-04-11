@@ -247,7 +247,7 @@ Rationale: prevents CAND when filtered/processed kicks are still clearly present
 Bass-heavy breaks still enter CAND since bass-only kMeanR (~0.65–0.75) is below the 1.05 cap.
 
 **CAND → BREAK (Deep Confirmation):**
-- After `CAND_MIN_BARS` (1)
+- After `CAND_MIN_BARS` (0) — deep eval begins on the CAND entry bar itself
 - Two consecutive bars with:
   - `kR < 0.40`
   - AND (`rR < 0.80` OR `tR < 0.55`)
@@ -333,7 +333,7 @@ sub-bass-heavy tracks where kMeanR stays near baseline while kR remains low.
 | `KICK_GONE_KR_MAX` | 0.60 | Kick impulsiveness threshold |
 | `CAND_KMEANR_MAX` | 1.05 | Kick band energy cap (blocks if groove clearly on) |
 | `KICK_GONE_CONFIRM_WINDOWS` | 4 (~300ms) | Window persistence |
-| `CAND_MIN_BARS` | 1 | Minimum bars in CAND before BREAK eval |
+| `CAND_MIN_BARS` | 0 | Minimum bars in CAND before BREAK eval (entry bar counts as first deep bar) |
 
 ### BREAK Confirmation
 
