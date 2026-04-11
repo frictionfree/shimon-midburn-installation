@@ -322,7 +322,8 @@ Audio-only invite after game over. Encourages replay. No blocking LED pattern.
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `SPEED_STEP` | 0.97 | Acceleration factor (every 3 levels) |
+| `SEQUENCE_SPEED_STEP` | 0.97 | Sequence display acceleration (every 3 levels) |
+| `INPUT_SPEED_STEP` | 0.97 | Input timeout acceleration (every 3 levels) |
 | `MAX_SAME_COLOR` | 2 | Max consecutive same colors |
 
 ### Invite Timing

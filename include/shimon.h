@@ -26,10 +26,8 @@ constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 
 // Button LEDs - HARDWARE-CONTROLLED (GPIOs UNUSED/RESERVED)
 // NOTE: Button LEDs are hardwired to mirror LED strips via MOSFET channels.
-// These GPIO assignments are RESERVED but not actively used by firmware.
 // Button LEDs automatically turn on/off when LED strips do (hardware-controlled).
 // NOTE: GPIO26 is now BTN_BLUE; GPIO32 is now I2S DATA; GPIO33 is now I2S BCLK.
-constexpr uint8_t BTN_LED_BLUE   = 25;  // RESERVED (was: Blue  button LED)
 
 // DFPlayer (Serial2)
 // (DFP_RX2 / DFP_TX2 removed — use DFPLAYER_RX / DFPLAYER_TX below)
@@ -120,11 +118,8 @@ constexpr uint8_t AUDIO_INSTRUCTIONS_BLUE = 12;     // Blue-themed instructions 
 constexpr uint8_t AUDIO_INSTRUCTIONS_RED = 13;      // Red-themed instructions (0013.mp3)
 constexpr uint8_t AUDIO_INSTRUCTIONS_GREEN = 14;    // Green-themed instructions (0014.mp3)
 constexpr uint8_t AUDIO_INSTRUCTIONS_YELLOW = 15;   // Yellow-themed instructions (0015.mp3)
-constexpr uint8_t AUDIO_MY_TURN = 7;             // "My Turn" announcement (0007.mp3) - Legacy, replaced by variations
-constexpr uint8_t AUDIO_YOUR_TURN = 8;           // "Your Turn" announcement (0008.mp3) - Legacy, replaced by variations
 constexpr uint8_t AUDIO_WRONG = 51;              // Wrong button press (0051.mp3)
 constexpr uint8_t AUDIO_TIMEOUT = 52;            // Timeout notification (0052.mp3)
-constexpr uint8_t AUDIO_CORRECT = 41;            // Positive feedback / Level complete - Legacy, replaced by variations (0041-0045.mp3)
 
 // Game Over Messages (personalized based on difficulty and score)
 constexpr uint8_t AUDIO_GAME_OVER_NOVICE_STRONG = 53;       // 0053.mp3 - Novice, score >= 8

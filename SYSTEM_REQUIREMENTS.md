@@ -412,18 +412,15 @@ Enter selected mode (Game / Party / Diagnostic)
 
 ## 11. DFPlayer Power Management
 
-DFPlayer Mini draws ~45 mA in its active/idle state (chip powered, no playback). Over a long party session or diagnostic run, this causes thermal issues. The chip supports a standby command (`sleep()`) that reduces consumption to ~5 mA.
+DFPlayer Mini draws ~45 mA in its active/idle state (chip powered, no playback). The chip supports a standby command (`sleep()`) that reduces consumption to ~5 mA, but this was investigated and removed (Task 8 / commit `f7d7d50`).
 
 ### Policy
 
-| Scenario | Action |
-|----------|--------|
-| Game mode exit (`game_stop()`) | `dfPlayer.sleep()` → `delay(100)` → `dfPlayerSerial.end()` |
-| Party mode entry (`party_init()`) | UART1 briefly mapped to DFPlayer pins → `sleep()` → UART1 released to MIDI |
-| Diagnostic mode entry (`diag_init()`) | `DiagDfpSer` briefly opened → `sleep()` → `DiagDfpSer.end()` (Phase E re-opens with full init) |
-| Game mode entry (`game_init()`) | `audio.begin()` → `dfPlayer.begin()` serves as wake-up (full re-initialization) |
+DFPlayer is **left always-on** across all mode switches. No sleep/wake cycles are used.
 
-**Implementation note:** Sleep commands in `party_init()` and `diag_init()` use `begin(stream, isACK=false, doReset=false)` to avoid any blocking handshake — the command bytes are sent immediately without waiting for chip acknowledgement.
+**Why sleep was removed:** The DFPlayer Mini's UART wake circuit is unreliable after `ESP.restart()`. The TX pin glitches during UART reassignment regardless of the pull-up on GPIO17, causing the chip to miss the wake command. A hardware MOSFET on VCC would be required for reliable power-cycle-based sleep — not currently implemented.
+
+**Mitigation:** A 10kΩ pull-up resistor on GPIO17 (ESP32 TX → DFPlayer RX) keeps the line HIGH during UART reassignment and restarts, preventing spurious commands.
 
 ---
 
