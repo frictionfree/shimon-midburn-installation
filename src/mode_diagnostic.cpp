@@ -146,6 +146,9 @@ static unsigned long phCD_nextBeatMs;
 static unsigned long phCD_beatOffMs;
 static bool          phCD_beatLedOn;
 
+// ---- Phase C_PROMPT ----
+static bool phCPrompt_skipCD;  // true = non-BLUE pressed → skip C+D, go straight to Phase E
+
 // ---- Phase E ----
 static bool phE_dfpOk;
 
@@ -231,19 +234,26 @@ static bool phB_tick() {
 // PHASE C_PROMPT — wait for operator to start music
 // =============================================================================
 static void phCPrompt_enter() {
+  phCPrompt_skipCD = false;
   hw_led_all_off();
   diagTimer = millis();
-  Serial.printf("[DIAG] Start music on mixer. Press BLUE when ready (auto in %lus).\n",
+  Serial.printf("[DIAG] Start music on mixer. Press BLUE when ready (auto in %lus). Any other button skips MIDI/I2S.\n",
                 (unsigned long)(PHASE_C_PROMPT_MS / 1000));
   hw_led_duty(BLUE, 80);
 }
 static bool phCPrompt_tick() {
   uint8_t duty = (uint8_t)(40.0f + 40.0f * sinf((float)(millis() % 1500) * 6.2832f / 1500.0f));
   hw_led_duty(BLUE, duty);
+  Color pressed;
   // Edge detection: BLUE held from Phase B cannot confirm instantly (bug fix)
-  if (hw_btn_edge(BLUE)) {
+  if (hw_btn_any_edge(&pressed)) {
     hw_led_all_off();
-    Serial.println("  BLUE pressed - starting music phases.");
+    if (pressed == BLUE) {
+      Serial.println("  BLUE pressed - starting music phases.");
+    } else {
+      Serial.println("  Skipped — MIDI/I2S not tested. Proceeding to Phase E.");
+      phCPrompt_skipCD = true;
+    }
     return true;
   }
   if (millis() - diagTimer >= PHASE_C_PROMPT_MS) {
@@ -526,8 +536,8 @@ static void printSummary() {
   Serial.println("\n========== DIAGNOSTIC SUMMARY ==========");
   Serial.printf("  A (LED PWM):    %s\n", drStr(resultA));
   Serial.printf("  B (Buttons):    %s\n", drStr(resultB));
-  Serial.printf("  C (MIDI Clock): %s\n", drStr(resultC));
-  Serial.printf("  D (I2S Audio):  %s\n", drStr(resultD));
+  Serial.printf("  C (MIDI Clock): %s\n", resultC == DR_NONE ? "SKIP" : drStr(resultC));
+  Serial.printf("  D (I2S Audio):  %s\n", resultD == DR_NONE ? "SKIP" : drStr(resultD));
   Serial.printf("  E (DFPlayer):   %s\n", resultE == DR_NONE ? "SKIP" : drStr(resultE));
   Serial.println("-----------------------------------------");
   diagOverallResult = anyFail ? DR_FAIL : (anyWarn ? DR_WARN : DR_PASS);
@@ -598,8 +608,13 @@ void diag_tick() {
 
     case DS_PHASE_C_PROMPT:
       if (phCPrompt_tick()) {
-        diagState = DS_PHASE_CD;
-        phCD_enter();
+        if (phCPrompt_skipCD) {
+          diagState = DS_PHASE_E;
+          phE_enter();
+        } else {
+          diagState = DS_PHASE_CD;
+          phCD_enter();
+        }
       }
       break;
 
