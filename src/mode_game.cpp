@@ -66,6 +66,16 @@ void sparkleBurstSequence(uint8_t sparkleCount, uint8_t delayMs);
 void diagonalCrossPattern(uint8_t cycles, uint16_t delayMs);
 void acceleratingChaseSequence();
 
+// Delay that keeps hw_btn_update() running so hw_btn_held_ms(YELLOW) accumulates
+// correctly during blocking visual patterns. Allows loop() to detect YELLOW 5s
+// reset as soon as the current step ends, instead of after the full pattern.
+static void delayPoll(uint16_t ms) {
+  uint32_t start = millis();
+  while ((uint32_t)(millis() - start) < ms) {
+    hw_btn_update();
+  }
+}
+
 // ---- Audio System ----
 // Design contract:
 //   play*()   — stop any active track, start new one, record fallback timeout internally
@@ -612,7 +622,7 @@ void clockwiseRotation(uint8_t cycles, uint16_t delayMs) {
   for (uint8_t cycle = 0; cycle < cycles; cycle++) {
     for (uint8_t i = 0; i < COLOR_COUNT; i++) {
       setLed(clockwiseOrder[i], true);
-      delay(delayMs);
+      delayPoll(delayMs);
       setLed(clockwiseOrder[i], false);
     }
   }
@@ -623,7 +633,7 @@ void sparkleBurstSequence(uint8_t sparkleCount, uint8_t delayMs) {
   for (uint8_t i = 0; i < sparkleCount; i++) {
     Color randomWing = (Color)random(0, COLOR_COUNT);
     setLed(randomWing, true);
-    delay(delayMs);
+    delayPoll(delayMs);
     setLed(randomWing, false);
   }
 }
@@ -633,20 +643,20 @@ void diagonalCrossPattern(uint8_t cycles, uint16_t delayMs) {
   for (uint8_t cycle = 0; cycle < cycles; cycle++) {
     // Top-left to bottom-right diagonal
     setLed(BLUE, true);
-    delay(delayMs);
+    delayPoll(delayMs);
     setLed(BLUE, false);
 
     setLed(GREEN, true);
-    delay(delayMs);
+    delayPoll(delayMs);
     setLed(GREEN, false);
 
     // Top-right to bottom-left diagonal
     setLed(RED, true);
-    delay(delayMs);
+    delayPoll(delayMs);
     setLed(RED, false);
 
     setLed(YELLOW, true);
-    delay(delayMs);
+    delayPoll(delayMs);
     setLed(YELLOW, false);
   }
 }
