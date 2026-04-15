@@ -8,6 +8,8 @@
 // Modify these values to customize the game experience without touching the main code.
 // =============================================================================
 
+#define SHIMON_VERSION "1.0"
+
 // Matches verified wiring as of Nov 2025 (Channel 1=Blue, 2=Red, 3=Green, 4=Yellow)
 
 // --- Hardware Pin Configuration ---

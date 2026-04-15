@@ -1,32 +1,4 @@
-/*
-  Shimon – Party Mode (I2S) + Ableton MIDI Clock (bar.beat logs) – Debug v8.1 + VISUALS v1
-  + Failure/MusicStop classifier (Clock-only loss / Audio-only loss / Simultaneous stop)
-
-  v8.1 focus: eliminate "short burst" false DROP positives.
-
-  DROP Detection = Return-Impact model (BREAK-only)
-  - DROP is detected ONLY in BREAK_CONFIRMED via:
-      Phase A: detect "Return Start" when kick returns vs BREAK floor (window-level)
-      Phase B: track peaks for a short window and classify:
-        DROP = high-impact return (kick strong + lift vs break floor)
-        otherwise: no DROP (return expires)
-
-  Sanity / anti-burst mechanism (SINGLE mechanism)
-  - REMOVED bar-level sanity check (RESTORE_RR_MIN) entirely.
-  - Added post-DROP kick verification (window-level, 75ms):
-      After DROP entry, require kick to stay present often enough within a short budget.
-      If verification fails -> cancel DROP back to BREAK (not STD).
-
-  Other policy behavior preserved:
-  - Baseline learns ONLY in STANDARD and only on qualified bars; frozen in CAND/BREAK/DROP.
-  - STANDARD -> CAND: kick absence mandatory (bar-level) + window persistence protection.
-  - CAND -> BREAK: after CAND_MIN_BARS, 2 consecutive deep bars.
-  - CAND -> STANDARD recovery: bar-level 1 bar meeting thresholds.
-  - BREAK -> STANDARD recovery: bar-level 1 bar meeting thresholds,
-      but blocked while returnActive==true to avoid stealing the return moment.
-  - BREAK floor updates only while in BREAK, and is FROZEN while returnActive==true.
-  - DROP duration: fixed DROP_BARS from onset, exit at bar boundary.
-*/
+// Shimon – Party Mode: I2S audio analysis + MIDI clock beat sync + visual pattern engine
 
 
 #include <Arduino.h>
@@ -1464,8 +1436,7 @@ static void processButtons() {
 
 // ---------------- MODE INTERFACE ----------------
 void party_init() {
-  Serial.println("\nShimon – Party Mode + MIDI Clock (Debug v8.1) + Visuals v1 + Failure/MusicStop\n");
-  Serial.printf("MEM baseKVar=0x%08X\n", (uint32_t)&baseKVar);
+  Serial.println("[PARTY] Entered Party Mode.");
 
   // Party mode splash: 2× all-wing pulse
   uint8_t on[4] = {180, 180, 180, 180};
@@ -1487,8 +1458,10 @@ void party_init() {
   curBeatForEvents = 0;
   noMidiStartMs = millis();
 
-  Serial.println("Ready. Baseline learns only on qualified STD bars; transitions only after BASELINE_READY.");
-  Serial.println("Policy v8.1: DROP=Return-Impact; sanity=post-DROP kick verification (window-level); cancel returns to BREAK.");
+  Serial.printf("[PARTY] MIDI: listening on pin %d at %d bps\n", MIDI_PIN_RX, MIDI_BAUD_RATE);
+  Serial.println("[PARTY] I2S: initialized.");
+  Serial.printf("[PARTY] Visual patterns: %d loaded.\n", PAT_COUNT);
+  Serial.println("[PARTY] Waiting for MIDI clock...");
 }
 
 void party_tick() {

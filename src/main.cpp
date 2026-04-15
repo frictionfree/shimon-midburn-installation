@@ -75,7 +75,7 @@ static TopMode runModeSelection() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n=== Shimon Integrated Firmware (Phase 3: Game + Party + Diagnostic) ===");
+  Serial.println("\n=== Shimon v" SHIMON_VERSION " ===");
   hw_led_init();
   hw_btn_init();
   Serial.println("[BOOT] Hardware init done. Entering mode selection.");
