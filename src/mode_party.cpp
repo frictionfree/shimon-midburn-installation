@@ -19,7 +19,11 @@ static bool clockLostLatched = false;
 static bool audioLostLatched = false;
 static uint32_t clockLostAtUs = 0;
 static uint32_t audioLostAtUs = 0;
-static bool prevBothPresent = false;
+
+// Audio-degraded mode: MIDI present but I2S signal absent.
+// Patterns continue (STD only); audio analysis frozen until signal recovers.
+static bool sysAudioDegraded   = false;
+static uint32_t audioDegradedSince = 0;
 
 // ---------------- STATE ----------------
 // ContextState enum is defined in party_patterns.h
@@ -33,7 +37,7 @@ static constexpr bool DEBUG_BEAT_LOG = false;
 // Set to true to log baseline updates and skips at every bar boundary.
 // Logs BASE_UPDATE (qualified bar + new baseline values + ratios)
 // and BASE_SKIP (rejected bar + skip reason) to track baseline development.
-static constexpr bool DEBUG_BASELINE_LOG = true;
+static constexpr bool DEBUG_BASELINE_LOG = false; // flip to true to log BASE_SKIP/BASE_UPDATE per bar
 
 // ---------------- VISUAL TUNABLES ----------------
 static constexpr uint8_t DEBUG_BRIGHT = 200;
@@ -273,8 +277,10 @@ static uint32_t noMidiStartMs = 0;  // set at party_init(); used for 60s no-MIDI
 static bool seenAnyAudio = false;
 static uint32_t lastAudioUs = 0;
 
-// Thresholds (tune later)
-static constexpr uint32_t CLOCK_LOSS_US = 600000;      // 0.6s
+// Thresholds
+// CLOCK_LOSS_US: 1.5s — DJM-900 can briefly drop MIDI during track transitions;
+// 600ms was too tight and caused false FAIL triggers in the field.
+static constexpr uint32_t CLOCK_LOSS_US = 1500000;     // 1.5s
 static constexpr uint32_t AUDIO_LOSS_US = 1500000;     // 1.5s
 static constexpr uint32_t STOP_COINCIDE_US = 1000000;  // 1.0s window
 static constexpr float    AUDIO_PRESENT_MIN_RMS = 0.004f;
@@ -335,19 +341,26 @@ static void visualsRender() {
       lastFailHbMs = ms;
       const uint32_t nowUs = micros();
       const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
-      if (failReason == FAIL_AUDIO_LOST) {
-        Serial.printf("NO_AUDIO bpm=%.1f clockAge_ms=%lu\n", currentBPM(), (unsigned long)clockAgeMs);
-      } else {
-        const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
-        Serial.printf("FAIL reason=%u clockAge_ms=%lu audioAge_ms=%lu ctx=%s\n",
-          (unsigned)failReason, (unsigned long)clockAgeMs, (unsigned long)audioAgeMs, ctxName(state));
-      }
+      const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
+      Serial.printf("FAIL_ACTIVE bpm=%.1f clockAge_ms=%lu audioAge_ms=%lu ctx=%s\n",
+        currentBPM(), (unsigned long)clockAgeMs, (unsigned long)audioAgeMs, ctxName(state));
     }
     const bool on = (ms % 1000) < 150;
     uint8_t req[4] = {0,0,0,0};
     req[RED] = on ? 200 : 0;
     hw_led_all_set(req);
     return;
+  }
+
+  // AUDIO_DEGRADED: patterns still running via MIDI; periodic reminder on serial
+  if (sysAudioDegraded) {
+    static uint32_t lastDegradedLogMs = 0;
+    const uint32_t ms = millis();
+    if ((uint32_t)(ms - lastDegradedLogMs) >= 4000) {
+      lastDegradedLogMs = ms;
+      Serial.printf("AUDIO_DEGRADED_ACTIVE bpm=%.1f pos=%lu.%u\n",
+        currentBPM(), (unsigned long)curBarForEvents, (unsigned)curBeatForEvents);
+    }
   }
 
   pp_render();
@@ -359,18 +372,6 @@ static void resetForHardReset();   // clears baseline
 static void resetForResumeLike();  // keeps baseline
 
 // ---------------- Party Mode helpers ----------------
-static void autoResyncIfRecovered(bool clockPresent, bool audioPresent) {
-  const bool bothPresent = clockPresent && audioPresent;
-  if (!prevBothPresent && bothPresent) {
-    logEvent("AUTO_RESYNC_BOTH_PRESENT");
-    sysMode = SYS_OK;
-    failReason = FAIL_NONE;
-
-    resetForResumeLike(); // keep baseline
-  }
-  prevBothPresent = bothPresent;
-}
-
 static void baselineInit(float rms, float tr, float kVar, float kMean) {
   baseRms = rms; baseTr = tr; baseKVar = kVar; baseKMean = kMean;
   baseInited = true;
@@ -548,6 +549,7 @@ static void onMonitorWindow(float winRms, float winTr, float winKVar) {
   if (!baselineReady) return;
   if (!baseInited) return;
   if (sysMode == SYS_FAIL) return;
+  if (sysAudioDegraded) return;
 
   // --- STD-only kick-absence persistence (prevents bar-average false CAND) ---
   if (state == STANDARD) {
@@ -658,6 +660,16 @@ static void onBarFinalized(uint32_t finalizedBarNumber, float rms, float tr, flo
   const float rR    = baseInited ? safeDiv(rms,   baseRms)   : 0.0f;
   const float tR    = baseInited ? safeDiv(tr,    baseTr)    : 0.0f;
   const float kR    = baseInited ? safeDiv(kVar,  baseKVar)  : 0.0f;
+
+  // Audio degraded: no valid I2S data — skip all analysis, hold state at STANDARD
+  if (sysAudioDegraded) {
+    state = STANDARD;
+    last_rR = last_tR = last_kR = 0.0f;
+    last_bfR = last_bfT = last_bfK = 0.0f;
+    last_hasBF = false;
+    last_stateForBar = STANDARD;
+    return;
+  }
 
   baselineMaybeInitAndUpdate(rms, tr, kVar, kMean, rR, tR, kR);
 
@@ -1021,6 +1033,9 @@ static void logBeatLine(uint32_t nowUs, bool isBarStart) {
 
 // ---------------- MIDI processing ----------------
 static void resetForHardReset() {
+  sysAudioDegraded   = false;
+  audioDegradedSince = 0;
+
   tickInBeat = 0;
   ticksSinceBeat = 0;
   barCount = 1;
@@ -1127,6 +1142,10 @@ static void doManualResync() {
 static void enterFailure(FailReason r) {
   if (sysMode == SYS_FAIL) return;
 
+  const uint32_t nowUs = micros();
+  const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
+  const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
+
   sysMode = SYS_FAIL;
   failReason = r;
 
@@ -1138,9 +1157,10 @@ static void enterFailure(FailReason r) {
   breakRecoveryBars = 0;
   candDeepStreak = 0;
 
-  if (r == FAIL_CLOCK_LOST) logEvent("FAIL_CLOCK_LOST");
-  else if (r == FAIL_AUDIO_LOST) logEvent("FAIL_AUDIO_LOST");
-  else logEvent("FAIL");
+  Serial.printf("EVENT FAIL reason=CLOCK_LOST pos=%lu.%u bpm=%.1f ctx=%s clockAge_ms=%lu audioAge_ms=%lu\n",
+    (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+    currentBPM(), ctxName(state),
+    (unsigned long)clockAgeMs, (unsigned long)audioAgeMs);
 }
 
 static void enterMusicStop() {
@@ -1148,6 +1168,8 @@ static void enterMusicStop() {
 
   sysMode = SYS_OK;
   failReason = FAIL_NONE;
+  sysAudioDegraded   = false;
+  audioDegradedSince = 0;
 
   midiRunning = false;
 
@@ -1155,8 +1177,9 @@ static void enterMusicStop() {
 
   seenAnyClock = false;
   seenAnyAudio = false;
-  lastClockUs = 0;
-  lastAudioUs = 0;
+  lastClockUs  = 0;
+  lastAudioUs  = 0;
+  noMidiStartMs = millis(); // reset 60s no-MIDI timer so re-connection has a full window
 }
 
 static void clearStopLatches() {
@@ -1167,72 +1190,105 @@ static void clearStopLatches() {
 }
 
 static void processFailureWatchdog() {
-  // Already in FAIL — nothing more to classify. Clear stale latches so they
-  // don't cause a spurious re-trigger on recovery, then bail out.
-  if (sysMode == SYS_FAIL) { clearStopLatches(); return; }
-
   const uint32_t nowUs = micros();
-
-  const uint32_t clockAgeMs = seenAnyClock ? (uint32_t)((nowUs - lastClockUs) / 1000) : 999999;
-  const uint32_t audioAgeMs = seenAnyAudio ? (uint32_t)((nowUs - lastAudioUs) / 1000) : 999999;
-
-  const bool clockLostNow = seenAnyClock && ((uint32_t)(nowUs - lastClockUs) > CLOCK_LOSS_US);
-  const bool audioLostNow = seenAnyAudio && ((uint32_t)(nowUs - lastAudioUs) > AUDIO_LOSS_US);
 
   const bool clockPresent = seenAnyClock && ((uint32_t)(nowUs - lastClockUs) <= CLOCK_LOSS_US);
   const bool audioPresent = seenAnyAudio && ((uint32_t)(nowUs - lastAudioUs) <= AUDIO_LOSS_US);
 
-  const bool bothPresent = clockPresent && audioPresent;
-  if (!prevBothPresent && bothPresent) {
-    logEvent("AUTO_RESYNC_BOTH_PRESENT");
-    sysMode = SYS_OK;
-    failReason = FAIL_NONE;
-    resetForResumeLike();
+  // --- Recovery from SYS_FAIL ---
+  // SYS_FAIL is only entered on MIDI clock loss. As soon as clock returns,
+  // auto-recover. Audio may still be degraded — handled below.
+  if (sysMode == SYS_FAIL) {
+    if (clockPresent) {
+      const uint32_t clockAgeMs = (uint32_t)((nowUs - lastClockUs) / 1000);
+      Serial.printf("EVENT AUTO_RESYNC pos=%lu.%u clockAge_ms=%lu audio=%s\n",
+        (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+        (unsigned long)clockAgeMs, audioPresent ? "OK" : "DEGRADED");
+      sysMode = SYS_OK;
+      failReason = FAIL_NONE;
+      clearStopLatches();
+      resetForResumeLike();
+      // fall through: check degraded state with current signal conditions
+    } else {
+      clearStopLatches();
+      return; // still waiting for MIDI
+    }
   }
-  prevBothPresent = bothPresent;
+
+  // --- Degraded mode: MIDI present but I2S audio absent ---
+  // Patterns continue (STD only); audio analysis is frozen.
+  const bool audioLostNow = seenAnyAudio && ((uint32_t)(nowUs - lastAudioUs) > AUDIO_LOSS_US);
+
+  if (!sysAudioDegraded && audioLostNow) {
+    sysAudioDegraded   = true;
+    audioDegradedSince = nowUs;
+    const uint32_t audioAgeMs = (uint32_t)((nowUs - lastAudioUs) / 1000);
+    Serial.printf("EVENT AUDIO_DEGRADED pos=%lu.%u audioAge_ms=%lu bpm=%.1f ctx=%s\n",
+      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+      (unsigned long)audioAgeMs, currentBPM(), ctxName(state));
+  }
+
+  if (sysAudioDegraded && audioPresent) {
+    const uint32_t degradedMs = (uint32_t)((nowUs - audioDegradedSince) / 1000);
+    Serial.printf("EVENT AUDIO_RECOVERED pos=%lu.%u degraded_ms=%lu\n",
+      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
+      (unsigned long)degradedMs);
+    sysAudioDegraded   = false;
+    audioDegradedSince = 0;
+    // Reset baseline for fast re-learning from the restored signal
+    baseInited = false;
+    baseRms = baseTr = baseKVar = baseKMean = 0.0f;
+    baselineReady = false;
+    baselineQualifiedBars = 0;
+  }
+
+  // --- MUSIC_STOP / FAIL_CLOCK_LOST detection ---
+  // Latch clock loss; also latch audio loss for coincidence window (MUSIC_STOP detection).
+  // Audio loss alone never triggers FAIL — it enters degraded mode instead (above).
+  const bool clockLostNow = seenAnyClock && ((uint32_t)(nowUs - lastClockUs) > CLOCK_LOSS_US);
 
   if (clockLostNow && !clockLostLatched) {
     clockLostLatched = true;
-    clockLostAtUs = nowUs;
-    Serial.printf("EVENT CLOCK_LOST_LATCH pos=%lu.%u age_ms=%lu ctx=%s\n",
+    clockLostAtUs    = nowUs;
+    const uint32_t clockAgeMs = (uint32_t)((nowUs - lastClockUs) / 1000);
+    Serial.printf("EVENT CLOCK_LOST_LATCH pos=%lu.%u age_ms=%lu bpm=%.1f ctx=%s\n",
       (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-      (unsigned long)clockAgeMs, ctxName(state));
+      (unsigned long)clockAgeMs, currentBPM(), ctxName(state));
   }
 
+  // Also latch audio loss purely for coincidence detection with clock loss
   if (audioLostNow && !audioLostLatched) {
     audioLostLatched = true;
-    audioLostAtUs = nowUs;
-    Serial.printf("EVENT AUDIO_LOST_LATCH pos=%lu.%u age_ms=%lu ctx=%s\n",
-      (unsigned long)curBarForEvents, (unsigned)curBeatForEvents,
-      (unsigned long)audioAgeMs, ctxName(state));
+    audioLostAtUs    = nowUs;
   }
 
-  if (!clockLostLatched && !audioLostLatched) return;
+  if (!clockLostLatched) {
+    // No clock loss pending — clear stale audio latch if present
+    if (audioLostLatched) { audioLostLatched = false; audioLostAtUs = 0; }
+    return;
+  }
 
+  // Clock is latched: check if audio also dropped within the coincidence window
   if (clockLostLatched && audioLostLatched) {
-    const uint32_t diff = (clockLostAtUs > audioLostAtUs) ? (clockLostAtUs - audioLostAtUs)
-                                                          : (audioLostAtUs - clockLostAtUs);
+    const uint32_t diff = (clockLostAtUs > audioLostAtUs)
+                          ? (clockLostAtUs - audioLostAtUs)
+                          : (audioLostAtUs - clockLostAtUs);
     if (diff <= STOP_COINCIDE_US) {
-      enterMusicStop();
+      enterMusicStop();   // both dropped together — music stopped cleanly
       clearStopLatches();
       return;
     }
-
-    if (clockLostAtUs < audioLostAtUs) enterFailure(FAIL_CLOCK_LOST);
-    else                               enterFailure(FAIL_AUDIO_LOST);
+    // Not coincident: clock was lost independently → FAIL
+    enterFailure(FAIL_CLOCK_LOST);
     clearStopLatches();
     return;
   }
 
-  const uint32_t latchedAt = clockLostLatched ? clockLostAtUs : audioLostAtUs;
-  if ((uint32_t)(nowUs - latchedAt) < STOP_COINCIDE_US) {
-    return;
+  // Only clock latched: wait up to STOP_COINCIDE_US to see if audio also drops
+  if ((uint32_t)(nowUs - clockLostAtUs) >= STOP_COINCIDE_US) {
+    enterFailure(FAIL_CLOCK_LOST); // audio didn't drop → pure MIDI loss
+    clearStopLatches();
   }
-
-  if (clockLostLatched) enterFailure(FAIL_CLOCK_LOST);
-  else                  enterFailure(FAIL_AUDIO_LOST);
-
-  clearStopLatches();
 }
 
 static void onMidiBeat() {
@@ -1496,13 +1552,15 @@ void party_stop() {
   MidiSerial.end();                  // release UART1 so Game Mode can use it for DFPlayer
 
   // Reset failure-tracking state not covered by resetForHardReset()
-  midiRunning      = false;
-  sysMode          = SYS_OK;
-  failReason       = FAIL_NONE;
-  seenAnyClock     = false;
-  seenAnyAudio     = false;
-  clockLostLatched = false;
-  audioLostLatched = false;
+  midiRunning        = false;
+  sysMode            = SYS_OK;
+  failReason         = FAIL_NONE;
+  sysAudioDegraded   = false;
+  audioDegradedSince = 0;
+  seenAnyClock       = false;
+  seenAnyAudio       = false;
+  clockLostLatched   = false;
+  audioLostLatched   = false;
 
   Serial.println("[PARTY] Mode stopped.");
 }
