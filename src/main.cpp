@@ -18,6 +18,13 @@
 //   RED    → Diagnostic Mode
 //   YELLOW → Stress Test Mode  (hold 5s → restart loop back to mode selection)
 
+static const char* uptimeStr() {
+  static char buf[16];
+  unsigned long s = millis() / 1000;
+  snprintf(buf, sizeof(buf), "%luh%02lum%02lus", s / 3600, (s % 3600) / 60, s % 60);
+  return buf;
+}
+
 // ---- Persistent state (survives SW restart; cleared to 0 on power-on) ----
 RTC_DATA_ATTR static uint8_t rtcBootIntent;     // 1 = enter mode selection on next boot
 RTC_DATA_ATTR static uint8_t rtcPassiveRetries; // counts passive-mode auto-restart attempts
@@ -48,7 +55,7 @@ static void enterPassiveMode(const char* reason) {
   passiveEnterMs = millis();
   snprintf(passiveReason, sizeof(passiveReason), "%s", reason);
   hw_led_all_off();
-  Serial.printf("[PASSIVE] Entering: %s\n", passiveReason);
+  Serial.printf("[PASSIVE] Entering at %s: %s\n", uptimeStr(), passiveReason);
   Serial.printf("[PASSIVE] Retry budget: %u/%u (auto-restart in %lu s)\n",
                 (unsigned)rtcPassiveRetries, (unsigned)PASSIVE_MAX_RETRIES,
                 (unsigned long)(PASSIVE_RETRY_INTERVAL_MS / 1000));
@@ -294,6 +301,16 @@ void loop() {
     game_stop();
     enterPassiveMode("DFPlayer unresponsive");
     return;
+  }
+
+  // Periodic uptime heartbeat (every 5 min)
+  static unsigned long lastUptimeLog = 0;
+  if (millis() - lastUptimeLog >= 300000UL) {
+    lastUptimeLog = millis();
+    const char* modeStr = (activeMode == STRESS_MODE) ? "stress"
+                        : (activeMode == DIAG_MODE)   ? "diag"
+                        :                               "game";
+    Serial.printf("[SYS] Uptime: %s  mode=%s\n", uptimeStr(), modeStr);
   }
 
   switch (activeMode) {
