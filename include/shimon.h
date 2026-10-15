@@ -223,6 +223,14 @@ constexpr unsigned long START_BURST_DELAY_MS = 100;         // Game start burst 
 // Do not modify anything below this line unless you understand the code structure
 // =============================================================================
 
+// --- System Health / Passive Mode ---
+constexpr uint32_t STUCK_BUTTON_MS           = 2000;    // button held at boot to trigger passive (ms)
+constexpr uint8_t  GHOST_STORM_COUNT         = 10;      // ghost clicks within window to trigger passive
+constexpr uint32_t GHOST_STORM_WINDOW_MS     = 30000;   // sliding window for ghost counting (ms)
+constexpr uint8_t  AUDIO_FAIL_THRESHOLD      = 3;       // consecutive audio timeouts → passive
+constexpr uint8_t  PASSIVE_MAX_RETRIES       = 3;       // auto-restart attempts from passive mode
+constexpr uint32_t PASSIVE_RETRY_INTERVAL_MS = 300000;  // interval between auto-restarts (ms, 5 min)
+
 // Internal derived constants (calculated from above settings)
 // Note: COLOR_COUNT is defined in hw.h as part of the Color enum
 constexpr uint8_t AMBIENT_EFFECT_COUNT = 4;

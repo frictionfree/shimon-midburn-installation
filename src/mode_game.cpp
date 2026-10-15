@@ -132,13 +132,14 @@ HardwareSerial dfPlayerSerial(1);
 DFRobotDFPlayerMini dfPlayer;
 
 struct Audio {
-  bool          initialized      = false;
-  bool          _finished        = true;
-  unsigned long _playStartMs     = 0;
-  unsigned long _fallbackMs      = 0;
-  unsigned long _ignoreUntilMs   = 0;   // suppress stale events after stop()/play*()
+  bool          initialized        = false;
+  uint8_t       consecutiveTimeouts = 0;  // increments on fallback timeout, resets on normal completion
+  bool          _finished          = true;
+  unsigned long _playStartMs       = 0;
+  unsigned long _fallbackMs        = 0;
+  unsigned long _ignoreUntilMs     = 0;   // suppress stale events after stop()/play*()
   uint8_t       _lastFinishedTrack = 255; // dedup: track number of last PlayFinished
-  unsigned long _lastFinishedMs  = 0;   // dedup: when last PlayFinished was accepted
+  unsigned long _lastFinishedMs    = 0;   // dedup: when last PlayFinished was accepted
 
   // Stop active playback and arm a new track's state.
   // Called by every tracked play*() before issuing the DFPlayer command.
@@ -158,8 +159,9 @@ struct Audio {
   bool isDone() {
     if (_finished) return true;
     if (millis() - _playStartMs > _fallbackMs) {
-      Serial.printf("[AUDIO] WARNING: timeout fallback fired after %lu ms — DFPlayer did not signal completion\n",
-                    millis() - _playStartMs);
+      consecutiveTimeouts++;
+      Serial.printf("[AUDIO] WARNING: timeout fallback fired after %lu ms (consecutive: %u)\n",
+                    millis() - _playStartMs, (unsigned)consecutiveTimeouts);
       _finished = true;
       return true;
     }
@@ -188,9 +190,10 @@ struct Audio {
         }
         Serial.printf("[AUDIO] Playback finished (track %d, elapsed %lu ms)\n",
                       val, millis() - _playStartMs);
-        _lastFinishedTrack = (uint8_t)val;
-        _lastFinishedMs    = millis();
-        _finished = true;
+        _lastFinishedTrack   = (uint8_t)val;
+        _lastFinishedMs      = millis();
+        _finished            = true;
+        consecutiveTimeouts  = 0;
         break;
       case DFPlayerCardOnline:
       case DFPlayerUSBOnline:
@@ -199,7 +202,8 @@ struct Audio {
         // continues at the correct level. Unblock any waiting FSM state.
         Serial.println("[AUDIO] WARNING: DFPlayer reset detected — re-applying volume");
         dfPlayer.volume(DFPLAYER_VOLUME);
-        _finished = true;
+        _finished           = true;
+        consecutiveTimeouts = 0;
         break;
       case DFPlayerError:          Serial.printf("[AUDIO] Error: %d\n", val);  break;
       case DFPlayerCardInserted:   Serial.println("[AUDIO] SD card inserted");  break;
@@ -217,7 +221,8 @@ struct Audio {
     dfPlayer.volume(DFPLAYER_VOLUME);
     dfPlayer.EQ(DFPLAYER_EQ);
     delay(100);
-    initialized = true;
+    initialized         = true;
+    consecutiveTimeouts = 0;
     Serial.println("[AUDIO] DFPlayer initialized.");
   }
 
@@ -1212,4 +1217,20 @@ void game_stop() {
   }
   gameState = IDLE;
   Serial.println("[GAME] Mode stopped.");
+}
+
+bool game_dfpOk() {
+#ifdef USE_WOKWI
+  return true;
+#else
+  return audio.initialized;
+#endif
+}
+
+uint8_t game_audioFailCount() {
+#ifdef USE_WOKWI
+  return 0;
+#else
+  return audio.consecutiveTimeouts;
+#endif
 }
