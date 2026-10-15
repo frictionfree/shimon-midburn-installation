@@ -1,10 +1,12 @@
 /*
-  Stress Test Mode - hardware endurance and ghost-click monitoring
+  Stress Test Mode - hardware endurance and button activity monitoring
   - Rotates LEDs continuously (BLUE→RED→GREEN→YELLOW, 500ms each)
   - Plays a random DFPlayer track every 15 s
   - Logs initial and final button states
-  - Detects ghost clicks: raw GPIO LOW that never reaches debounced press
-  - Logs legitimate presses (debounce-confirmed) separately
+  - Logs ALL raw button activity at resolution with uptime timestamp and duration:
+      GHOST = raw LOW resolved without debounce confirmation (EMI/coupling spike)
+      PRESS = raw LOW that reached debounce threshold (human tap or slow ghost)
+    Duration distinguishes real taps (>80ms) from slow ghosts (50-80ms range).
   - Hold any button >= 3 s to stop and print summary
 */
 
@@ -35,7 +37,7 @@ static uint8_t       ledIdx;
 static unsigned long ledTimer;
 static unsigned long audioTimer;
 
-// Ghost detection: track raw GPIO state vs debounced press state per channel
+// Per-channel raw tracking
 static bool          rawActive[4];
 static bool          becameDebounced[4];
 static unsigned long rawStartMs[4];
@@ -47,6 +49,14 @@ static bool                dfpOk;
 #endif
 
 static const Color COLS[4] = {BLUE, RED, GREEN, YELLOW};
+
+// Format a specific millis() value as uptime string (e.g. "1h05m23s")
+static const char* stressUptimeAt(unsigned long ms) {
+  static char buf[16];
+  unsigned long s = ms / 1000;
+  snprintf(buf, sizeof(buf), "%luh%02lum%02lus", s / 3600, (s % 3600) / 60, s % 60);
+  return buf;
+}
 
 static void logButtonStates(const char* label) {
   Serial.printf("[STRESS] %s: ", label);
@@ -71,19 +81,22 @@ static void printSummary() {
   Serial.println("\n========== STRESS TEST SUMMARY ==========");
   Serial.printf("  Duration:    %lu s\n", durMs / 1000);
   Serial.printf("  Audio plays: %lu\n", (unsigned long)audioCount);
-  Serial.println("  Button activity (ghost / legit press):");
+  Serial.println("  Button activity:");
+  Serial.println("    Channel  Ghost  Press");
   for (int i = 0; i < 4; i++) {
-    Serial.printf("    %s: %lu ghost  %lu legit\n",
+    Serial.printf("    %-7s  %-5lu  %lu\n",
                   hw_led_name(COLS[i]),
                   (unsigned long)ghostCount[i],
                   (unsigned long)legitCount[i]);
   }
+  Serial.println("  (PRESS dur <80ms may be a slow ghost that slipped debounce)");
   Serial.println("=========================================");
 }
 
 void stress_init() {
   Serial.println("\n=== STRESS TEST MODE ===");
   Serial.println("  LED rotation + DFPlayer audio. Hold any button 3s to stop.");
+  Serial.println("  All button events logged with uptime and duration.");
 
   memset(ghostCount,      0, sizeof(ghostCount));
   memset(legitCount,      0, sizeof(legitCount));
@@ -107,10 +120,10 @@ void stress_init() {
   Serial.println("  [SIM] DFPlayer skipped.");
 #endif
 
-  startMs    = millis();
-  ledIdx     = 0;
-  ledTimer   = millis();
-  audioTimer = millis();
+  startMs     = millis();
+  ledIdx      = 0;
+  ledTimer    = millis();
+  audioTimer  = millis();
   stressState = SS_RUNNING;
 
   hw_led_all_off();
@@ -135,6 +148,7 @@ void stress_tick() {
       logButtonStates("FINAL state");
       printSummary();
       stressState = SS_DONE;
+      hw_btn_reset_edges();  // prevent immediate restart from the hold edge
       Serial.println("[STRESS] Press any button to restart.");
       return;
     }
@@ -154,7 +168,9 @@ void stress_tick() {
     audioTimer = now;
   }
 
-  // Ghost + legitimate press detection
+  // Button activity: log ALL events at resolution with uptime-at-start + duration.
+  // GHOST = sub-debounce spike.  PRESS = debounce-confirmed (human or slow ghost).
+  // Duration context: real human taps are typically >80ms; 50-80ms is a suspicious zone.
   for (int i = 0; i < 4; i++) {
     bool raw       = hw_btn_raw(COLS[i]);
     bool debounced = hw_btn_pressed(COLS[i]);
@@ -168,23 +184,24 @@ void stress_tick() {
     } else {
       if (debounced) becameDebounced[i] = true;
       if (!raw) {
-        if (!becameDebounced[i]) {
+        unsigned long dur = now - rawStartMs[i];
+        if (becameDebounced[i]) {
+          legitCount[i]++;
+          Serial.printf("[STRESS] @%s  PRESS  %s  dur=%lums  press#%lu\n",
+                        stressUptimeAt(rawStartMs[i]), hw_led_name(COLS[i]),
+                        dur, (unsigned long)legitCount[i]);
+        } else {
           ghostCount[i]++;
-          Serial.printf("[STRESS] Ghost: %s  dur=%lums  total=%lu\n",
-                        hw_led_name(COLS[i]),
-                        now - rawStartMs[i],
-                        (unsigned long)ghostCount[i]);
+          Serial.printf("[STRESS] @%s  GHOST  %s  dur=%lums  ghost#%lu\n",
+                        stressUptimeAt(rawStartMs[i]), hw_led_name(COLS[i]),
+                        dur, (unsigned long)ghostCount[i]);
         }
         rawActive[i]       = false;
         becameDebounced[i] = false;
       }
     }
 
-    if (hw_btn_edge(COLS[i])) {
-      legitCount[i]++;
-      Serial.printf("[STRESS] Press: %s at %lums  total=%lu\n",
-                    hw_led_name(COLS[i]), now, (unsigned long)legitCount[i]);
-    }
+    hw_btn_edge(COLS[i]);  // consume edge to prevent accumulation in SS_DONE
   }
 }
 
