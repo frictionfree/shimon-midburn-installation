@@ -461,15 +461,6 @@ Service LED:               D2 (heartbeat)
 - **Purpose**: Native unit tests on development machine
 - **Usage**: `pio test -e native`
 
-#### **`[env:pattern_test]` - Visual Pattern Tester**
-- **Purpose**: Standalone 120 BPM visual pattern test — no audio, no MIDI, no game logic; drives LEDs only
-- **Source filter**: compiles only `hw.cpp`, `party_patterns.cpp`, `main_pattern_test.cpp`
-- **PatternID** integers are defined in `include/party_patterns.h` (new patterns appended to end of enum)
-- **Usage**: Edit `PATTERN_TEST=N` in `platformio.ini`, then:
-  ```bash
-  pio run -e pattern_test -t upload
-  pio device monitor -e pattern_test
-  ```
 
 ## Quick Reference for Testing
 
@@ -494,91 +485,6 @@ Service LED:               D2 (heartbeat)
 - **Confuser Mode**: Play Intermediate (Red) difficulty to see voice mismatch with LED
 - **Progression**: Complete several levels, notice increasing speed (except Advanced/Green)
 - **Error Handling**: Test wrong buttons, timeouts, and game over sequences
-
-## Visual Pattern Development
-
-### Party Patterns Architecture
-
-Visual patterns live in a **shared module** (`include/party_patterns.h` / `src/party_patterns.cpp`) used by both party mode (`mode_party.cpp`) and the standalone pattern tester (`main_pattern_test.cpp`). This means:
-
-- Patterns developed and validated in the tester work identically in production
-- No code duplication between test and production paths
-- New patterns are added once in `party_patterns.cpp` and available everywhere
-
-### `pp_*` Public API
-
-| Function | Description |
-|----------|-------------|
-| `pp_setContext(state, beatUs)` | Called before `pp_onBeat` each beat; sets brightness cap and crossfade timing |
-| `pp_onBeat(bar, beat)` | Beat event driver (bar 1–N, beat 1–4) |
-| `pp_onHalfBeat()` | Half-beat event (half-way between beats) |
-| `pp_render()` | Call every loop tick — handles BREAK crossfades and DROP shimmers |
-| `pp_setPattern(p)` | Pin a specific pattern (suppresses 8-bar round-robin; used by tester) |
-| `pp_selectForState(s)` | Round-robin pattern selection for a state (used by party mode) |
-| `pp_reset()` | Clear all visual state and turn off all LEDs |
-| `pp_activePattern()` | Return current `PatternID` |
-| `pp_patternName(p)` | Human-readable pattern name string |
-| `pp_ctxName(s)` | Human-readable `ContextState` name string |
-
-### Pattern Tester (`[env:pattern_test]`)
-
-Runs a single pattern at a fixed 120 BPM software clock. No MIDI, no audio, no game FSM — LED output only.
-
-Edit `PATTERN_TEST=N` in `platformio.ini`, then upload:
-
-```bash
-pio run -e pattern_test -t upload
-pio device monitor -e pattern_test
-```
-
-PatternID integers are defined in `include/party_patterns.h`.
-
-Serial output confirms the running pattern and beats:
-```
-=== Pattern Tester: Impact Chase at 120 BPM ===
-bar=1 beat=1
-bar=1 beat=2
-...
-```
-
-### Adding a New Pattern (Step-by-Step)
-
-1. **Write the pattern function** in `src/party_patterns.cpp`, following the existing structure:
-   - Use `setWing(color, duty)` to request LED output
-   - Use `clearRequests()` + `commitRequests()` for a hard-cut frame
-   - Patterns are driven by `pp_onBeat(bar, beat)` and `pp_onHalfBeat()` callbacks
-
-2. **Add the `PatternID`** to the enum in `include/party_patterns.h`:
-   ```cpp
-   PAT_STD_04 = 9,   // My New Pattern
-   PAT_COUNT  = 10   // always keep this last
-   ```
-
-3. **Add the pattern name** to `pp_patternName()` in `party_patterns.cpp`:
-   ```cpp
-   case PAT_STD_04: return "My New Pattern";
-   ```
-
-4. **Add the context mapping** to `ctxForPattern()` in `src/main_pattern_test.cpp` — use an **explicit `case`**, not a range comparison:
-   ```cpp
-   case PAT_STD_04: return STANDARD;
-   ```
-   > **Important:** Range comparisons (`p < PAT_BRK_01`) break if IDs are ever added out of order.
-
-5. **Add to the family array** in `party_patterns.cpp` (e.g. `stdPatterns[]`):
-   ```cpp
-   static const PatternID stdPatterns[] = { PAT_STD_01, PAT_STD_02, PAT_STD_03, PAT_STD_04 };
-   ```
-
-6. **Test with the pattern tester**: set `PATTERN_TEST=N` in `platformio.ini`, then:
-   ```bash
-   pio run -e pattern_test -t upload
-   pio device monitor -e pattern_test
-   ```
-
-7. **Ship**: Once validated, the pattern is automatically picked up by production — `mode_party.cpp` uses the same family arrays.
-
----
 
 ## Recent Changes & Implementation Notes
 
@@ -657,7 +563,6 @@ bar=1 beat=2
     - `bootSequence()` (rainbow wave splash) now starts immediately — reduces game mode entry from ~8 s to ~3 s
 
 12. **Mode-specific entry splashes**
-    - **Party mode**: 2× all-wing pulse (capped via `hw_led_all_set()`) — was nothing before
     - **Diagnostic mode**: BLUE blinks 2× — was nothing before
     - **Game mode**: existing `bootSequence()` unchanged
 
@@ -668,25 +573,7 @@ bar=1 beat=2
     - Removed dead code from `mode_party.cpp`: `GLOBAL_DUTY_CAP`, `applyGlobalCap()`, `writeWingDuty()`, `outDuty[]`, `allOff()`
     - Removed dead constants from `shimon.h`: `MAX_SIMULTANEOUS_WINGS_FULL_BRIGHTNESS`, `POWER_BUDGET_SAFETY_MARGIN`
 
-### Visual Pattern Engine + Pattern Tester (March 2026, Branch: `feat/party-mode-poc`)
-
-14. **`party_patterns.h/cpp` — Shared Visual Pattern Module**
-    - Extracted all 9 visual patterns from `mode_party.cpp` into a standalone shared module
-    - `ppPatternLocked` flag: set by `pp_setPattern()` to suppress 8-bar round-robin switching (used by tester); cleared by `pp_selectForState()` (used by party mode) and `pp_reset()`
-    - Pattern families: `stdPatterns[]`, `brkPatterns[]`, `drpPatterns[]` — round-robin indices are independent per family
-    - `ContextState` enum moved here from `mode_party.cpp`; `mode_party.cpp` now uses `pp_ctxName()` wrapper
-
-15. **`[env:pattern_test]` — Standalone Pattern Tester**
-    - Software 120 BPM clock (BEAT_US=500000µs, HALF_US=250000µs) — no MIDI required
-    - Pattern selected via `-D PATTERN_TEST=N` build flag; `ctxForPattern()` maps PatternID → ContextState with an explicit switch statement
-    - Source filter compiles only `hw.cpp`, `party_patterns.cpp`, `main_pattern_test.cpp` — no party/game/diag code
-
-16. **DRP-03 redesign — half-beat 16-step symmetrical cycle**
-    - Original: slow bar-based `numWings` increment (felt like a break pattern at live tempos)
-    - Redesigned: 16-step half-beat cycle `{1,2,3,4,4,3,2,1, 1,2,3,4,4,3,2,1}` — one full expansion + contraction per 8-bar window
-    - Hard LED clear (`clearRequests` + `commitRequests`) before each step transition to prevent smearing
-
-### Hardware Pin Consolidation + I2S Bug Fix (March 2026, Branch: `feat/party-mode-poc`)
+### Hardware Pin Consolidation (March 2026, Branch: `feat/party-mode-poc`)
 
 17. **ESP32 pin changes**
     - `BTN_BLUE`: GPIO 32 → GPIO 26
@@ -703,12 +590,9 @@ bar=1 beat=2
 - ✅ Audio messages getting cut off (fixed with finish detection)
 - ✅ No post-game prompt (fixed with POST_GAME_INVITE state)
 - ✅ Button LEDs flashing instead of staying on (fixed with hold detection)
-- ✅ Phase C MIDI FAIL when BLUE held from C_PROMPT (fixed with edge detection in hw.h)
 - ✅ DS_DONE spurious restart from PWM ghost clicks (fixed with edge detection in hw.h)
 - ✅ `selConfirmAnimation` and diag PASS exceeding PSU limit (fixed with `hw_led_all_set()`)
 - ✅ Redundant hw init calls in every mode (cleaned up — now only in `setup()`)
-- ✅ Pattern tester switching patterns after 8 bars (fixed with `ppPatternLocked` flag)
-- ✅ Diagnostic I2S Phase D WARN with music playing (stale pin constants fixed by shimon.h centralization)
 
 ### PlatformIO Access
 PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`
@@ -716,16 +600,14 @@ Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
 
 ## File Structure
 
-- `src/main.cpp`: Top-level mode selection FSM and loop dispatcher
+- `src/main.cpp`: Top-level mode selection FSM and loop dispatcher (BLUE=Game, RED=Diag, YELLOW=Stress)
 - `include/hw.h` + `src/hw.cpp`: **Shared hardware abstraction layer** — Color enum, LED PWM, button debounce
-- `include/shimon.h`: **Single source of truth** for all hardware pin assignments and tunable parameters — LED, button, I2S, MIDI, DFPlayer, PWM, game timing
-- `src/mode_game.cpp`: Simon Says game logic (~1050 lines)
-- `src/mode_party.cpp`: Party mode — I2S audio analysis, MIDI clock, beat-sync visuals
-- `src/mode_diagnostic.cpp`: 5-phase hardware diagnostic (LED / Buttons / MIDI / I2S / DFPlayer)
-- `src/mode_game.h`, `src/mode_party.h`, `src/mode_diagnostic.h`: Mode interface headers
-- `include/party_patterns.h` + `src/party_patterns.cpp`: **Visual pattern engine** — 9 beat-sync patterns (3 STD / 3 BRK / 3 DRP), `pp_*` API; shared by party mode and pattern tester
-- `src/main_pattern_test.cpp`: Standalone pattern tester (compiled only in `[env:pattern_test]` when `PATTERN_TEST` is defined)
-- `platformio.ini`: Build environments (sim, hardware, pattern_test, native testing)
-- `wokwi.toml` + `diagram.json`: Wokwi simulation configuration with proper pin connections
-- `CLAUDE.md`: This comprehensive documentation file
+- `include/shimon.h`: **Single source of truth** for all hardware pin assignments and tunable parameters
+- `src/mode_game.cpp`: Simon Says game logic
+- `src/mode_stress.cpp` + `src/mode_stress.h`: Stress test mode — LED rotation, DFPlayer audio, ghost-click monitoring
+- `src/mode_diagnostic.cpp` + `src/mode_diagnostic.h`: 3-phase diagnostic (A=LED / B=Buttons / E=DFPlayer)
+- `src/mode_game.h`: Game mode interface header
+- `platformio.ini`: Build environments (sim, hardware, hardware-com6)
+- `wokwi.toml` + `diagram.json`: Wokwi simulation configuration
+- `CLAUDE.md`: This documentation file
 - Standard PlatformIO directories (`lib/`, `test/`) currently unused

@@ -2,17 +2,17 @@
 #include "shimon.h"
 #include "hw.h"
 #include "mode_game.h"
-#include "mode_party.h"
+#include "mode_stress.h"
 #include "mode_diagnostic.h"
 
-// Shimon - Top-level orchestrator  (Phase 3: Game + Party + Diagnostic)
+// Shimon - Top-level orchestrator (Event: Game + Stress Test + Diagnostic)
 // Mode Selection (blocking, no timeout):
 //   BLUE  single press  -> Game Mode
-//   GREEN single press  -> Party Mode
+//   GREEN single press  -> Stress Test Mode
 //   RED   single press  -> Diagnostic Mode
 //   YELLOW hold >=5 s   -> Global Reset
 
-enum TopMode : uint8_t { GAME_MODE = 0, PARTY_MODE = 1, DIAG_MODE = 2 };
+enum TopMode : uint8_t { GAME_MODE = 0, STRESS_MODE = 1, DIAG_MODE = 2 };
 static TopMode activeMode = GAME_MODE;
 
 static void selConfirmAnimation() {
@@ -29,21 +29,21 @@ static void selConfirmAnimation() {
 
 static TopMode runModeSelection() {
   Serial.println("\n=== MODE SELECTION ===");
-  Serial.println("  BLUE  -> Game Mode");
-  Serial.println("  GREEN -> Party Mode");
-  Serial.println("  RED   -> Diagnostic Mode");
-  Serial.println("  YELLOW hold 5s -> Global Reset");
+  Serial.println("  BLUE   -> Game Mode");
+  Serial.println("  RED    -> Diagnostic Mode");
+  Serial.println("  YELLOW -> Stress Test Mode  (hold 5s = Global Reset)");
+  static const Color SEL_COLORS[] = {BLUE, RED, YELLOW};
   uint8_t rotSlot = 0;
-  hw_led_duty(BLUE, 180);
+  hw_led_duty(SEL_COLORS[0], 180);
   unsigned long ledTimer = millis();
   while (true) {
     unsigned long now = millis();
     hw_btn_update();
 
     if (now - ledTimer >= 1000UL) {
-      hw_led_duty((Color)rotSlot, 0);
-      rotSlot = (rotSlot + 1) % 3;  // cycles BLUE(0) → RED(1) → GREEN(2)
-      hw_led_duty((Color)rotSlot, 180);
+      hw_led_duty(SEL_COLORS[rotSlot], 0);
+      rotSlot = (rotSlot + 1) % 3;  // cycles BLUE → RED → YELLOW
+      hw_led_duty(SEL_COLORS[rotSlot], 180);
       ledTimer = now;
     }
 
@@ -54,14 +54,14 @@ static TopMode runModeSelection() {
     }
 
     Color pressed;
-    if (hw_btn_any_edge(&pressed) && pressed != YELLOW) {
+    if (hw_btn_any_edge(&pressed) && pressed != GREEN) {
       hw_led_all_off();
       TopMode sel;
       const char* nm;
       switch (pressed) {
-        case BLUE:  sel = GAME_MODE;   nm = "Game Mode";       break;
-        case RED:   sel = DIAG_MODE;   nm = "Diagnostic Mode"; break;
-        default:    sel = PARTY_MODE;  nm = "Party Mode";      break;
+        case BLUE:   sel = GAME_MODE;   nm = "Game Mode";        break;
+        case RED:    sel = DIAG_MODE;   nm = "Diagnostic Mode";  break;
+        default:     sel = STRESS_MODE; nm = "Stress Test Mode"; break;
       }
       Serial.printf("[MODE] %s selected.\n", nm);
       selConfirmAnimation();
@@ -81,8 +81,8 @@ void setup() {
   Serial.println("[BOOT] Hardware init done. Entering mode selection.");
   activeMode = runModeSelection();
   switch (activeMode) {
-    case PARTY_MODE: party_init(); break;
-    case DIAG_MODE:  diag_init();  break;
+    case STRESS_MODE: stress_init(); break;
+    case DIAG_MODE:   diag_init();  break;
     default:         game_init();  break;
   }
 }
@@ -93,16 +93,16 @@ void loop() {
   if (hw_btn_held_ms(YELLOW) >= 5000UL) {
     Serial.println("[SYS] Yellow 5s: global reset.");
     switch (activeMode) {
-      case PARTY_MODE: party_stop(); break;
-      case DIAG_MODE:  diag_stop();  break;
+      case STRESS_MODE: stress_stop(); break;
+      case DIAG_MODE:   diag_stop();  break;
       default:         game_stop();  break;
     }
     delay(200); ESP.restart();
   }
 
   switch (activeMode) {
-    case PARTY_MODE: party_tick(); break;
-    case DIAG_MODE:  diag_tick();  break;
+    case STRESS_MODE: stress_tick(); break;
+    case DIAG_MODE:   diag_tick();  break;
     default:         game_tick();  break;
   }
 }
