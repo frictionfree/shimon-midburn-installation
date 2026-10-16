@@ -20,11 +20,13 @@
 #include <DFRobotDFPlayerMini.h>
 #endif
 
-static constexpr uint32_t STRESS_LED_CYCLE_MS    = 500;
-static constexpr uint32_t STRESS_AUDIO_INTERVAL  = 15000;
-static constexpr uint32_t STRESS_HOLD_EXIT_MS    = 3000;
-static constexpr uint8_t  STRESS_AUDIO_MAX_TRACK = 5;
-static constexpr uint8_t  STRESS_AUDIO_VOL       = 20;
+static constexpr uint32_t STRESS_LED_CYCLE_MS        = 500;
+static constexpr uint32_t STRESS_AUDIO_INTERVAL      = 15000;
+static constexpr uint32_t STRESS_HOLD_EXIT_MS         = 3000;
+static constexpr uint8_t  STRESS_AUDIO_MAX_TRACK      = 5;
+static constexpr uint8_t  STRESS_AUDIO_VOL            = 20;
+static constexpr uint32_t STRESS_STUCK_FIRST_MS       = 500;   // log if raw LOW persists beyond this
+static constexpr uint32_t STRESS_STUCK_INTERVAL_MS    = 1000;  // repeat log every this many ms
 
 enum StressState : uint8_t { SS_RUNNING, SS_DONE };
 static StressState stressState;
@@ -41,6 +43,7 @@ static unsigned long audioTimer;
 static bool          rawActive[4];
 static bool          becameDebounced[4];
 static unsigned long rawStartMs[4];
+static unsigned long lastStuckLogMs[4];
 
 #ifndef USE_WOKWI
 static HardwareSerial      stressDfpSer(2);
@@ -102,6 +105,7 @@ void stress_init() {
   memset(legitCount,      0, sizeof(legitCount));
   memset(rawActive,       0, sizeof(rawActive));
   memset(becameDebounced, 0, sizeof(becameDebounced));
+  memset(lastStuckLogMs,  0, sizeof(lastStuckLogMs));
   audioCount = 0;
 
   logButtonStates("INITIAL state");
@@ -198,6 +202,17 @@ void stress_tick() {
         }
         rawActive[i]       = false;
         becameDebounced[i] = false;
+        lastStuckLogMs[i]  = 0;
+      } else {
+        // Periodic log if button stays LOW — catches stuck buttons before hold-exit fires
+        unsigned long elapsed = now - rawStartMs[i];
+        if (elapsed >= STRESS_STUCK_FIRST_MS) {
+          if (lastStuckLogMs[i] == 0 || now - lastStuckLogMs[i] >= STRESS_STUCK_INTERVAL_MS) {
+            lastStuckLogMs[i] = now;
+            Serial.printf("[STRESS] @%s  %s  still LOW  %lums\n",
+                          stressUptimeAt(rawStartMs[i]), hw_led_name(COLS[i]), elapsed);
+          }
+        }
       }
     }
 

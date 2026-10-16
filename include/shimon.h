@@ -167,9 +167,10 @@ constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must d
 // 15 ms is safe given hardware RC debouncing (10kΩ + 100nF per button); electrical
 // ghosts from MOSFET switching are sub-ms and are filtered by the RC network.
 // HW_BTN_GHOST_MS_FAST: hold time used in active-input states (SEQ_INPUT, diag Phase B).
-// 0 ms means only 3 consistent reads (~5-10 ms) are required — allows quick taps.
+// 10 ms compensates for faster loop speed vs original firmware; filters contact bounce
+// on release without affecting responsiveness (real taps last 50ms+).
 constexpr uint32_t HW_BTN_GHOST_MS_STANDARD = 15;  // Normal debounce hold (ms)
-constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 0;   // Fast-input debounce hold (ms)
+constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 20;  // Fast-input debounce hold (ms)
 
 // Visual Effects Settings
 constexpr unsigned long AMBIENT_EFFECT_DURATION_SEC = 30;  // Time per ambient effect

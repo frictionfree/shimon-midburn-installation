@@ -982,7 +982,7 @@ void game_tick() {
       static Color  releaseColor    = BLUE;
 
       if (awaitingRelease) {
-        if (!hw_btn_raw(releaseColor)) {
+        if (!hw_btn_pressed(releaseColor)) {
           setLed(releaseColor, false);
           stateTimer = millis(); // reset input timeout after release
           awaitingRelease = false;

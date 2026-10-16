@@ -278,12 +278,6 @@ void loop() {
     return;
   }
 
-  // Ghost storm monitor (game mode only)
-  if (activeMode == GAME_MODE) {
-    ghostMonitorTick();
-    if (sysHealth == PASSIVE) return;
-  }
-
   // Yellow 5s from any active mode → restart to mode selection
   if (hw_btn_held_ms(YELLOW) >= 5000UL) {
     Serial.println("[SYS] Yellow 5s: restarting to mode selection.");
