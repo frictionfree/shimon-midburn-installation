@@ -23,7 +23,10 @@ static DFRobotDFPlayerMini diagDfp;
 static bool                diagDfpOk;
 #endif
 
-static bool wasPressed[4];
+static bool          wasPressed[4];
+static bool          rawActive[4];
+static bool          rawDebounced[4];
+static unsigned long rawStartMs[4];
 
 static uint8_t colorAudioTrack(Color c) {
   switch (c) {
@@ -47,7 +50,9 @@ void diag_init() {
   Serial.println("  Press any button: LED on + color audio plays.");
   Serial.println("  Hold YELLOW 3s: return to mode selection.");
 
-  memset(wasPressed, 0, sizeof(wasPressed));
+  memset(wasPressed,    0, sizeof(wasPressed));
+  memset(rawActive,     0, sizeof(rawActive));
+  memset(rawDebounced,  0, sizeof(rawDebounced));
   hw_led_all_off();
   hw_btn_set_fast(true);
 
@@ -73,10 +78,33 @@ void diag_init() {
 }
 
 void diag_tick() {
-  for (int i = 0; i < 4; i++) {
-    Color c       = (Color)i;
-    bool  pressed = hw_btn_pressed(c);
+  unsigned long now = millis();
 
+  for (int i = 0; i < 4; i++) {
+    Color c        = (Color)i;
+    bool  raw      = hw_btn_raw(c);
+    bool  pressed  = hw_btn_pressed(c);
+
+    // Ghost monitoring: raw LOW that resolves without debounce confirmation
+    if (!rawActive[i]) {
+      if (raw) {
+        rawActive[i]    = true;
+        rawDebounced[i] = false;
+        rawStartMs[i]   = now;
+      }
+    } else {
+      if (pressed) rawDebounced[i] = true;
+      if (!raw) {
+        if (!rawDebounced[i]) {
+          Serial.printf("[DIAG] GHOST: %s  dur=%lums\n",
+                        hw_led_name(c), now - rawStartMs[i]);
+        }
+        rawActive[i]    = false;
+        rawDebounced[i] = false;
+      }
+    }
+
+    // Press / release logging
     if (hw_btn_edge(c)) {
       hw_led_duty(c, 200);
       Serial.printf("[DIAG] PRESS: %s\n", hw_led_name(c));
