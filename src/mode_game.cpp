@@ -515,16 +515,8 @@ bool anyButtonPressed() {
 }
 
 void scheduleNextInvite() {
-  // For testing: first invite sooner, then normal intervals
-  static bool firstInvite = true;
-  if (firstInvite) {
-    nextInviteDelay = FIRST_INVITE_DELAY_SEC * 1000; // First invite delay from config
-    firstInvite = false;
-    Serial.printf("First invite scheduled in %d seconds\n", FIRST_INVITE_DELAY_SEC);
-  } else {
-    nextInviteDelay = random(INVITE_INTERVAL_MIN_SEC * 1000, (INVITE_INTERVAL_MAX_SEC + 1) * 1000);
-    Serial.printf("Next invite scheduled in %lu seconds\n", nextInviteDelay / 1000);
-  }
+  nextInviteDelay = random(INVITE_INTERVAL_MIN_SEC * 1000, (INVITE_INTERVAL_MAX_SEC + 1) * 1000);
+  Serial.printf("Next invite scheduled in %lu seconds\n", nextInviteDelay / 1000);
   lastInvite = millis();
 }
 
