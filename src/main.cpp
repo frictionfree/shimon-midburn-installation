@@ -10,13 +10,13 @@
 // Shimon - Top-level orchestrator (Event: Game + Stress Test + Diagnostic)
 //
 // Boot behaviour:
-//   Power-on / crash  → auto-start Game Mode (no operator intervention needed)
-//   SW restart with rtcBootIntent==1 → Mode Selection (set by yellow 5s from any mode)
+//   Power-on / crash    → auto-start Game Mode (no operator intervention needed)
+//   Yellow held at boot → Mode Selection (hold Yellow until LEDs go off and menu appears)
 //
 // Mode Selection (blocking):
 //   BLUE   → Game Mode
 //   RED    → Diagnostic Mode
-//   YELLOW → Stress Test Mode  (hold 5s → restart loop back to mode selection)
+//   YELLOW → Stress Test Mode  (hold 3s → restart to game mode)
 
 static const char* uptimeStr() {
   static char buf[16];
@@ -26,7 +26,6 @@ static const char* uptimeStr() {
 }
 
 // ---- Persistent state (survives SW restart; cleared to 0 on power-on) ----
-RTC_DATA_ATTR static uint8_t rtcBootIntent;     // 1 = enter mode selection on next boot
 RTC_DATA_ATTR static uint8_t rtcPassiveRetries; // counts passive-mode auto-restart attempts
 
 // ---- Mode ----
@@ -68,11 +67,10 @@ static void passiveTick() {
   uint8_t duty = (uint8_t)(20.0f + 25.0f * sinf((float)(now % 3000) * 6.2832f / 3000.0f));
   hw_led_duty(RED, duty);
 
-  // Manual exit: yellow 5s → mode selection
+  // Manual exit: hold Yellow → mode selection (keep holding through reboot)
   if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
     hw_led_all_off();
-    Serial.println("[PASSIVE] Yellow 3s: manual exit to mode selection.");
-    rtcBootIntent = 1;
+    Serial.println("[PASSIVE] Yellow held: restarting to mode selection.");
     delay(200); ESP.restart();
   }
 
@@ -83,7 +81,6 @@ static void passiveTick() {
       hw_led_all_off();
       Serial.printf("[PASSIVE] Auto-restart attempt %u/%u — restarting to game mode.\n",
                     (unsigned)rtcPassiveRetries, (unsigned)PASSIVE_MAX_RETRIES);
-      rtcBootIntent = 0;
       delay(200); ESP.restart();
     }
     // Periodic status log (every 60 s)
@@ -177,11 +174,12 @@ static TopMode runModeSelection() {
       hw_led_duty(SEL_COLORS[rotSlot], 180);
       ledTimer = now;
     }
-    // Yellow 5s in mode selection → restart directly to game mode
+    // Yellow 3s in mode selection → restart to game mode
+    // Wait for release first so Yellow isn't held on the next boot
     if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
       hw_led_all_off();
       Serial.println("[SYS] Yellow 3s in mode selection: restarting to game mode.");
-      rtcBootIntent = 0;
+      while (hw_btn_raw(YELLOW)) delay(10);
       delay(200); ESP.restart();
     }
     Color pressed;
@@ -213,34 +211,36 @@ void setup() {
   hw_btn_init();
 
   esp_reset_reason_t resetReason = esp_reset_reason();
-  // Clear retry counter and intent on cold start or brownout
+  // Clear retry counter on cold start or brownout
   if (resetReason == ESP_RST_POWERON || resetReason == ESP_RST_BROWNOUT) {
     rtcPassiveRetries = 0;
-    rtcBootIntent     = 0;
     Serial.println("[BOOT] Cold start — passive retry counter cleared.");
   }
-  Serial.printf("[BOOT] Reset reason=%d  passiveRetries=%u  bootIntent=%u\n",
-                (int)resetReason, (unsigned)rtcPassiveRetries, (unsigned)rtcBootIntent);
-
-  // --- Stuck button check (before mode selection) ---
-  static char stuckBuf[40];
-  for (int i = 0; i < 4; i++) {
-    Color c = (Color)i;
-    unsigned long t = millis();
-    while (hw_btn_raw(c) && millis() - t < STUCK_BUTTON_MS) delay(10);
-    if (hw_btn_raw(c)) {
-      snprintf(stuckBuf, sizeof(stuckBuf), "Stuck button: %s", hw_led_name(c));
-      enterPassiveMode(stuckBuf);
-      return;  // loop() will run passiveTick() with activeMode at default GAME_MODE
-    }
-  }
+  Serial.printf("[BOOT] Reset reason=%d  passiveRetries=%u\n",
+                (int)resetReason, (unsigned)rtcPassiveRetries);
 
   // --- Mode decision ---
-  if (resetReason == ESP_RST_SW && rtcBootIntent == 1) {
-    rtcBootIntent = 0;
-    Serial.println("[BOOT] Mode selection restart.");
+  // Yellow held at boot → mode selection (user holds Yellow through the restart)
+  // Otherwise → stuck button check → auto-start Game Mode
+  if (hw_btn_raw(YELLOW)) {
+    Serial.println("[BOOT] Yellow held: entering mode selection.");
+    while (hw_btn_raw(YELLOW)) delay(10);  // wait for release
+    delay(50);
+    hw_btn_reset_edges();
     activeMode = runModeSelection();
   } else {
+    // --- Stuck button check ---
+    static char stuckBuf[40];
+    for (int i = 0; i < 4; i++) {
+      Color c = (Color)i;
+      unsigned long t = millis();
+      while (hw_btn_raw(c) && millis() - t < STUCK_BUTTON_MS) delay(10);
+      if (hw_btn_raw(c)) {
+        snprintf(stuckBuf, sizeof(stuckBuf), "Stuck button: %s", hw_led_name(c));
+        enterPassiveMode(stuckBuf);
+        return;
+      }
+    }
     activeMode = GAME_MODE;
     Serial.println("[BOOT] Auto-start: Game Mode.");
   }
@@ -280,13 +280,12 @@ void loop() {
 
   // Yellow 5s from any active mode → restart to mode selection
   if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
-    Serial.println("[SYS] Yellow 3s: restarting to mode selection.");
+    Serial.println("[SYS] Yellow held: restarting to mode selection.");
     switch (activeMode) {
       case STRESS_MODE: stress_stop(); break;
       case DIAG_MODE:   diag_stop();   break;
       default:          game_stop();   break;
     }
-    rtcBootIntent = 1;
     delay(200); ESP.restart();
   }
 
