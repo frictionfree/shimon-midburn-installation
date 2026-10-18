@@ -18,7 +18,7 @@ This document covers requirements specific to the game-only build. For game logi
 | Party mode | Full multi-wing pattern system | **Removed** |
 | Diagnostic | 3-phase (LED / Buttons / DFPlayer) | **Simplified — interactive button tester** |
 | Stress test | Basic LED rotation + passive button log | **Replaced — automated click simulation** |
-| Boot | Mode selection required | **Auto-boot to game mode** |
+| Boot | Mode selection required | **Auto-boot to game mode; Yellow held at boot → mode selection** |
 | Failure handling | None | **Passive mode with auto-restart** |
 | Yellow exit hold | 5 seconds | **3 seconds** |
 | Button debounce | HW_BTN_GHOST_MS_FAST = 0 ms | **20 ms** |
@@ -40,9 +40,14 @@ Three operating modes:
 | Reset type | Behavior |
 |------------|----------|
 | Cold start / brownout | Auto-boot directly to Game Mode (no operator action needed) |
-| SW restart with `rtcBootIntent = 1` | Enter Mode Selection screen |
+| Yellow held at boot | Enter Mode Selection screen |
+| Any other restart | Auto-boot to Game Mode |
 
-Mode Selection is only reachable via Yellow 3s hold from any active mode.
+**Entering Mode Selection:** Hold Yellow until the LEDs go off and the menu appears. No counting required — just hold until something happens. The 3s threshold triggers the restart; keeping Yellow held through the ~500ms reboot is what signals mode selection intent.
+
+**Yellow-at-boot detection:** `setup()` checks `hw_btn_raw(YELLOW)` immediately after `hw_btn_init()`. If held, waits for release then enters `runModeSelection()`. Stuck button check is skipped for Yellow in this path.
+
+**Implementation note:** `RTC_DATA_ATTR` boot intent flag was removed — it did not persist reliably through SW restart on this ESP32 chip. Yellow-held-at-boot is simpler and more reliable.
 
 ### Mode Selection
 
@@ -52,13 +57,13 @@ Mode Selection is only reachable via Yellow 3s hold from any active mode.
 | Red | Diagnostic Mode |
 | Yellow | Stress Test Mode |
 
-Yellow 5s during Mode Selection → restart directly to Game Mode.
+Yellow 3s during Mode Selection → waits for Yellow release, then restarts directly to Game Mode (Yellow released = not held at boot = auto-starts game).
 
 ### Universal Exit Gesture
 
-**Yellow held 3 seconds** from any active mode → stops the current mode, sets `rtcBootIntent = 1`, restarts to Mode Selection.
+**Hold Yellow until LEDs go off** from any active mode → stops the current mode, restarts. Keep holding through the reboot → Mode Selection appears.
 
-The 3-second hold applies everywhere: Game Mode, Diagnostic Mode, Stress Test Mode, and Passive Mode.
+The 3-second threshold applies everywhere: Game Mode, Diagnostic Mode, Stress Test Mode, and Passive Mode.
 
 ---
 
@@ -299,12 +304,13 @@ All constants in `include/shimon.h`.
 - ✅ Passive mode failure handler (stuck button, DFPlayer fail, audio timeout)
 - ✅ Button debounce fix: `HW_BTN_GHOST_MS_FAST = 20 ms`
 - ✅ Release detection fix: `awaitingRelease` uses `hw_btn_pressed()`
+- ✅ `YELLOW_EXIT_HOLD_MS = 3000` added to `shimon.h`, all exit points updated
+- ✅ Diagnostic mode rewrite — interactive button/LED/audio tester (§4)
+- ✅ Stress test rewrite — automated click simulation with ghost monitoring (§5)
+- ✅ Mode selection via Yellow-held-at-boot (replaces unreliable `rtcBootIntent`)
 
 ### Pending
 
-- ⬜ `YELLOW_EXIT_HOLD_MS` constant added to `shimon.h`, all exit points updated to 3s
-- ⬜ Diagnostic mode rewrite (§4)
-- ⬜ Stress test rewrite (§5)
 - ⬜ Click detection investigation and improvement (§6.2)
 - ⬜ Swap game levels 2 and 3 _(deferred — only if time permits and no risk to stability)_
 
