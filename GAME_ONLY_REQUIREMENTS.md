@@ -250,13 +250,13 @@ Yellow held 3s → `stress_stop()` (called by main loop) → logs final status +
 
 **Result:** Input quality reported as better than original firmware.
 
-### 6.2 Click Detection Improvement (Pending Investigation)
+### 6.2 Click Detection Improvement (Resolved)
 
-**Status:** Partially resolved by §6.1. Some false detections still observed in edge cases.
+**Status:** Resolved. Root cause was a defective microswitch in the BLUE arcade button.
 
-**Approach:** Use Diagnostic Mode (§4) to observe PRESS/RELEASE log events directly for each button. Test scenarios: slow tap, fast tap, hold-and-release, repeated rapid taps. Compare log timing against expected debounce behavior. Based on findings, tune `HW_BTN_GHOST_MS_FAST`, `HW_BTN_CONSISTENT`, or `awaitingRelease` logic.
+**Investigation (Diagnostic Mode):** Ghost monitoring in Diagnostic Mode (`[DIAG] GHOST:` log) was used to isolate the source. BLUE showed repeated ghosts of 2–19ms while RED/GREEN/YELLOW were clean. A GPIO swap test (rewiring BLUE↔YELLOW at the button box) confirmed the bounce traveled with the physical button, not the GPIO environment — ruling out PCB layout, trace coupling, and capacitor quality as factors.
 
-**Goal:** Zero false press or release events under normal human interaction patterns.
+**Fix:** Replaced the click mechanism (microswitch) in the BLUE arcade button. Post-replacement log showed one 0ms ghost across ~30 presses — within normal electrical noise levels, well below the 20ms threshold. `HW_BTN_GHOST_MS_FAST` remains at 20ms; no firmware change needed.
 
 ### 6.3 Ghost Storm Monitor
 
@@ -311,8 +311,11 @@ All constants in `include/shimon.h`.
 
 ### Pending
 
-- ⬜ Click detection investigation and improvement (§6.2)
 - ⬜ Swap game levels 2 and 3 _(deferred — only if time permits and no risk to stability)_
+
+### Done (additions)
+
+- ✅ Click detection investigation resolved — BLUE button microswitch replaced; 20ms debounce threshold confirmed sufficient (§6.2)
 
 ---
 
