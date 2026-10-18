@@ -67,11 +67,10 @@ static void playColorAudio(Color c) {
 #ifndef USE_WOKWI
   if (dfpOk) stressDfp.playMp3Folder(track);
 #endif
-  Serial.printf("[STRESS] AUDIO: %s (track %u)\n", hw_led_name(c), (unsigned)track);
 }
 
 static void logStatus() {
-  Serial.printf("[STRESS] Status @%s  clicks=%lu  ghosts: BLUE=%lu RED=%lu GREEN=%lu YELLOW=%lu\n",
+  Serial.printf("\n[STRESS ===] @%s  clicks=%lu  ghosts: BLUE=%lu RED=%lu GREEN=%lu YELLOW=%lu\n",
                 stressRuntime(), (unsigned long)clickCount,
                 (unsigned long)ghostCount[0], (unsigned long)ghostCount[1],
                 (unsigned long)ghostCount[2], (unsigned long)ghostCount[3]);
@@ -80,8 +79,8 @@ static void logStatus() {
 static void enterClick() {
   Color c = COLS[clickIdx];
   hw_led_duty(c, 200);
-  Serial.printf("[STRESS] CLICK START: %s  #%lu\n", hw_led_name(c), (unsigned long)(clickCount + 1));
   playColorAudio(c);
+  Serial.printf("[STRESS] #%lu  %s\n", (unsigned long)(clickCount + 1), hw_led_name(c));
   stateTimer  = millis();
   stressState = SS_CLICK_ACTIVE;
 }
@@ -176,10 +175,8 @@ void stress_tick() {
   switch (stressState) {
     case SS_CLICK_ACTIVE:
       if (now - stateTimer >= STRESS_CLICK_DURATION_MS) {
-        Color c = COLS[clickIdx];
-        hw_led_duty(c, 0);
+        hw_led_duty(COLS[clickIdx], 0);
         clickCount++;
-        Serial.printf("[STRESS] CLICK END:   %s  #%lu\n", hw_led_name(c), (unsigned long)clickCount);
         stateTimer  = now;
         stressState = SS_GAP;
       }

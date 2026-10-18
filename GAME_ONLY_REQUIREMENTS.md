@@ -223,16 +223,19 @@ Yellow held 3s → `stress_stop()` (called by main loop) → logs final status +
 
 ```
 === STRESS TEST MODE ===
-  Click: 1000ms on / 2000ms gap, order: BLUE→RED→GREEN→YELLOW.
+  Click: 1000ms on / 2000ms gap, order: BLUE->RED->GREEN->YELLOW.
   All button activity logged. Hold YELLOW 3s to exit.
   DFPlayer OK.
-[STRESS] CLICK START: BLUE  #1
-[STRESS] AUDIO: BLUE (track 61)
-[STRESS] CLICK END:   BLUE  #1
-[STRESS] CLICK START: RED  #2
+[STRESS] #1  BLUE
+[STRESS] #2  RED
+[STRESS] UNEXPECTED GHOST: YELLOW  dur=3ms  ghost#1  @0h00m09s
+[STRESS] #3  GREEN
 ...
-[STRESS] Status @0h10m00s  clicks=20  ghosts: BLUE=0 RED=0 GREEN=0 YELLOW=0
+
+[STRESS ===] @0h10m00s  clicks=80  ghosts: BLUE=0 RED=0 GREEN=0 YELLOW=1
 ```
+
+One line per click (`#N  COLOR`). Errors (`UNEXPECTED GHOST`, `UNEXPECTED PRESS`, `STUCK`) print inline. Status uses `[STRESS ===]` tag with a leading blank line to stand out when scrolling.
 
 ---
 
