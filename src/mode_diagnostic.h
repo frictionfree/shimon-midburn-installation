@@ -1,7 +1,7 @@
 #pragma once
 // Diagnostic Mode module interface.
-// Runs a 5-phase hardware verification sequence (LED / Buttons / MIDI / I2S / DFPlayer).
+// Interactive button/LED/audio tester: press any button to light its LED and play color audio.
 
-void diag_init();   // One-time setup: init LEDC, reset state, begin Phase A
-void diag_tick();   // Advances diagnostic state machine; call every loop() iteration
-void diag_stop();   // Release any open peripherals; reset state
+void diag_init();   // One-time setup: init DFPlayer, blink entry confirmation
+void diag_tick();   // Called every loop() iteration — handles press/release per button
+void diag_stop();   // Release peripherals, restore debounce mode

@@ -226,6 +226,7 @@ constexpr unsigned long START_BURST_DELAY_MS = 100;         // Game start burst 
 
 // --- System Health / Passive Mode ---
 constexpr uint32_t STUCK_BUTTON_MS           = 2000;    // button held at boot to trigger passive (ms)
+constexpr uint32_t YELLOW_EXIT_HOLD_MS       = 3000;    // yellow hold to exit to mode selection (ms)
 constexpr uint8_t  GHOST_STORM_COUNT         = 10;      // ghost clicks within window to trigger passive
 constexpr uint32_t GHOST_STORM_WINDOW_MS     = 30000;   // sliding window for ghost counting (ms)
 constexpr uint8_t  AUDIO_FAIL_THRESHOLD      = 3;       // consecutive audio timeouts → passive

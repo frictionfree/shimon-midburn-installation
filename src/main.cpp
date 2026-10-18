@@ -69,9 +69,9 @@ static void passiveTick() {
   hw_led_duty(RED, duty);
 
   // Manual exit: yellow 5s → mode selection
-  if (hw_btn_held_ms(YELLOW) >= 5000UL) {
+  if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
     hw_led_all_off();
-    Serial.println("[PASSIVE] Yellow 5s: manual exit to mode selection.");
+    Serial.println("[PASSIVE] Yellow 3s: manual exit to mode selection.");
     rtcBootIntent = 1;
     delay(200); ESP.restart();
   }
@@ -178,9 +178,9 @@ static TopMode runModeSelection() {
       ledTimer = now;
     }
     // Yellow 5s in mode selection → restart directly to game mode
-    if (hw_btn_held_ms(YELLOW) >= 5000UL) {
+    if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
       hw_led_all_off();
-      Serial.println("[SYS] Yellow 5s in mode selection: restarting to game mode.");
+      Serial.println("[SYS] Yellow 3s in mode selection: restarting to game mode.");
       rtcBootIntent = 0;
       delay(200); ESP.restart();
     }
@@ -279,8 +279,8 @@ void loop() {
   }
 
   // Yellow 5s from any active mode → restart to mode selection
-  if (hw_btn_held_ms(YELLOW) >= 5000UL) {
-    Serial.println("[SYS] Yellow 5s: restarting to mode selection.");
+  if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
+    Serial.println("[SYS] Yellow 3s: restarting to mode selection.");
     switch (activeMode) {
       case STRESS_MODE: stress_stop(); break;
       case DIAG_MODE:   diag_stop();   break;
