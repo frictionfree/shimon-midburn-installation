@@ -305,13 +305,27 @@ The interval is randomized so the installation does not sound like a fixed timer
 
 **Validated on hardware 2026-10-19.** The unused `FIRST_INVITE_DELAY_SEC` constant was then removed from `shimon.h`.
 
-### 6.5 Presses During Sequence Display (Open — Audio Content)
+### 6.5 Eager Input After Sequence Display (Resolved — validated on hardware 2026-10-19)
 
-**Observation:** Players press buttons while the sequence is still being displayed. Presses during `SEQ_DISPLAY` are silently ignored — input is only accepted from `SEQ_INPUT` onward (edges are reset at its start). "Your Turn" audio plays in the background at the start of `SEQ_INPUT`, so input is live as soon as the last cue ends.
+**Observation:** Most players start answering the moment the sequence ends, without waiting for "Your Turn". Previously input opened only after the last cue's trailing gap (`CUE_GAP_MS`, 250 ms), so a press in that window was discarded — and if the player then pressed the next color, it was judged against the first step → false "Wrong". Also, the first-press timeout started when the sequence ended, so "Your Turn" (~1–1.5 s) ate into the first press's time — penalizing players who wait as instructed.
 
-**Planned fix (no firmware change):** Re-record instructions track `0011.mp3` to tell players to watch the whole sequence and wait for "Your Turn" before pressing.
+**Design decision:** Instructions stay as-is — waiting for "Your Turn" is fine and preferred. But early answers must not be lost or punished.
 
-**Under discussion:** A visual cue marking the start of input (backup signal for players who don't hear the audio).
+**Behavior:**
+
+| Moment | Behavior |
+|--------|----------|
+| During sequence presentation (incl. last LED on) | Presses ignored (edges reset when input opens) |
+| Last cue's LED turns off | Presentation over → `SEQ_INPUT` starts immediately; presses count as part of the answer |
+| + one `CUE_GAP_MS` | "Your Turn" starts (same moment as before — avoids cutting off the last color name). **Skipped** if the player has already pressed. |
+| "Your Turn" finishes | First-press input timeout starts |
+| After each release | Timeout restarts for the next press (unchanged) |
+
+If the player answers before "Your Turn" finishes, the timeout starts on release of the first press.
+
+**Timeout values unchanged:** `INPUT_TIMEOUT_MS_DEFAULT = 3000`, ×0.97 every 3 levels (2910 ms at levels 3–5), min 1800 ms.
+
+**Implementation:** `mode_game.cpp` — `SEQ_DISPLAY` transitions on the last cue's LED-off; `SEQ_INPUT` uses `yourTurnPlayed` / `inputClockRunning` flags to defer "Your Turn" and gate the timeout.
 
 ### 6.6 Swap Difficulty Levels 2 and 3 (Planned — Blocked on Audio)
 
@@ -383,9 +397,11 @@ All constants in `include/shimon.h`.
 - ✅ Idle invite timing — second invite waits the full random interval; validated on hardware (§6.4)
 - ✅ Cleanup: removed unused `FIRST_INVITE_DELAY_SEC` and `POST_GAME_INVITE_DELAY_MS` from `shimon.h`; Mode Selection banner and comments now say 3 s (matches `YELLOW_EXIT_HOLD_MS`)
 
+- ✅ Eager input: input opens when the last cue ends; first-press timeout starts after "Your Turn"; validated on hardware (§6.5)
+
 ### Pending
 
-- ⬜ Re-record instructions `0011.mp3` — tell players to wait for "Your Turn" (§6.5); decide on visual input cue
+- ⬜ Fix `sim` build: simulation `Audio` stub lacks `shutdown()` (called by `game_stop()`)
 - ⬜ Re-record difficulty instructions `0013.mp3` / `0014.mp3`, then swap levels 2 and 3 (§6.6)
 
 ---

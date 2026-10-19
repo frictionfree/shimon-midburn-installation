@@ -104,8 +104,8 @@ The core game runs on a finite state machine (FSM) with these states:
 - `SEQ_DISPLAY_INIT`: Initialize new sequence
 - `SEQ_DISPLAY_MYTURN`: Playing "My Turn" audio
 - `SEQ_DISPLAY`: Show the sequence with LEDs and audio (button presses ignored)
-- `SEQ_DISPLAY_YOURTURN`: Unused — "Your Turn" plays in the background at the start of `SEQ_INPUT`
-- `SEQ_INPUT`: Wait for player input with timeout
+- `SEQ_DISPLAY_YOURTURN`: Unused — "Your Turn" plays in the background inside `SEQ_INPUT`
+- `SEQ_INPUT`: Input open from the last cue's LED-off; first-press timeout starts after "Your Turn" finishes
 - `CORRECT_FEEDBACK`: Playing correct feedback sound
 - `WRONG_FEEDBACK`: Playing wrong input sound
 - `TIMEOUT_FEEDBACK`: Playing timeout notification
@@ -319,7 +319,6 @@ Service LED:               D2 (heartbeat)
 **Audio**: `[AUDIO] Instructions -> /mp3/0011.mp3`  
 **Visual**: None (blocking pattern removed)  
 **Skip**: A button press during instructions selects that difficulty directly  
-**Pending**: `0011.mp3` re-record — tell players to wait for "Your Turn" before pressing
 
 ### **Difficulty Selection / Instructions**
 **Visual**: Clockwise LED rotation (400 ms per wing) while waiting for a choice  
@@ -359,14 +358,14 @@ Service LED:               D2 (heartbeat)
 - Gap of `CUE_GAP_MS` between cues (default 250ms, decreases each level)
 - Serial: `"Step X: LED=Y, Voice=Z (CONFUSER!)"` if colors differ
 
-**Input**: Button presses during the display are ignored (edges reset when `SEQ_INPUT` starts)
+**Input**: Button presses during the display are ignored. Input opens the moment the last cue's LED turns off (no trailing gap).
 
 #### **"Your Turn" Audio**
-**Audio**: `0031`-`0035` variation, played in the background as `SEQ_INPUT` starts — input is live immediately  
+**Audio**: `0031`-`0035` variation, started one `CUE_GAP_MS` after the last LED-off (so it doesn't cut the last color name); skipped if the player already pressed  
 **Visual**: All LEDs OFF
 
 ### **Player Input Phase**
-**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms), reset after each release
+**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms) per press — first press measured from the end of "Your Turn", later presses from the previous release
 **Audio**: "Your Turn" (background, at start only)
 **Visual**:
 - Wing LED flashes briefly on button press
@@ -505,9 +504,10 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **BLUE ghost clicks**: hardware — failing microswitch, replaced (see `hardware-baseline.md §5.2.1`).
 - **Idle invite timing** (`dc10342`): second invite no longer fires 5 s after the first (which truncated it); all subsequent invites wait 20-45 s.
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
+- **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
 
 **Pending:**
-- Re-record `0011.mp3` — tell players to wait for "Your Turn" (presses during display are ignored); maybe add a visual input cue
+- Fix `sim` build: simulation `Audio` stub lacks `shutdown()`
 - Re-record `0013`/`0014`, then swap Red/Green mechanics (confuser → Green/Advanced) — 2-line swap in `difficultyConfigs`
 
 ### Updates (November 2025)

@@ -70,9 +70,9 @@ In Intermediate difficulty, the spoken color name may differ from the displayed 
 | `AWAIT_START` | Waiting for button press to begin game |
 | `SEQ_DISPLAY_INIT` | Initialize new sequence |
 | `SEQ_DISPLAY_MYTURN` | Playing "My Turn" audio |
-| `SEQ_DISPLAY` | Show sequence with LEDs and audio — **button presses are ignored** |
-| `SEQ_DISPLAY_YOURTURN` | Unused — "Your Turn" now plays in the background at the start of `SEQ_INPUT` |
-| `SEQ_INPUT` | Wait for player input with timeout ("Your Turn" audio playing in background) |
+| `SEQ_DISPLAY` | Show sequence with LEDs and audio — **button presses are ignored**; ends when the last cue's LED turns off |
+| `SEQ_DISPLAY_YOURTURN` | Unused — "Your Turn" now plays in the background inside `SEQ_INPUT` |
+| `SEQ_INPUT` | Input accepted immediately; "Your Turn" plays one cue gap in (skipped if player already pressed); first-press timeout starts when "Your Turn" finishes |
 | `CORRECT_FEEDBACK` | Playing correct feedback sound |
 | `WRONG_FEEDBACK` | Playing wrong input sound |
 | `TIMEOUT_FEEDBACK` | Playing timeout notification |
@@ -98,7 +98,7 @@ AWAIT_START                          │
 SEQ_DISPLAY_INIT ◄───────────────────┘
   ↓
 SEQ_DISPLAY_MYTURN → SEQ_DISPLAY
-  ↓ (last cue done; "Your Turn" starts in background)
+  ↓ (last cue's LED off — input open; "Your Turn" follows in background)
 SEQ_INPUT
   ├─→ CORRECT_FEEDBACK → (next level) → SEQ_DISPLAY_INIT
   ├─→ WRONG_FEEDBACK → GAME_OVER
@@ -182,8 +182,7 @@ All files in `/mp3/` directory on SD card.
 | 0014.mp3 | Green/Advanced difficulty instructions |
 | 0015.mp3 | Yellow/Pro difficulty instructions |
 
-**Pending re-recordings** (see `GAME_ONLY_REQUIREMENTS.md §6.5–6.6`):
-- `0011.mp3` — add: watch the whole sequence and wait for "Your Turn" before pressing (presses during the display are ignored)
+**Pending re-recordings** (see `GAME_ONLY_REQUIREMENTS.md §6.6`):
 - `0013.mp3` — describe new-sequence-each-round (after level swap)
 - `0014.mp3` — describe the audio confuser (after level swap)
 
@@ -339,7 +338,7 @@ Audio-only invite after game over. Encourages replay. No blocking LED pattern.
 |-----------|---------|-----|-------------|
 | `CUE_ON_MS` | 450ms | 250ms | LED on-time per cue |
 | `CUE_GAP_MS` | 250ms | 120ms | Gap between cues |
-| `INPUT_TIMEOUT_MS` | 3000ms | 1800ms | Player response limit |
+| `INPUT_TIMEOUT_MS` | 3000ms | 1800ms | Player response limit per press (first press: measured from end of "Your Turn"; later presses: from previous release) |
 
 ### Progression
 
@@ -370,7 +369,7 @@ Visual patterns that use `delay()` internally (e.g. `diagonalCrossPattern`, `clo
 - **Edge-based:** Actions on press/release only
 - **No hold logic:** No action while button held
 - **Visual feedback:** LED stays on while pressed
-- **Input window:** Presses are only accepted in `SEQ_INPUT`; edges are reset when it starts, so presses during `SEQ_DISPLAY` are discarded
+- **Input window:** Input opens the moment the last cue's LED turns off — players may answer before or during "Your Turn" and it counts. Presses during the presentation itself are discarded (edges reset when input opens). See `GAME_ONLY_REQUIREMENTS.md §6.5`
 - **Debounce:** Fast mode (`HW_BTN_GHOST_MS_FAST = 20 ms`) during `SEQ_INPUT`; mid-sequence release confirmed via `hw_btn_pressed()` (see `GAME_ONLY_REQUIREMENTS.md §6.1`)
 
 ### Button Assignments
@@ -418,9 +417,10 @@ Visual patterns that use `delay()` internally (e.g. `diagonalCrossPattern`, `clo
 - ✅ Second idle invite fired 5 s after the first, truncating it (fixed `dc10342`: leftover `firstInvite` flag removed from `scheduleNextInvite()`; validated 2026-10-19)
 - ✅ False input edge after button release (fixed: 20 ms fast ghost hold + debounced release detection)
 
+- ✅ Early answers lost/penalized + "Your Turn" eating first-press time (fixed: input opens at last LED-off; first-press timeout starts after "Your Turn"; validated 2026-10-19)
+
 ### Pending
 
-- ⬜ Re-record `0011.mp3` — wait for "Your Turn" before pressing
 - ⬜ Swap Red/Green mechanics after re-recording `0013.mp3` / `0014.mp3`
 
 ---

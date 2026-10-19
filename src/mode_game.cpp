@@ -365,6 +365,8 @@ unsigned long lastInvite = 0;      // Last invite time
 unsigned long nextInviteDelay = 0; // Next invite delay
 bool ledOn = false;                // Current LED state during display
 Color lastButtonPressed = RED;     // Track button presses
+bool yourTurnPlayed = false;       // SEQ_INPUT: "Your Turn" started (or skipped because player already pressed)
+bool inputClockRunning = false;    // SEQ_INPUT: input timeout active (starts when "Your Turn" finishes)
 
 // Ambient effects state
 AmbientEffect currentAmbientEffect = BREATHING;
@@ -943,21 +945,22 @@ void game_tick() {
         // Turn off LED after cue time (keep ledOn=true to prevent retriggering)
         setLed((Color)game.seq[currentStep], false);
 
-        // Check if gap period is also complete
-        if (now - stateTimer > getCurrentCueOnMs(game.level) + getCurrentCueGapMs(game.level)) {
+        if (currentStep + 1 >= game.level) {
+          // Last cue done - presentation is over, input opens immediately (no trailing gap).
+          // "Your Turn" is deferred by one cue gap inside SEQ_INPUT so it doesn't cut off the
+          // last color name; the input timeout starts only once "Your Turn" finishes.
+          hw_btn_reset_edges(); // Discard presses made during the presentation
+          hw_btn_set_fast(true); // Enable fast debounce for player input
+          yourTurnPlayed    = false;
+          inputClockRunning = false;
+          stateTimer = now;
+          currentStep = 0;
+          gameState = SEQ_INPUT; // Skip SEQ_DISPLAY_YOURTURN - go directly to input
+          Serial.printf("INPUT DEBUG: Input open at %lu ms (timeout %lu ms, starts after Your Turn)\n",
+                        now, getCurrentInputTimeout(game.level));
+        } else if (now - stateTimer > getCurrentCueOnMs(game.level) + getCurrentCueGapMs(game.level)) {
           currentStep++;
-          if (currentStep >= game.level) {
-            // Sequence complete - play "Your Turn" and immediately allow input
-            audio.playYourTurn(); // Play in background (non-blocking)
-            hw_btn_reset_edges(); // Reset at start of input phase
-            hw_btn_set_fast(true); // Enable fast debounce for player input
-            stateTimer = now;
-            currentStep = 0;
-            gameState = SEQ_INPUT; // Skip SEQ_DISPLAY_YOURTURN - go directly to input
-            Serial.printf("INPUT DEBUG: Starting input phase at %lu ms (timeout: %lu ms)\n", now, getCurrentInputTimeout(game.level));
-          } else {
-            ledOn = false; // Ready for next step
-          }
+          ledOn = false; // Ready for next step
         }
       }
       break;
@@ -977,15 +980,30 @@ void game_tick() {
         if (!hw_btn_pressed(releaseColor)) {
           setLed(releaseColor, false);
           stateTimer = millis(); // reset input timeout after release
+          inputClockRunning = true;
           awaitingRelease = false;
           Serial.printf("INPUT DEBUG: Released, timer reset for step %d\n", currentStep);
         }
         break;
       }
 
+      // Deferred "Your Turn": one cue gap after the last LED (same moment as before input
+      // opened early). Skipped if the player has already started answering.
+      if (!yourTurnPlayed && now - stateTimer >= getCurrentCueGapMs(game.level)) {
+        audio.playYourTurn(); // Play in background (non-blocking)
+        yourTurnPlayed = true;
+      }
+
+      // First-press timeout starts only after "Your Turn" finishes
+      if (!inputClockRunning && yourTurnPlayed && audio.isDone()) {
+        stateTimer = now;
+        inputClockRunning = true;
+        Serial.printf("INPUT DEBUG: Your Turn done, timeout started at %lu ms\n", now);
+      }
+
       // Check for timeout
       unsigned long elapsed = now - stateTimer;
-      if (elapsed > getCurrentInputTimeout(game.level)) {
+      if (inputClockRunning && elapsed > getCurrentInputTimeout(game.level)) {
         Serial.printf("TIMEOUT DEBUG: now=%lu, stateTimer=%lu, elapsed=%lu, timeout=%lu\n",
                       now, stateTimer, elapsed, getCurrentInputTimeout(game.level));
         hw_btn_set_fast(false);
@@ -997,6 +1015,7 @@ void game_tick() {
       }
 
       if (anyButtonPressed()) {
+        yourTurnPlayed = true; // Player already answering - don't start "Your Turn" now
         Color expectedColor = (Color)game.seq[currentStep];
         Serial.printf("BUTTON DEBUG: Pressed %d, Expected %d (step %d)\n",
                       lastButtonPressed, expectedColor, currentStep);
