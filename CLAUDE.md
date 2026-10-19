@@ -97,12 +97,14 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 ### Game Logic
 The core game runs on a finite state machine (FSM) with these states:
 - `IDLE`: Waiting for any button press to start, with ambient visual effects
-- `INSTRUCTIONS`: Playing audio instructions
+- `INSTRUCTIONS`: Playing audio instructions (button press skips and selects difficulty)
+- `DIFFICULTY_SELECTION`: Clockwise LED rotation, waiting for a difficulty button
+- `DIFFICULTY_INSTRUCTIONS`: Playing difficulty-specific instructions (button press skips to game start)
 - `AWAIT_START`: Waiting for button press to begin game
 - `SEQ_DISPLAY_INIT`: Initialize new sequence
 - `SEQ_DISPLAY_MYTURN`: Playing "My Turn" audio
-- `SEQ_DISPLAY`: Show the sequence with LEDs and audio
-- `SEQ_DISPLAY_YOURTURN`: Playing "Your Turn" audio
+- `SEQ_DISPLAY`: Show the sequence with LEDs and audio (button presses ignored)
+- `SEQ_DISPLAY_YOURTURN`: Unused — "Your Turn" plays in the background at the start of `SEQ_INPUT`
 - `SEQ_INPUT`: Wait for player input with timeout
 - `CORRECT_FEEDBACK`: Playing correct feedback sound
 - `WRONG_FEEDBACK`: Playing wrong input sound
@@ -282,8 +284,9 @@ Service LED:               D2 (heartbeat)
 
 #### Common (`setup()`) — always runs at power-on
 **Duration**: ~0 ms (no LED pattern)
-**Serial**: `[BOOT] Hardware init done. Entering mode selection.`
+**Serial**: `=== Shimon v1.0 ===`, `[BOOT] Reset reason=N ...`, then `[BOOT] Auto-start: Game Mode.` (or `[BOOT] Yellow held: entering mode selection.`)
 **Visual**: None — LED sweep removed; mode-specific splashes handle visual confirmation.
+**Event branch**: Auto-boots to Game Mode after a stuck-button check; Mode Selection only if Yellow is held at boot. See `GAME_ONLY_REQUIREMENTS.md §2`.
 
 #### Game Mode splash (`game_init()` → `bootSequence()`)
 **Duration**: ~3 seconds
@@ -295,7 +298,7 @@ Service LED:               D2 (heartbeat)
 
 ### **Idle Mode - Continuous Ambient Effects**
 **Duration**: Indefinite (until player interaction)  
-**Audio**: Periodic invites every 5 seconds (first), then 20-45 seconds  
+**Audio**: First invite immediately after the boot splash, then every 20-45 seconds (random — avoids a mechanical, predictable rhythm)  
 **Visual**: 4 rotating ambient effects, each lasting 30 seconds:
 
 1. **BREATHING (0-30s)**: All LEDs pulse gently together (sine wave, 100ms updates)
@@ -307,23 +310,20 @@ Service LED:               D2 (heartbeat)
 
 ### **Invite Sequence** 
 **Trigger**: Automatic timer expires  
-**Duration**: ~3-4 seconds  
-**Audio**: `[AUDIO] Playing invite X` (random 1-5)  
-**Visual**:
-- Double flash: All LEDs flash twice (200ms on/off)
-- Spinning chase: 8 spins through colors (150ms each)  
-- Final flash: All LEDs bright for 300ms
-- Serial: `"Playing invite LED sequence..."`
-- **Returns to ambient effects** after completion
+**Audio**: `[AUDIO] Invite N -> /mp3/000N.mp3` (random 1-5, no back-to-back repeat)  
+**Visual**: None — ambient effects continue (blocking invite LED pattern removed; it blocked input for ~3 s)  
+**Next**: `Next invite scheduled in NN seconds` (20-45 s)
 
 ### **Instructions Sequence**
-**Trigger**: Any button press (except YELLOW in idle)  
-**Duration**: ~2 seconds + 2 second pause  
-**Audio**: `[AUDIO] Playing instructions (0006.mp3)`  
-**Visual**:
-- Alternating pairs: Red+Green ↔ Blue+Yellow (6 cycles, 300ms each)
-- All LEDs OFF for 2 seconds
-- Serial: `"Instructions playing..."`
+**Trigger**: Any button press in idle  
+**Audio**: `[AUDIO] Instructions -> /mp3/0011.mp3`  
+**Visual**: None (blocking pattern removed)  
+**Skip**: A button press during instructions selects that difficulty directly  
+**Pending**: `0011.mp3` re-record — tell players to wait for "Your Turn" before pressing
+
+### **Difficulty Selection / Instructions**
+**Visual**: Clockwise LED rotation (400 ms per wing) while waiting for a choice  
+**Audio**: `0012`-`0015` (Blue/Red/Green/Yellow difficulty instructions); a button press skips straight to game start
 
 ### **Ready to Start State**
 **Duration**: Indefinite (until button press)  
@@ -359,14 +359,15 @@ Service LED:               D2 (heartbeat)
 - Gap of `CUE_GAP_MS` between cues (default 250ms, decreases each level)
 - Serial: `"Step X: LED=Y, Voice=Z (CONFUSER!)"` if colors differ
 
+**Input**: Button presses during the display are ignored (edges reset when `SEQ_INPUT` starts)
+
 #### **"Your Turn" Audio**
-**Duration**: 1 second  
-**Audio**: `[AUDIO] Your Turn!`  
+**Audio**: `0031`-`0035` variation, played in the background as `SEQ_INPUT` starts — input is live immediately  
 **Visual**: All LEDs OFF
 
 ### **Player Input Phase**
-**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms)
-**Audio**: None during input
+**Duration**: Up to `INPUT_TIMEOUT_MS` (default 3000ms), reset after each release
+**Audio**: "Your Turn" (background, at start only)
 **Visual**:
 - Wing LED flashes briefly on button press
 - **Button LED stays ON while button is physically held** (src/main.cpp:915, 927-937)
@@ -380,19 +381,19 @@ Service LED:               D2 (heartbeat)
 
 #### **Correct Input**
 **Duration**: 1 second  
-**Audio**: `[AUDIO] Correct! (0010.mp3)`  
+**Audio**: Positive feedback variation (`0041`-`0045`)  
 **Visual**: Pressed LED stays on during feedback  
 **Progression**: Sequence extends, speeds increase, next level begins
 
 #### **Wrong Input**
 **Duration**: 1 second + 2 seconds  
-**Audio**: `[AUDIO] Wrong (0008.mp3)` → `[AUDIO] Game Over (0009.mp3)`  
+**Audio**: `0051.mp3` (wrong) → personalized game over  
 **Visual**: All LEDs OFF  
 **Result**: Game ends
 
 #### **Input Timeout**
 **Duration**: 1 second + 2 seconds  
-**Audio**: `[AUDIO] Timeout -> Game Over (0007.mp3)` → `[AUDIO] Game Over (0009.mp3)`  
+**Audio**: `0052.mp3` (timeout) → personalized game over  
 **Visual**: All LEDs OFF  
 **Result**: Game ends
 
@@ -405,7 +406,7 @@ Service LED:               D2 (heartbeat)
 - Pro (score ≥ 10): `[AUDIO] 0056.mp3` - "Memory master! See you at finals!"
 - Below threshold: `[AUDIO] 0057.mp3` - "Good try! Practice makes perfect!"
 
-**Delay**: 300ms between personalized and general message
+**Transition**: General message starts as soon as the personalized one finishes (a button press skips ahead)
 
 **Audio Phase 2**: General game over message
 - `[AUDIO] 0058.mp3` - "Thanks for playing!"
@@ -414,19 +415,14 @@ Service LED:               D2 (heartbeat)
 **Result**: Proceeds to General Game Over → Post-Game Invite
 
 ### **General Game Over**
-**Duration**: Wait for audio completion (with 6000ms timeout fallback)
-**Delay**: 6000ms pause after audio completes (let message sink in)
+**Duration**: Wait for audio completion (fallback timeout inside `play*()`)
 **Result**: Proceeds to Post-Game Invite
 
 ### **Post-Game Invite**
-**Duration**: ~3-4 seconds
-**Audio**: `[AUDIO] Playing invite X` (random 1-5) - Same as idle invites
-**Visual**:
-- Double flash: All LEDs flash twice (200ms on/off)
-- Spinning chase: 8 spins through colors (150ms each)
-- Final flash: All LEDs bright for 300ms
-- Serial: `"Post-game invite: encouraging player to play again"`
-**Result**: Returns to Idle Mode with ambient effects
+**Cooldown**: 2500 ms silent pause, then the invite plays (button press during cooldown → straight to IDLE)
+**Audio**: Random invite (1-5) — same as idle invites
+**Visual**: None (blocking pattern removed)
+**Result**: Returns to Idle Mode; next invite in 20-45 s
 
 **Note**: The post-game invite was added to provide closure and encourage players to play again, rather than silently returning to idle mode.
 
@@ -436,10 +432,12 @@ Service LED:               D2 (heartbeat)
 - `CUE_ON_MS_DEFAULT`: 450ms (min: 250ms) - LED on-time
 - `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues
 - `INPUT_TIMEOUT_MS_DEFAULT`: 3000ms (min: 1800ms) - Player response limit
-- `SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels for gradual difficulty progression
-- `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds (first invite: 5 seconds)
+- `SEQUENCE_SPEED_STEP` / `INPUT_SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels (same for all difficulties)
+- `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds random (first invite: immediate after boot). `FIRST_INVITE_DELAY_SEC` is unused.
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
-- `ENABLE_AUDIO_CONFUSER`: Configured automatically based on difficulty level (Intermediate/Red only)
+- `ENABLE_AUDIO_CONFUSER`: Configured automatically based on difficulty level (Intermediate/Red only — moves to Advanced/Green after the planned level swap)
+- `HW_BTN_GHOST_MS_FAST` / `STANDARD`: 20 / 15 ms debounce hold
+- `YELLOW_EXIT_HOLD_MS`: 3000 ms universal exit
 
 ### Build Environments
 
@@ -456,6 +454,10 @@ Service LED:               D2 (heartbeat)
 - **Usage**: `pio run -e hardware`
 - **Requires**: DFPlayer Mini + SD card with audio files
 
+#### **`[env:hardware-com6]` - Real Hardware on COM6**
+- Same as `hardware` but `upload_port = COM6` (`hardware` uses COM3)
+- **Usage**: `pio run -e hardware-com6 -t upload`
+
 #### **`[env:native]` - Unit Testing**
 - **Build Flag**: `-D UNIT_TESTS`
 - **Purpose**: Native unit tests on development machine
@@ -465,10 +467,10 @@ Service LED:               D2 (heartbeat)
 ## Quick Reference for Testing
 
 ### **What to Expect in Wokwi Simulation:**
-1. **Boot**: Rainbow wave + flashing (5-6 seconds)
+1. **Boot**: Rainbow wave + flashing (~3 seconds)
 2. **Idle**: Continuous ambient effects (breathing, chase, twinkle, waves)
-3. **Every 5s (first) then 20-45s**: Invite sequences (double flash + spin)
-4. **Press any button**: Instructions (alternating pairs) → Ready pulse
+3. **Immediately, then every 20-45s**: Invite audio (ambient effects continue)
+4. **Press any button**: Instructions → difficulty selection (clockwise rotation) → difficulty instructions → Ready pulse
 5. **Press again**: Game start burst → "My Turn" → LED sequence → "Your Turn" 
 6. **Match sequence**: Correct feedback → next level (faster & longer)
 7. **Wrong/Timeout**: Game over → back to idle with ambient
@@ -480,15 +482,35 @@ Service LED:               D2 (heartbeat)
 
 ### **Testing Scenarios:**
 - **Visual Engagement**: Wait and observe ambient effects cycling
-- **Invite System**: Wait 5 seconds for first invite, then longer intervals
+- **Invite System**: First invite right after boot; serial should then show `Next invite scheduled in NN seconds` (20-45) with no invite before that
 - **Difficulty Levels**: Test all 4 difficulties (Blue/Red/Green/Yellow) for different game mechanics
 - **Confuser Mode**: Play Intermediate (Red) difficulty to see voice mismatch with LED
-- **Progression**: Complete several levels, notice increasing speed (except Advanced/Green)
+- **Progression**: Complete several levels, notice increasing speed every 3 levels
 - **Error Handling**: Test wrong buttons, timeouts, and game over sequences
 
 ## Recent Changes & Implementation Notes
 
-### Latest Updates (November 2025)
+### Midburn Event Build (October 2026, Branch: `event/midburn-oct-2026`)
+
+Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
+
+- **Game-only build**: Party Mode removed. Modes: Game (default), Diagnostic, Stress Test.
+- **Auto-boot to Game Mode**: Mode Selection only when Yellow is held at boot (RTC boot-intent flag dropped — unreliable on this chip). Mode menu: Blue=Game, Red=Diagnostic, Yellow=Stress.
+- **Universal exit**: Yellow held **3 s** (`YELLOW_EXIT_HOLD_MS`); keep holding through reboot for Mode Selection.
+- **Passive Mode**: stuck button at boot / DFPlayer init fail / DFPlayer unresponsive → RED breathing, auto-restart every 5 min (max 3). Ghost-storm trigger exists but is disabled.
+- **Uptime logging**: `[SYS] Uptime` every 5 min; passive entry logs uptime.
+- **Debounce fix**: `HW_BTN_GHOST_MS_FAST` 0 → 20 ms; `SEQ_INPUT` release uses `hw_btn_pressed()` (fixed false edge after release).
+- **Diagnostic Mode**: interactive tester — press = LED + color audio; logs PRESS / RELEASE / `GHOST dur=Nms`.
+- **Stress Test Mode**: automated click simulation (1 s on / 2 s gap, B→R→G→Y); one log line per click; errors (`UNEXPECTED GHOST/PRESS`, `STUCK`) inline; `[STRESS ===]` status every 10 min. ~1 h clean run.
+- **BLUE ghost clicks**: hardware — failing microswitch, replaced (see `hardware-baseline.md §5.2.1`).
+- **Idle invite timing** (`dc10342`): second invite no longer fires 5 s after the first (which truncated it); all subsequent invites wait 20-45 s.
+
+**Pending:**
+- Re-record `0011.mp3` — tell players to wait for "Your Turn" (presses during display are ignored); maybe add a visual input cue
+- Re-record `0013`/`0014`, then swap Red/Green mechanics (confuser → Green/Advanced) — 2-line swap in `difficultyConfigs`
+- Cleanup: unused `FIRST_INVITE_DELAY_SEC`, `POST_GAME_INVITE_DELAY_MS`; Mode Selection banner says "hold 5s" (code uses 3 s)
+
+### Updates (November 2025)
 **Branch**: `feat/logic-change`
 
 1. **Audio Finish Detection System** (Commits: 11095ad, latest)
@@ -593,6 +615,9 @@ Service LED:               D2 (heartbeat)
 - ✅ DS_DONE spurious restart from PWM ghost clicks (fixed with edge detection in hw.h)
 - ✅ `selConfirmAnimation` and diag PASS exceeding PSU limit (fixed with `hw_led_all_set()`)
 - ✅ Redundant hw init calls in every mode (cleaned up — now only in `setup()`)
+- ✅ False input edge after button release on event build (20 ms fast ghost hold + debounced release)
+- ✅ BLUE ghost clicks (hardware: microswitch replaced)
+- ✅ Second idle invite 5 s after the first, truncating it (`dc10342`)
 
 ### PlatformIO Access
 PlatformIO can be accessed at: `~/.platformio/penv/Scripts/pio.exe`

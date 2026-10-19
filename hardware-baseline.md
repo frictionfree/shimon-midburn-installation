@@ -101,6 +101,12 @@ Each button input includes:
 
 This RC network eliminates noise and ghost presses caused by long cable runs and EMI. The 1 µF cap provides additional filtering of lower-frequency transients that the 100 nF alone cannot suppress.
 
+### 5.2.1 Microswitch Wear (Field Finding, Oct 2026)
+
+The RC network cannot mask a failing switch. In Oct 2026 the BLUE button produced repeated 2–19 ms contact bounces (ghost clicks) that the other three buttons did not. A BLUE↔YELLOW GPIO swap at the button box showed the bounce followed the physical button, not the GPIO/wiring. Replacing the BLUE arcade button's microswitch resolved it.
+
+**Maintenance:** If one channel shows repeated ghosts in Diagnostic Mode (`[DIAG] GHOST:`), suspect the microswitch first — swap-test, then replace. Keep spare microswitches on site.
+
 ### 5.3 Button LED Integration (Final, Implemented Design)
 
 - Button LEDs are **12 V devices**

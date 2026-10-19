@@ -90,7 +90,7 @@ Passive mode is entered when a hardware fault is detected. It suspends all game 
 
 | Path | Action |
 |------|--------|
-| Auto-restart | Every 5 minutes, up to 3 attempts (`PASSIVE_MAX_RETRIES`). Each attempt restarts directly to Game Mode (`rtcBootIntent = 0`). |
+| Auto-restart | Every 5 minutes, up to 3 attempts (`PASSIVE_MAX_RETRIES`). Each attempt restarts directly to Game Mode (Yellow not held at boot → auto-start). |
 | Manual exit | Yellow 3s → Mode Selection |
 | Max retries reached | Stay dark indefinitely until power-cycle or Yellow 3s |
 
@@ -116,6 +116,16 @@ During operation (per button):
 - **While held** → LED stays on
 - **Release detected** → LED off, serial log: `[DIAG] RELEASE: <color>`
 
+### Ghost Click Monitoring
+
+Raw GPIO state is tracked alongside debounced press/release detection. Any raw LOW that resolves without reaching the debounce threshold is logged as a ghost:
+
+```
+[DIAG] GHOST: <color>  dur=<N>ms
+```
+
+Used to isolate the BLUE microswitch defect (§6.2). A healthy button shows no ghosts, or an occasional 0–2 ms ghost (normal electrical noise). Repeated ghosts approaching 20 ms on a single channel indicate a failing switch.
+
 Yellow button: short tap works normally (LED on + audio). 3-second hold exits to Mode Selection (handled by main loop).
 
 ### Audio
@@ -140,6 +150,7 @@ Diagnostic runs with the fast debounce setting (`hw_btn_set_fast(true)`) to matc
 [DIAG] PRESS: BLUE
 [DIAG] AUDIO: BLUE (track 61)
 [DIAG] RELEASE: BLUE
+[DIAG] GHOST: BLUE  dur=3ms
 ```
 
 ### Future (Full Version)
@@ -169,8 +180,8 @@ Automated hardware endurance test. Simulates button clicks at a fixed rate to dr
 Each simulated click:
 1. LED turns on at duty 200 for the active color
 2. Corresponding color audio plays (0061–0064.mp3)
-3. Serial log: `[STRESS] CLICK START: <color>  #N`
-4. After `STRESS_CLICK_DURATION_MS`: LED off, log `[STRESS] CLICK END: <color>  #N`
+3. Serial log (one line per click): `[STRESS] #N  <color>`
+4. After `STRESS_CLICK_DURATION_MS`: LED off (not logged)
 5. Gap of `STRESS_CLICK_GAP_MS`, then next color
 
 No human input is expected during a stress test run. All button GPIO activity is therefore unexpected and logged.
@@ -187,7 +198,7 @@ The test monitors all 4 button GPIO lines every tick. Since no physical presses 
 
 Log format:
 ```
-[STRESS] UNEXPECTED GHOST: RED  dur=2ms  @0h05m12s
+[STRESS] UNEXPECTED GHOST: RED  dur=2ms  ghost#1  @0h05m12s
 [STRESS] UNEXPECTED PRESS: BLUE  dur=95ms  @0h05m15s
 [STRESS] STUCK: GREEN  1500ms  @0h10m30s
 ```
@@ -200,10 +211,13 @@ Ghost counts are tracked per channel and included in status logs and the stop su
 |-----------|----------|---------|
 | Periodic status interval | `STRESS_STATUS_INTERVAL_MS` | 600000 ms (10 min) |
 
-Status log format:
+Status log format (preceded by a blank line so it stands out when scrolling):
 ```
-[STRESS] Status @0h10m00s  clicks=20  ghosts: BLUE=0 RED=1 GREEN=0 YELLOW=0
+
+[STRESS ===] @0h10m00s  clicks=200  ghosts: BLUE=0 RED=1 GREEN=0 YELLOW=0
 ```
+
+**Validation run (2026-10-18):** ~1 hour continuous run after the BLUE microswitch replacement — clean, no unexpected activity.
 
 Runtime is expressed as elapsed time since `stress_init()` in `H:MM:SS` format.
 
@@ -271,6 +285,57 @@ The ghost storm monitor (`ghostMonitorTick()` in `main.cpp`) was implemented to 
 
 **Future:** Can be re-enabled with logging-only mode (no passive entry trigger) to surface hardware ghost data during live operation without risking false shutdown.
 
+### 6.4 Idle Invite Timing Fix (Resolved)
+
+**Problem:** After boot, the first invite played immediately, then the second invite fired only 5 s later. With invite tracks ~5 s long, the second invite started right as the first ended — or cut it off mid-playback if the first track was longer than 5 s.
+
+**Root cause:** `scheduleNextInvite()` contained a leftover `static bool firstInvite` flag (from early testing) that applied `FIRST_INVITE_DELAY_SEC = 5` on its first call. `game_init()` already handles the immediate first invite (`nextInviteDelay = 0`), so the 5 s delay was applied to the *second* invite.
+
+**Fix (`dc10342`):** Removed the special case. `scheduleNextInvite()` always uses the random `INVITE_INTERVAL_MIN_SEC`–`INVITE_INTERVAL_MAX_SEC` interval.
+
+**Invite timing (current):**
+
+| Invite | Timing |
+|--------|--------|
+| First (after boot splash) | Immediate |
+| All subsequent idle invites | Random 20–45 s after the previous one |
+| Post-game invite | 2500 ms after general game over message, then random 20–45 s to the next |
+
+The interval is randomized so the installation does not sound like a fixed timer, passers-by and staff don't habituate to a predictable beat, and invites don't lock into phase with surrounding sound sources. Combined with the 5 random invite variations (anti-repetition), the idle audio stays varied.
+
+**Validated on hardware 2026-10-19.** Note: `FIRST_INVITE_DELAY_SEC` in `shimon.h` is now unused (dead constant).
+
+### 6.5 Presses During Sequence Display (Open — Audio Content)
+
+**Observation:** Players press buttons while the sequence is still being displayed. Presses during `SEQ_DISPLAY` are silently ignored — input is only accepted from `SEQ_INPUT` onward (edges are reset at its start). "Your Turn" audio plays in the background at the start of `SEQ_INPUT`, so input is live as soon as the last cue ends.
+
+**Planned fix (no firmware change):** Re-record instructions track `0011.mp3` to tell players to watch the whole sequence and wait for "Your Turn" before pressing.
+
+**Under discussion:** A visual cue marking the start of input (backup signal for players who don't hear the audio).
+
+### 6.6 Swap Difficulty Levels 2 and 3 (Planned — Blocked on Audio)
+
+**Rationale:** Field testing showed the audio confuser is harder than new-sequence-each-turn, so it should be the higher level.
+
+| Button | Difficulty | Current mechanic | After swap |
+|--------|------------|------------------|------------|
+| Red | Intermediate | Audio confuser | New sequence each turn |
+| Green | Advanced | New sequence each turn | Audio confuser |
+
+**Code change:** Swap `difficultyConfigs[1]` and `difficultyConfigs[2]` in `mode_game.cpp`:
+- Red (INTERMEDIATE): `{3, false, true, false}`
+- Green (ADVANCED): `{3, true, false, false}`
+
+Also update the `DifficultyLevel` enum comments and the `"Green level"` serial log in `CORRECT_FEEDBACK`.
+
+**No change needed:** Game over thresholds and messages — Red/Intermediate stays at ≥ 8 ("Move up to Advanced!"), Green/Advanced stays at ≥ 10 ("Join finals Friday!").
+
+**Blocked on:** Re-recording difficulty instruction tracks:
+- `0013.mp3` (Red) — must describe new-sequence-each-turn
+- `0014.mp3` (Green) — must describe the audio confuser
+
+Firmware and audio must be deployed together; swapping either alone would make the spoken instructions contradict the gameplay.
+
 ---
 
 ## 7. Configuration Constants
@@ -287,6 +352,7 @@ All constants in `include/shimon.h`.
 | `PASSIVE_MAX_RETRIES` | 3 | Max auto-restart attempts from passive mode |
 | `PASSIVE_RETRY_INTERVAL_MS` | 300000 ms | Interval between passive auto-restarts (5 min) |
 | `STUCK_BUTTON_MS` | 2000 ms | Button held at boot to trigger passive mode |
+| `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC` | 20 / 45 s | Random idle invite interval (§6.4) |
 
 ### Stress Test
 
@@ -311,14 +377,16 @@ All constants in `include/shimon.h`.
 - ✅ Diagnostic mode rewrite — interactive button/LED/audio tester (§4)
 - ✅ Stress test rewrite — automated click simulation with ghost monitoring (§5)
 - ✅ Mode selection via Yellow-held-at-boot (replaces unreliable `rtcBootIntent`)
+- ✅ Ghost click monitoring in Diagnostic Mode (§4)
+- ✅ Click detection investigation resolved — BLUE button microswitch replaced; 20ms debounce threshold confirmed sufficient (§6.2)
+- ✅ Stress test logging simplified; ~1 hour clean run (§5)
+- ✅ Idle invite timing — second invite waits the full random interval; validated on hardware (§6.4)
 
 ### Pending
 
-- ⬜ Swap game levels 2 and 3 _(deferred — only if time permits and no risk to stability)_
-
-### Done (additions)
-
-- ✅ Click detection investigation resolved — BLUE button microswitch replaced; 20ms debounce threshold confirmed sufficient (§6.2)
+- ⬜ Re-record instructions `0011.mp3` — tell players to wait for "Your Turn" (§6.5); decide on visual input cue
+- ⬜ Re-record difficulty instructions `0013.mp3` / `0014.mp3`, then swap levels 2 and 3 (§6.6)
+- ⬜ Cleanup: remove unused `FIRST_INVITE_DELAY_SEC` and `POST_GAME_INVITE_DELAY_MS` from `shimon.h`; fix stale "hold 5s" text in Mode Selection serial banner (code uses 3 s)
 
 ---
 
@@ -327,6 +395,6 @@ All constants in `include/shimon.h`.
 | Document | Content |
 |----------|---------|
 | `GAME_MODE_REQUIREMENTS.md` | Full game FSM, audio system, difficulty levels |
-| `SYSTEM_REQUIREMENTS.md` | Shared system behaviors (pre-game-only-build) |
+| `SYSTEM_REQUIREMENTS.md` | Shared system behaviors (full build; this document overrides it on this branch) |
 | `hardware-baseline.md` | Pin assignments, PWM constraints, electrical design |
 | `CLAUDE.md` | Developer guide, build commands, file structure |

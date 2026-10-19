@@ -5,6 +5,8 @@
 
 This document defines requirements specific to Game Mode operation. System-level requirements (mode selection, boot sequence, failure handling) are defined in `SYSTEM_REQUIREMENTS.md`. Hardware constraints are defined in `hardware-baseline.md`.
 
+> **Event branch (`event/midburn-oct-2026`):** Boot, mode selection, exit gesture, passive mode, debounce values and pending game changes for the game-only build are defined in `GAME_ONLY_REQUIREMENTS.md`, which takes precedence over this document and `SYSTEM_REQUIREMENTS.md` where they differ.
+
 ---
 
 ## 1. Purpose of Game Mode
@@ -27,18 +29,22 @@ Game Mode implements an interactive Simon Says memory game where players memoriz
 
 During difficulty selection, players choose by pressing a colored button:
 
-| Button | Difficulty | Starting Length | Description |
-|--------|------------|-----------------|-------------|
-| **Blue** | Novice | 3 | Slowest timing, standard gameplay |
-| **Red** | Intermediate | 3 | Faster timing, audio confuser enabled |
-| **Green** | Advanced | 3 | Faster timing, no speed acceleration |
-| **Yellow** | Pro | 3 | Fastest timing, maximum challenge |
+| Button | Difficulty | Starting Length | Mechanic |
+|--------|------------|-----------------|----------|
+| **Blue** | Novice | 3 | Standard — sequence extends by one color each round |
+| **Red** | Intermediate | 3 | Audio confuser — spoken color may differ from the LED |
+| **Green** | Advanced | 3 | New random sequence each round (one longer) — no memorizing the previous rounds |
+| **Yellow** | Pro | 3 | Alternating presentation — even steps LED only (silent), odd steps voice only (dark) |
 
 All difficulties start with a sequence of 3 colors. A sequence shorter than 3 is trivial and confusing — no difficulty starts below this floor.
 
+All difficulties share the same timing curve (see §7); difficulty comes from the mechanic, not speed.
+
+> **Planned swap (blocked on audio re-record):** Red and Green mechanics will be swapped — confuser moves to Green/Advanced, new-sequence-each-round moves to Red/Intermediate — because the confuser proved harder in field testing. See `GAME_ONLY_REQUIREMENTS.md §6.6`.
+
 ### Audio Confuser (Intermediate Only)
 
-In Intermediate difficulty, the spoken color name may differ from the displayed LED color, adding cognitive challenge.
+In Intermediate difficulty, the spoken color name may differ from the displayed LED color, adding cognitive challenge. (Moves to Advanced after the planned swap.)
 
 ### Score Thresholds
 
@@ -58,13 +64,15 @@ In Intermediate difficulty, the spoken color name may differ from the displayed 
 | State | Description |
 |-------|-------------|
 | `IDLE` | Waiting for button press, ambient visual effects |
-| `INSTRUCTIONS` | Playing audio instructions |
+| `INSTRUCTIONS` | Playing main instructions (`0011`); a button press skips and selects difficulty directly |
+| `DIFFICULTY_SELECTION` | Clockwise LED rotation; waiting for a difficulty button |
+| `DIFFICULTY_INSTRUCTIONS` | Playing difficulty instructions (`0012`–`0015`); a button press skips straight to game start |
 | `AWAIT_START` | Waiting for button press to begin game |
 | `SEQ_DISPLAY_INIT` | Initialize new sequence |
 | `SEQ_DISPLAY_MYTURN` | Playing "My Turn" audio |
-| `SEQ_DISPLAY` | Show sequence with LEDs and audio |
-| `SEQ_DISPLAY_YOURTURN` | Playing "Your Turn" audio |
-| `SEQ_INPUT` | Wait for player input with timeout |
+| `SEQ_DISPLAY` | Show sequence with LEDs and audio — **button presses are ignored** |
+| `SEQ_DISPLAY_YOURTURN` | Unused — "Your Turn" now plays in the background at the start of `SEQ_INPUT` |
+| `SEQ_INPUT` | Wait for player input with timeout ("Your Turn" audio playing in background) |
 | `CORRECT_FEEDBACK` | Playing correct feedback sound |
 | `WRONG_FEEDBACK` | Playing wrong input sound |
 | `TIMEOUT_FEEDBACK` | Playing timeout notification |
@@ -78,11 +86,19 @@ In Intermediate difficulty, the spoken color name may differ from the displayed 
 IDLE
   ↓ (any button)
 INSTRUCTIONS
-  ↓ (audio complete)
-AWAIT_START
-  ↓ (button press)
-SEQ_DISPLAY_INIT → SEQ_DISPLAY_MYTURN → SEQ_DISPLAY → SEQ_DISPLAY_YOURTURN
+  ├─ (button press = difficulty choice) ──────────┐
+  ↓ (audio complete)                               │
+DIFFICULTY_SELECTION                               │
+  ↓ (difficulty button)                            │
+DIFFICULTY_INSTRUCTIONS ◄──────────────────────────┘
+  ├─ (button press = skip) ──────────┐
+  ↓ (audio complete)                 │
+AWAIT_START                          │
+  ↓ (button press)                   │
+SEQ_DISPLAY_INIT ◄───────────────────┘
   ↓
+SEQ_DISPLAY_MYTURN → SEQ_DISPLAY
+  ↓ (last cue done; "Your Turn" starts in background)
 SEQ_INPUT
   ├─→ CORRECT_FEEDBACK → (next level) → SEQ_DISPLAY_INIT
   ├─→ WRONG_FEEDBACK → GAME_OVER
@@ -166,6 +182,11 @@ All files in `/mp3/` directory on SD card.
 | 0014.mp3 | Green/Advanced difficulty instructions |
 | 0015.mp3 | Yellow/Pro difficulty instructions |
 
+**Pending re-recordings** (see `GAME_ONLY_REQUIREMENTS.md §6.5–6.6`):
+- `0011.mp3` — add: watch the whole sequence and wait for "Your Turn" before pressing (presses during the display are ignored)
+- `0013.mp3` — describe new-sequence-each-round (after level swap)
+- `0014.mp3` — describe the audio confuser (after level swap)
+
 ### "My Turn" Variations (0021-0025)
 
 | File | Content |
@@ -244,7 +265,7 @@ Reserved for future use. Base 70 + score value.
 
 ### Boot Sequence
 
-**Note:** A common 4-color sequential sweep runs in `setup()` before mode selection (see `SYSTEM_REQUIREMENTS.md §10`). The Game Mode splash below runs after mode selection, inside `game_init()`.
+**Note:** There is no common LED pattern in `setup()`. On the event branch, Game Mode auto-starts at boot (no mode selection). The Game Mode splash below runs inside `game_init()`.
 
 **Duration:** ~3 seconds
 
@@ -265,11 +286,13 @@ Four rotating effects, 30 seconds each:
 | TWINKLE | Random LEDs sparkle |
 | PULSE_WAVE | Dual wave patterns flow through |
 
-**Audio:** Periodic invites (first at 5s, then 20-45s intervals)
+**Audio:** Periodic invites — first immediately on entering IDLE after boot, then every 20–45 s (random)
 
 ### Invite Sequence
 
 **Trigger:** Timer expires
+
+**Why random intervals:** Keeps the installation from sounding like a fixed timer, prevents people nearby from habituating to a predictable beat, and avoids phase-locking with surrounding sound. Combined with 5 invite variations (anti-repetition), idle audio stays varied.
 
 **Visual:** None — ambient effects continue uninterrupted. The blocking LED pattern (`inviteSequence`) was removed; it caused a ~3s input blackout during every invite, preventing players from pressing to start.
 
@@ -330,8 +353,8 @@ Audio-only invite after game over. Encourages replay. No blocking LED pattern.
 
 | Parameter | Value |
 |-----------|-------|
-| First invite | 5 seconds |
-| Subsequent | 20-45 seconds (random) |
+| First invite | Immediate (first IDLE tick after boot splash) |
+| Subsequent | 20-45 seconds (random), measured from the previous invite |
 | Post-game cooldown | 2500ms (before first post-game invite) |
 
 ### Blocking Visual Pattern Constraint
@@ -347,21 +370,21 @@ Visual patterns that use `delay()` internally (e.g. `diagonalCrossPattern`, `clo
 - **Edge-based:** Actions on press/release only
 - **No hold logic:** No action while button held
 - **Visual feedback:** LED stays on while pressed
+- **Input window:** Presses are only accepted in `SEQ_INPUT`; edges are reset when it starts, so presses during `SEQ_DISPLAY` are discarded
+- **Debounce:** Fast mode (`HW_BTN_GHOST_MS_FAST = 20 ms`) during `SEQ_INPUT`; mid-sequence release confirmed via `hw_btn_pressed()` (see `GAME_ONLY_REQUIREMENTS.md §6.1`)
 
 ### Button Assignments
 
 | Button | GPIO | Wing |
 |--------|------|------|
-| Blue | 32 | W1 |
+| Blue | 26 | W1 |
 | Red | 13 | W2 |
 | Green | 14 | W3 |
 | Yellow | 27 | W4 |
 
-### Special Combinations
+### Special Gestures
 
-See `SYSTEM_REQUIREMENTS.md` for:
-- Blue + Red → Game Mode selection
-- Red + Yellow → Universal reboot
+- **Yellow held 3 s** (event branch) → stop current mode and restart; keep holding through the reboot to reach Mode Selection. See `GAME_ONLY_REQUIREMENTS.md §2`.
 
 ---
 
@@ -392,6 +415,13 @@ See `SYSTEM_REQUIREMENTS.md` for:
 - ✅ DFPlayer volume lost after power glitch (fixed: re-apply on `DFPlayerCardOnline`/`USBOnline` events)
 - ✅ DFPlayer restart failure after mode switch (investigated sleep/wake — removed in favour of always-on; MOSFET on VCC needed for true power management)
 - ✅ Invite and instructions skip lag (~3s blackout) — blocking `inviteSequence()` and `instructionsSequence()` removed; `INSTRUCTIONS_MIN_DURATION_MS` guard removed; `stateTimer` now set with `millis()` at transition point
+- ✅ Second idle invite fired 5 s after the first, truncating it (fixed `dc10342`: leftover `firstInvite` flag removed from `scheduleNextInvite()`; validated 2026-10-19)
+- ✅ False input edge after button release (fixed: 20 ms fast ghost hold + debounced release detection)
+
+### Pending
+
+- ⬜ Re-record `0011.mp3` — wait for "Your Turn" before pressing
+- ⬜ Swap Red/Green mechanics after re-recording `0013.mp3` / `0014.mp3`
 
 ---
 
@@ -406,7 +436,8 @@ CUE_GAP_MS_DEFAULT     = 250
 INPUT_TIMEOUT_MS_DEFAULT = 3000
 
 // Progression
-SPEED_STEP             = 0.97
+SEQUENCE_SPEED_STEP    = 0.97
+INPUT_SPEED_STEP       = 0.97
 MAX_SAME_COLOR         = 2
 
 // Invites
@@ -424,6 +455,7 @@ PWM_MIN_EFFECTIVE_DUTY = 70
 | Document | Content |
 |----------|---------|
 | `hardware-baseline.md` | DFPlayer config (Section 6), PWM constraints (Section 11) |
-| `SYSTEM_REQUIREMENTS.md` | Mode selection, boot sequence |
+| `GAME_ONLY_REQUIREMENTS.md` | Event build: boot, passive mode, debounce, pending game changes (takes precedence) |
+| `SYSTEM_REQUIREMENTS.md` | Mode selection, boot sequence (full build) |
 | `PARTY_MODE_REQUIREMENTS.md` | Party Mode specific requirements |
 | `CLAUDE.md` | Developer guide, build commands |
