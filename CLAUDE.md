@@ -433,7 +433,7 @@ Service LED:               D2 (heartbeat)
 - `CUE_GAP_MS_DEFAULT`: 250ms (min: 120ms) - Gap between cues
 - `INPUT_TIMEOUT_MS_DEFAULT`: 3000ms (min: 1800ms) - Player response limit
 - `SEQUENCE_SPEED_STEP` / `INPUT_SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels (same for all difficulties)
-- `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds random (first invite: immediate after boot). `FIRST_INVITE_DELAY_SEC` is unused.
+- `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds random (first invite: immediate after boot)
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
 - `ENABLE_AUDIO_CONFUSER`: Configured automatically based on difficulty level (Intermediate/Red only — moves to Advanced/Green after the planned level swap)
 - `HW_BTN_GHOST_MS_FAST` / `STANDARD`: 20 / 15 ms debounce hold
@@ -504,11 +504,11 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Stress Test Mode**: automated click simulation (1 s on / 2 s gap, B→R→G→Y); one log line per click; errors (`UNEXPECTED GHOST/PRESS`, `STUCK`) inline; `[STRESS ===]` status every 10 min. ~1 h clean run.
 - **BLUE ghost clicks**: hardware — failing microswitch, replaced (see `hardware-baseline.md §5.2.1`).
 - **Idle invite timing** (`dc10342`): second invite no longer fires 5 s after the first (which truncated it); all subsequent invites wait 20-45 s.
+- **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 
 **Pending:**
 - Re-record `0011.mp3` — tell players to wait for "Your Turn" (presses during display are ignored); maybe add a visual input cue
 - Re-record `0013`/`0014`, then swap Red/Green mechanics (confuser → Green/Advanced) — 2-line swap in `difficultyConfigs`
-- Cleanup: unused `FIRST_INVITE_DELAY_SEC`, `POST_GAME_INVITE_DELAY_MS`; Mode Selection banner says "hold 5s" (code uses 3 s)
 
 ### Updates (November 2025)
 **Branch**: `feat/logic-change`

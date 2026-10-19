@@ -104,7 +104,7 @@ constexpr uint8_t MAX_SAME_COLOR = 2;            // Max consecutive identical co
 // Control how often the game invites players when idle
 constexpr unsigned long INVITE_INTERVAL_MIN_SEC = 20;   // Minimum time between invites (seconds)
 constexpr unsigned long INVITE_INTERVAL_MAX_SEC = 45;   // Maximum time between invites (seconds)
-constexpr unsigned long FIRST_INVITE_DELAY_SEC = 5;     // First invite delay after boot (for testing)
+// First invite plays immediately on entering IDLE after boot (game_init sets nextInviteDelay = 0)
 
 // --- Audio Configuration ---
 // Note: Only applies to real hardware with DFPlayer Mini
@@ -167,7 +167,7 @@ constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must d
 // 15 ms is safe given hardware RC debouncing (10kΩ + 100nF per button); electrical
 // ghosts from MOSFET switching are sub-ms and are filtered by the RC network.
 // HW_BTN_GHOST_MS_FAST: hold time used in active-input states (SEQ_INPUT, diag Phase B).
-// 10 ms compensates for faster loop speed vs original firmware; filters contact bounce
+// 20 ms compensates for faster loop speed vs original firmware; filters contact bounce
 // on release without affecting responsiveness (real taps last 50ms+).
 constexpr uint32_t HW_BTN_GHOST_MS_STANDARD = 15;  // Normal debounce hold (ms)
 constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 20;  // Fast-input debounce hold (ms)
@@ -206,7 +206,6 @@ constexpr unsigned long MY_TURN_DURATION_MS = 3000;                  // "My Turn
 constexpr unsigned long YOUR_TURN_DURATION_MS = 3000;                // "Your Turn" audio duration (increased fallback)
 constexpr unsigned long FEEDBACK_DURATION_MS = 5000;                 // Correct/Wrong feedback duration (5 sec fallback, DFPlayer notification preferred)
 constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message fallback timeout (primary: DFPlayer finish event)
-constexpr unsigned long POST_GAME_INVITE_DELAY_MS = 6000;            // Pause after general game over message before invite
 constexpr unsigned long GAME_OVER_MESSAGE_DELAY_MS = 1000;           // Gap between personalized and general game over messages
 
 // Visual Effect Durations (for blocking sequences like boot, invite, instructions)

@@ -93,7 +93,7 @@ static void passiveTick() {
                     (unsigned)(rtcPassiveRetries + 1), (unsigned)PASSIVE_MAX_RETRIES);
     }
   }
-  // Max retries reached: stay dark indefinitely until power-cycle or yellow 5s
+  // Max retries reached: stay dark indefinitely until power-cycle or yellow 3s
 }
 
 // =============================================================================
@@ -160,7 +160,7 @@ static TopMode runModeSelection() {
   Serial.println("\n=== MODE SELECTION ===");
   Serial.println("  BLUE   -> Game Mode");
   Serial.println("  RED    -> Diagnostic Mode");
-  Serial.println("  YELLOW -> Stress Test Mode  (hold 5s = restart to game mode)");
+  Serial.println("  YELLOW -> Stress Test Mode  (hold 3s = restart to game mode)");
   static const Color SEL_COLORS[] = {BLUE, RED, YELLOW};
   uint8_t rotSlot = 0;
   hw_led_duty(SEL_COLORS[0], 180);
@@ -278,7 +278,7 @@ void loop() {
     return;
   }
 
-  // Yellow 5s from any active mode → restart to mode selection
+  // Yellow 3s from any active mode → restart to mode selection
   if (hw_btn_held_ms(YELLOW) >= YELLOW_EXIT_HOLD_MS) {
     Serial.println("[SYS] Yellow held: restarting to mode selection.");
     switch (activeMode) {

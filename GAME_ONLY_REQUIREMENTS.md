@@ -303,7 +303,7 @@ The ghost storm monitor (`ghostMonitorTick()` in `main.cpp`) was implemented to 
 
 The interval is randomized so the installation does not sound like a fixed timer, passers-by and staff don't habituate to a predictable beat, and invites don't lock into phase with surrounding sound sources. Combined with the 5 random invite variations (anti-repetition), the idle audio stays varied.
 
-**Validated on hardware 2026-10-19.** Note: `FIRST_INVITE_DELAY_SEC` in `shimon.h` is now unused (dead constant).
+**Validated on hardware 2026-10-19.** The unused `FIRST_INVITE_DELAY_SEC` constant was then removed from `shimon.h`.
 
 ### 6.5 Presses During Sequence Display (Open — Audio Content)
 
@@ -381,12 +381,12 @@ All constants in `include/shimon.h`.
 - ✅ Click detection investigation resolved — BLUE button microswitch replaced; 20ms debounce threshold confirmed sufficient (§6.2)
 - ✅ Stress test logging simplified; ~1 hour clean run (§5)
 - ✅ Idle invite timing — second invite waits the full random interval; validated on hardware (§6.4)
+- ✅ Cleanup: removed unused `FIRST_INVITE_DELAY_SEC` and `POST_GAME_INVITE_DELAY_MS` from `shimon.h`; Mode Selection banner and comments now say 3 s (matches `YELLOW_EXIT_HOLD_MS`)
 
 ### Pending
 
 - ⬜ Re-record instructions `0011.mp3` — tell players to wait for "Your Turn" (§6.5); decide on visual input cue
 - ⬜ Re-record difficulty instructions `0013.mp3` / `0014.mp3`, then swap levels 2 and 3 (§6.6)
-- ⬜ Cleanup: remove unused `FIRST_INVITE_DELAY_SEC` and `POST_GAME_INVITE_DELAY_MS` from `shimon.h`; fix stale "hold 5s" text in Mode Selection serial banner (code uses 3 s)
 
 ---
 
