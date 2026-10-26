@@ -1,5 +1,7 @@
 # Mission: Add Difficulty Levels
 
+> **Note (Oct 2026)**: Red and Green mechanics have since been swapped — Red = new sequence each turn, Green = audio confuser. See `GAME_ONLY_REQUIREMENTS.md §6.6`. The original spec below is historical.
+
 ## Overview
 Extend the Shimon game from a single difficulty mode to **four distinct difficulty levels**, each offering unique gameplay mechanics and challenges.
 

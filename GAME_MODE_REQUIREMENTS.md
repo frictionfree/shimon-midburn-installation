@@ -32,19 +32,19 @@ During difficulty selection, players choose by pressing a colored button:
 | Button | Difficulty | Starting Length | Mechanic |
 |--------|------------|-----------------|----------|
 | **Blue** | Novice | 3 | Standard — sequence extends by one color each round |
-| **Red** | Intermediate | 3 | Audio confuser — spoken color may differ from the LED |
-| **Green** | Advanced | 3 | New random sequence each round (one longer) — no memorizing the previous rounds |
+| **Red** | Intermediate | 3 | New random sequence each round (one longer) — no memorizing the previous rounds |
+| **Green** | Advanced | 3 | Audio confuser — spoken color may differ from the LED |
 | **Yellow** | Pro | 3 | Alternating presentation — even steps LED only (silent), odd steps voice only (dark) |
 
 All difficulties start with a sequence of 3 colors. A sequence shorter than 3 is trivial and confusing — no difficulty starts below this floor.
 
 All difficulties share the same timing curve (see §7); difficulty comes from the mechanic, not speed.
 
-> **Planned swap (blocked on audio re-record):** Red and Green mechanics will be swapped — confuser moves to Green/Advanced, new-sequence-each-round moves to Red/Intermediate — because the confuser proved harder in field testing. See `GAME_ONLY_REQUIREMENTS.md §6.6`.
+> **Swapped Oct 2026:** Red and Green mechanics were swapped (confuser was Red, new-sequence was Green) because the confuser proved harder in field testing. See `GAME_ONLY_REQUIREMENTS.md §6.6`.
 
-### Audio Confuser (Intermediate Only)
+### Audio Confuser (Advanced Only)
 
-In Intermediate difficulty, the spoken color name may differ from the displayed LED color, adding cognitive challenge. (Moves to Advanced after the planned swap.)
+In Advanced (Green) difficulty, the spoken color name may differ from the displayed LED color, adding cognitive challenge.
 
 ### Score Thresholds
 
@@ -182,9 +182,7 @@ All files in `/mp3/` directory on SD card.
 | 0014.mp3 | Green/Advanced difficulty instructions |
 | 0015.mp3 | Yellow/Pro difficulty instructions |
 
-**Pending re-recordings** (see `GAME_ONLY_REQUIREMENTS.md §6.6`):
-- `0013.mp3` — describe new-sequence-each-round (after level swap)
-- `0014.mp3` — describe the audio confuser (after level swap)
+`0013.mp3` describes new-sequence-each-round; `0014.mp3` describes the audio confuser (re-recorded for the Oct 2026 level swap, see `GAME_ONLY_REQUIREMENTS.md §6.6`).
 
 ### "My Turn" Variations (0021-0025)
 
@@ -393,7 +391,7 @@ Visual patterns that use `delay()` internally (e.g. `diagonalCrossPattern`, `clo
 
 - ✅ Full FSM implementation
 - ✅ All 4 difficulty levels
-- ✅ Audio confuser (Intermediate)
+- ✅ Audio confuser (Advanced/Green since Oct 2026 swap)
 - ✅ Personalized game over messages
 - ✅ Audio finish detection
 - ✅ Ambient idle effects
@@ -421,7 +419,7 @@ Visual patterns that use `delay()` internally (e.g. `diagonalCrossPattern`, `clo
 
 ### Pending
 
-- ⬜ Swap Red/Green mechanics after re-recording `0013.mp3` / `0014.mp3`
+- ✅ Red/Green mechanics swapped (`0013.mp3` / `0014.mp3` re-recorded)
 
 ---
 

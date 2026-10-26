@@ -9,22 +9,22 @@
 // --- Difficulty Level System ---
 enum DifficultyLevel {
   NOVICE = 0,       // Blue button - Basic mode
-  INTERMEDIATE = 1, // Red button - Confuser mode
-  ADVANCED = 2,     // Green button - New sequence each turn
+  INTERMEDIATE = 1, // Red button - New sequence each turn
+  ADVANCED = 2,     // Green button - Confuser mode
   PRO = 3           // Yellow button - Alternating LED/audio
 };
 
 struct DifficultySettings {
   uint8_t startingSequenceLength;
   bool confuserEnabled;
-  bool regenerateSequenceEachTurn;  // For Green level - generates completely new sequence each turn
+  bool regenerateSequenceEachTurn;  // For Red level - generates completely new sequence each turn
   bool alternatingLedAudio;         // For Yellow level - alternates LED and audio presentation
 };
 
 const DifficultySettings difficultyConfigs[4] = {
   {3, false, false, false},  // NOVICE (Blue) - starts at 3, extends cumulatively
-  {3, true, false, false},   // INTERMEDIATE (Red) - confuser mode, starts at 3
-  {3, false, true, false},   // ADVANCED (Green) - new sequence each turn, starts at 3
+  {3, false, true, false},   // INTERMEDIATE (Red) - new sequence each turn, starts at 3
+  {3, true, false, false},   // ADVANCED (Green) - confuser mode, starts at 3
   {3, false, false, true}    // PRO (Yellow) - alternating LED/audio, starts at 3
 };
 
@@ -1014,10 +1014,10 @@ void game_tick() {
         auto settings = difficultyConfigs[selectedDifficulty];
 
         if (settings.regenerateSequenceEachTurn) {
-          // Green level - generate completely new sequence
+          // Red level - generate completely new sequence
           game.level++;  // Increase length
           generateNewSequence(game.level);  // Fresh random sequence
-          Serial.printf("Green level: Generated new sequence, length %d\n", game.level);
+          Serial.printf("Red level: Generated new sequence, length %d\n", game.level);
         } else {
           // Blue/Red/Yellow - extend existing sequence
           extendSequence();

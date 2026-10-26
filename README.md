@@ -49,7 +49,7 @@ GAME_OVER → IDLE
 - **Multiple audio variations** for \"My Turn\", \"Your Turn\", and positive feedback (5 variations each).
 - **Anti-repetition system** prevents playing the same audio variation consecutively.
 - **Four difficulty levels** (Novice, Intermediate, Advanced, Pro) with unique gameplay mechanics.
-- **Confuser mode** (Intermediate difficulty only) mismatches spoken vs. shown colors.
+- **Confuser mode** (Advanced/Green difficulty only) mismatches spoken vs. shown colors.
 - Adjustable timing: `CUE_ON_MS`, `CUE_GAP_MS`, `INPUT_TIMEOUT_MS`.
 - PWM-driven LED channels (4 × 4 kHz).
 - UART1 connection to DFPlayer (`TX = 17`, `RX = 16`).

@@ -327,11 +327,11 @@ If the player answers before "Your Turn" finishes, the timeout starts on release
 
 **Implementation:** `mode_game.cpp` — `SEQ_DISPLAY` transitions on the last cue's LED-off; `SEQ_INPUT` uses `yourTurnPlayed` / `inputClockRunning` flags to defer "Your Turn" and gate the timeout.
 
-### 6.6 Swap Difficulty Levels 2 and 3 (Planned — Blocked on Audio)
+### 6.6 Swap Difficulty Levels 2 and 3 (Done — Oct 2026)
 
 **Rationale:** Field testing showed the audio confuser is harder than new-sequence-each-turn, so it should be the higher level.
 
-| Button | Difficulty | Current mechanic | After swap |
+| Button | Difficulty | Before swap | Now |
 |--------|------------|------------------|------------|
 | Red | Intermediate | Audio confuser | New sequence each turn |
 | Green | Advanced | New sequence each turn | Audio confuser |
@@ -344,11 +344,11 @@ Also update the `DifficultyLevel` enum comments and the `"Green level"` serial l
 
 **No change needed:** Game over thresholds and messages — Red/Intermediate stays at ≥ 8 ("Move up to Advanced!"), Green/Advanced stays at ≥ 10 ("Join finals Friday!").
 
-**Blocked on:** Re-recording difficulty instruction tracks:
-- `0013.mp3` (Red) — must describe new-sequence-each-turn
-- `0014.mp3` (Green) — must describe the audio confuser
+**Audio:** Difficulty instruction tracks re-recorded to match:
+- `0013.mp3` (Red) — describes new-sequence-each-turn
+- `0014.mp3` (Green) — describes the audio confuser
 
-Firmware and audio must be deployed together; swapping either alone would make the spoken instructions contradict the gameplay.
+Firmware and audio must be deployed together (SD card must carry the new `0013`/`0014`); swapping either alone would make the spoken instructions contradict the gameplay.
 
 ---
 
@@ -401,10 +401,10 @@ All constants in `include/shimon.h`.
 - ✅ Wokwi simulation build removed: `[env:sim]`, `wokwi.toml`, `diagram.json` and all `USE_WOKWI` code; hardware envs only
 - ✅ Unused `shimon.h` constants removed; PWM config lives only in `hw.h`; I2S/MIDI pins kept as a RESERVED comment; dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`, files 0070-0170) dropped
 - ✅ `POST_GAME_COOLDOWN_MS` (2500 ms) moved into `shimon.h`
+- ✅ Red/Green mechanics swapped: Red = new sequence each turn, Green = audio confuser; `0013`/`0014` re-recorded (§6.6)
 
 ### Pending
 
-- ⬜ Swap levels 2 and 3 (§6.6) — `0013.mp3` / `0014.mp3` re-recorded, ready
 - ⬜ Per-difficulty high scores + game counter in NVS, logged at game start/end; new high score plays `0071.mp3` with fast LED rotation
 
 ---
