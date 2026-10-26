@@ -17,7 +17,7 @@ static uint8_t  statsHiScore[4];
 
 void stats_load() {
   Preferences prefs;
-  prefs.begin("shimon", true);
+  prefs.begin("shimon", false);  // read-write: creates the namespace on a fresh board (no nvs_open error)
   statsGameCount = prefs.getUInt("games", 0);
   for (int i = 0; i < 4; i++) statsHiScore[i] = prefs.getUChar(HISCORE_KEYS[i], HISCORE_INIT[i]);
   prefs.end();

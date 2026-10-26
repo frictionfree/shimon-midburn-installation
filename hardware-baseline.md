@@ -20,8 +20,19 @@ Audio feedback for interactive/game mode is provided by a DFPlayer Mini MP3 modu
 ## 2. Core Controller
 
 - **Controller:** ESP32‑DevKitC‑32E (ESP32‑WROOM‑32E)
-- Powered from 5 V (USB or buck converter)
+- Powered from 5 V (buck converter via the 5 V header pin; USB for development)
 - 3.3 V rail used for logic and button sensing
+
+### 2.1 USB‑C Board Revision — Power Path (Field Finding, Oct 2026)
+
+The controller was replaced with a USB‑C variant (Guchia ESP32‑WROOM‑32E, CH340K USB‑serial). Its power input differs from the previous USB‑B (micro‑USB) board:
+
+- **Schematic:** USB VBUS → diode **D1** → internal 5 V net; **5 V header pin → diode D2** → internal 5 V net (diode‑OR). An unpopulated 0402 pad marked **"IN‑OUT"** sits across D2.
+- **Consequence 1 — USB does not power the 5 V rail.** On USB alone the 5 V header pin measures < 1 V (3.3 V rail is fine). The DFPlayer, fed from the system 5 V rail, is unpowered → firmware reports `DFPlayer init failed` → Passive Mode (red breathing). The old board passed USB 5 V out to the header pin.
+- **Consequence 2 — USB + system 5 V together is safe.** Neither source can back‑feed the other, so the old rule "disconnect system 5 V while USB is plugged in" is **no longer needed** with this board.
+- **Power‑up order:** the ESP32 must boot with the system 5 V already on, otherwise DFPlayer init fails at boot and the box stays in Passive Mode (auto‑retry after 5 min). Turn on system power **first**, then plug in USB — or press **EN** after power‑on. Opening the serial monitor or uploading also resets the board.
+- **Do not bridge the "IN‑OUT" pad** — it would bypass D2, connect USB VBUS straight to the 5 V rail and reintroduce the back‑feed risk.
+- **Serial port:** CH340 driver; the COM port number may differ from the old board's.
 
 ---
 
@@ -178,7 +189,7 @@ This behavior has been implemented and tested in hardware.
   - 12 V distribution
   - 5 V distribution
   - Common ground star points
-- USB‑A → micro‑USB cable used to power ESP32 during development or via buck converter
+- USB‑C cable for upload / serial monitor during development (system 5 V stays on — see §2.1); in operation the ESP32 is powered from the buck converter
 
 ---
 

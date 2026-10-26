@@ -19,7 +19,8 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 ## Architecture
 
 ### Hardware Setup
-- **Platform**: ESP32 DevKitC-V4 (espressif32)
+- **Platform**: ESP32 DevKitC-V4 (espressif32); since Oct 2026 a USB-C ESP32-WROOM-32E board (CH340K)
+- **USB-C board power**: USB does NOT power the 5 V rail (diode on the 5 V pin) — DFPlayer needs system 5 V. Keep system power on while using USB (no back-feed with this board); power the system before plugging USB, or press EN. See `hardware-baseline.md §2.1`.
 - **Framework**: Arduino
 - **Pin Configuration** (`include/shimon.h` is the single source of truth for all pin/hw constants):
   - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5
@@ -461,6 +462,7 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
 - **Unused constants removed** from `shimon.h`: legacy `*_DURATION_MS` fallbacks, unused visual delays, ambient/scoring/variety/debug blocks, `PWM_FREQUENCY_HZ`/`PWM_RESOLUTION_BITS` (duplicates of `hw.h`), I2S/MIDI pin constants (now a RESERVED-pins comment), and the dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`).
+- **NVS first-boot error silenced**: `stats_load()` opens NVS read-write, so a fresh board no longer logs `nvs_open failed: NOT_FOUND`.
 - **Stats Mode** (Green in mode menu): ESP32 opens Wi-Fi `Shimon-Stats` (password `shimon2026`); Safari → `http://192.168.4.1` shows games played + high scores. Wi-Fi only runs in this mode. NVS stats code moved to shared `stats.cpp`. Flash 24% → 62%. See `GAME_ONLY_REQUIREMENTS.md §6.9`.
 - **Score = longest sequence completed** (was rounds completed — failing on 10 steps gave 7, now 9). Thresholds (8/10) and `HISCORE_INIT` (7) kept as-is by decision; thresholds moved into `shimon.h` + `isStrongScore()`. NVS high-score keys renamed `hi*` → `hs*` so old-unit test values are ignored. See `GAME_ONLY_REQUIREMENTS.md §6.8`.
 - **High scores + game counter**: persisted in NVS (`Preferences`, namespace `shimon`): one total game counter + one high score per difficulty, initial value `HISCORE_INIT` (7). No reset (survives power-down and reflash). Logs: `[STATS] Games played ...` at boot, `[STATS] Game #N start ...` / `[STATS] Game #N end ... (NEW HIGH SCORE!)`. A new high score inserts `NEW_HIGH_SCORE` (`0071` + fast rotation, skippable) between `0051`/`0052` and the personalized message. See `GAME_ONLY_REQUIREMENTS.md §6.7`.

@@ -369,6 +369,7 @@ Firmware and audio must be deployed together (SD card must carry the new `0013`/
 - No reset mechanism; values survive power-down and normal firmware uploads.
 - Score = longest sequence completed (see §6.8). Keys were renamed `hi*` → `hs*` with that change, so high scores saved by earlier test builds (old score units) are ignored and every difficulty restarts at `HISCORE_INIT`.
 - Writes happen only at game start (counter) and on a new high score.
+- `stats_load()` opens the namespace read-write so it is created on a fresh board (avoids the harmless `nvs_open failed: NOT_FOUND` log line).
 
 **Logging:**
 ```
@@ -477,6 +478,7 @@ All constants in `include/shimon.h`.
 - ✅ Per-difficulty high scores + game counter in NVS, logged at boot / game start / game end; new high score plays `0071.mp3` with fast LED rotation (§6.7)
 - ✅ Score = longest sequence completed; thresholds/initial high score unchanged; NVS keys `hs*` (§6.8)
 - ✅ Stats Mode (Green in mode menu): Wi-Fi page with game counter + high scores; NVS stats moved to shared `stats.cpp` (§6.9)
+- ✅ NVS first-boot `nvs_open failed` log line removed (§6.7); USB-C board power path documented (`hardware-baseline.md §2.1`)
 
 ### Pending
 
