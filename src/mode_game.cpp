@@ -1137,9 +1137,7 @@ void game_tick() {
 
     case POST_GAME_INVITE: {
       // Brief silent pause before invite so it doesn't play right on the back
-      // of the general game over message. stateTimer was set on entry.
-      const unsigned long POST_GAME_COOLDOWN_MS = 2500;
-
+      // of the general game over message (POST_GAME_COOLDOWN_MS). stateTimer was set on entry.
       if (anyButtonPressed()) {
         Serial.println("Post-game invite skipped by user");
         audio.stop();

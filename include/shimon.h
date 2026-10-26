@@ -94,6 +94,7 @@ constexpr uint8_t MAX_SAME_COLOR = 2;            // Max consecutive identical co
 // Control how often the game invites players when idle
 constexpr unsigned long INVITE_INTERVAL_MIN_SEC = 20;   // Minimum time between invites (seconds)
 constexpr unsigned long INVITE_INTERVAL_MAX_SEC = 45;   // Maximum time between invites (seconds)
+constexpr unsigned long POST_GAME_COOLDOWN_MS = 2500;   // Silent pause after game over before the post-game invite (ms)
 // First invite plays immediately on entering IDLE after boot (game_init sets nextInviteDelay = 0)
 
 // --- Audio Configuration ---

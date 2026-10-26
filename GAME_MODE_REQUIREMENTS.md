@@ -144,7 +144,7 @@ The `Audio` class owns all playback state. Callers follow one rule: **call `audi
 - FSM states do not pass timeout constants — fallback timeouts live inside `play*()` and are set generously (5–15 s) as a safety net, not as tuned estimates.
 - No blocking `delay()` calls in FSM states for audio purposes.
 - No blocking LED visual sequences during invite or instructions playback — all visual patterns that used `delay()` internally (`inviteSequence`, `instructionsSequence`) have been removed. Audio plays non-blocking; ambient effects provide visual engagement in IDLE.
-- `POST_GAME_INVITE` waits 2500 ms after entry before playing the invite, then plays immediately.
+- `POST_GAME_INVITE` waits `POST_GAME_COOLDOWN_MS` (2500 ms, `shimon.h`) after entry before playing the invite, then plays immediately.
 - Invite variations use anti-repetition tracking (`lastInviteVar`) matching the pattern used by My Turn, Your Turn, and Correct feedback variations.
 
 ### DFPlayer Power Lifecycle

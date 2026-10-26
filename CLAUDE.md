@@ -373,7 +373,7 @@ Service LED:               D2 (heartbeat)
 **Result**: Proceeds to Post-Game Invite
 
 ### **Post-Game Invite**
-**Cooldown**: 2500 ms silent pause, then the invite plays (button press during cooldown → straight to IDLE)
+**Cooldown**: `POST_GAME_COOLDOWN_MS` (2500 ms, `shimon.h`) silent pause, then the invite plays (button press during cooldown → straight to IDLE)
 **Audio**: Random invite (1-5) — same as idle invites
 **Visual**: None (blocking pattern removed)
 **Result**: Returns to Idle Mode; next invite in 20-45 s
@@ -388,6 +388,7 @@ Service LED:               D2 (heartbeat)
 - `INPUT_TIMEOUT_MS_DEFAULT`: 3000ms (min: 1800ms) - Player response limit
 - `SEQUENCE_SPEED_STEP` / `INPUT_SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels (same for all difficulties)
 - `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds random (first invite: immediate after boot)
+- `POST_GAME_COOLDOWN_MS`: 2500 ms silent pause before the post-game invite
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
 - `ENABLE_AUDIO_CONFUSER`: Configured automatically based on difficulty level (Intermediate/Red only — moves to Advanced/Green after the planned level swap)
 - `HW_BTN_GHOST_MS_FAST` / `STANDARD`: 20 / 15 ms debounce hold
@@ -448,10 +449,10 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
 - **Unused constants removed** from `shimon.h`: legacy `*_DURATION_MS` fallbacks, unused visual delays, ambient/scoring/variety/debug blocks, `PWM_FREQUENCY_HZ`/`PWM_RESOLUTION_BITS` (duplicates of `hw.h`), I2S/MIDI pin constants (now a RESERVED-pins comment), and the dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`).
+- **`POST_GAME_COOLDOWN_MS`** (2500 ms) moved from a local in `mode_game.cpp` to `shimon.h`.
 - **Sim build removed**: `[env:sim]`, `wokwi.toml`, `diagram.json` and all `USE_WOKWI` code deleted — hardware envs only.
 
 **Pending:**
-- Move `POST_GAME_COOLDOWN_MS` into `shimon.h`
 - Swap Red/Green mechanics (confuser → Green/Advanced) — `0013`/`0014` re-recorded, ready
 - Per-difficulty high scores + game counter (NVS), logged at game start/end; new high score → `0071.mp3` + fast LED rotation
 
