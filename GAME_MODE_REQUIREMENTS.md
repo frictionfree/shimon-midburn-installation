@@ -243,9 +243,9 @@ All files in `/mp3/` directory on SD card.
 | 0063.mp3 | "Green" |
 | 0064.mp3 | "Yellow" |
 
-### Score Announcements (0070-0170)
+### New High Score (0071)
 
-Reserved for future use. Base 70 + score value.
+`0071.mp3` — new-high-score celebration (pending high-score feature). The old score-announcement range (0070-0170) was never used and has been dropped.
 
 ### Audio File Specifications
 

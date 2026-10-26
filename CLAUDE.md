@@ -81,6 +81,7 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 - **Stable Operating Envelope**:
   - Frequency: 12-12.5 kHz
   - Resolution: 8-bit (0-255)
+- **Configuration**: `HW_PWM_FREQ` / `HW_PWM_BITS` in `hw.h` (HAL-internal)
 - **Note**: Higher frequency + resolution combinations (e.g., 25 kHz @ 12-bit) are unstable or non-functional
 
 #### Button LED Behavior
@@ -187,15 +188,7 @@ mp3/
 │   ├── 0063.mp3   # "Green"
 │   └── 0064.mp3   # "Yellow"
 │
-└── 0070-0170.mp3  # Score announcements (base 70 + score value)
-    ├── 0070.mp3   # "Zero points"
-    ├── 0071.mp3   # "One point"
-    ├── 0072.mp3   # "Two points"
-    ├── 0075.mp3   # "Five points"
-    ├── 0080.mp3   # "Ten points"
-    ├── 0085.mp3   # "Fifteen points"
-    ├── 0090.mp3   # "Twenty points"
-    └── 0170.mp3   # "One hundred points! Amazing!"
+└── 0071.mp3       # New high score celebration (high-score feature, pending)
 ```
 
 **Notes**:
@@ -205,7 +198,7 @@ mp3/
   - Strong performers encouraged to advance to next difficulty level
   - Top performers (Advanced/Pro) invited to finals on Friday
   - General game over message (0058) always plays after personalized message
-- Score files (0070-0170) reserved for future use (not currently announced in-game)
+- Score-announcement range (0070-0170) dropped Oct 2026 — never used in-game; `0071` is now the new-high-score message
 
 ### **Audio File Specifications:**
 - **Format**: MP3, 16-bit, mono recommended for smaller file size
@@ -454,10 +447,10 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Idle invite timing** (`dc10342`): second invite no longer fires 5 s after the first (which truncated it); all subsequent invites wait 20-45 s.
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
+- **Unused constants removed** from `shimon.h`: legacy `*_DURATION_MS` fallbacks, unused visual delays, ambient/scoring/variety/debug blocks, `PWM_FREQUENCY_HZ`/`PWM_RESOLUTION_BITS` (duplicates of `hw.h`), I2S/MIDI pin constants (now a RESERVED-pins comment), and the dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`).
 - **Sim build removed**: `[env:sim]`, `wokwi.toml`, `diagram.json` and all `USE_WOKWI` code deleted — hardware envs only.
 
 **Pending:**
-- Remove unused `shimon.h` constants (incl. dead `playScore()` / `AUDIO_SCORE_BASE`)
 - Move `POST_GAME_COOLDOWN_MS` into `shimon.h`
 - Swap Red/Green mechanics (confuser → Green/Advanced) — `0013`/`0014` re-recorded, ready
 - Per-difficulty high scores + game counter (NVS), logged at game start/end; new high score → `0071.mp3` + fast LED rotation

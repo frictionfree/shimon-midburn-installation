@@ -399,10 +399,10 @@ All constants in `include/shimon.h`.
 
 - ✅ Eager input: input opens when the last cue ends; first-press timeout starts after "Your Turn"; validated on hardware (§6.5)
 - ✅ Wokwi simulation build removed: `[env:sim]`, `wokwi.toml`, `diagram.json` and all `USE_WOKWI` code; hardware envs only
+- ✅ Unused `shimon.h` constants removed; PWM config lives only in `hw.h`; I2S/MIDI pins kept as a RESERVED comment; dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`, files 0070-0170) dropped
 
 ### Pending
 
-- ⬜ Remove unused constants from `shimon.h` (incl. dead score-announcement code `playScore()` / `AUDIO_SCORE_BASE`)
 - ⬜ Move `POST_GAME_COOLDOWN_MS` (2500 ms) from `mode_game.cpp` into `shimon.h`
 - ⬜ Swap levels 2 and 3 (§6.6) — `0013.mp3` / `0014.mp3` re-recorded, ready
 - ⬜ Per-difficulty high scores + game counter in NVS, logged at game start/end; new high score plays `0071.mp3` with fast LED rotation

@@ -260,14 +260,6 @@ struct Audio {
     dfPlayer.playMp3Folder(AUDIO_GAME_OVER_GENERAL);
     Serial.printf("[AUDIO] General game over -> /mp3/%04d.mp3\n", AUDIO_GAME_OVER_GENERAL);
   }
-  void playScore(uint8_t score) {
-    if (score > 100) return;
-    uint8_t f = AUDIO_SCORE_BASE + score;
-    _stopAndStart(5000);
-    if (!initialized) return;
-    dfPlayer.playMp3Folder(f);
-    Serial.printf("[AUDIO] Score %d -> /mp3/%04d.mp3\n", score, f);
-  }
   void stop() {
     Serial.println("[AUDIO] Stop");
     if (initialized) dfPlayer.stop();

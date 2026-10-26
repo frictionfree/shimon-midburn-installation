@@ -1,7 +1,7 @@
 # Multiple Audio Feedbacks Feature - IMPLEMENTATION COMPLETE
 
 **Feature Status**: ✅ FULLY IMPLEMENTED AND TESTED  
-> **Note (Oct 2026)**: the Wokwi simulation build (`USE_WOKWI`, `pio run -e sim`) has been removed. Simulation snippets below are historical.
+> **Note (Oct 2026)**: the Wokwi simulation build (`USE_WOKWI`, `pio run -e sim`) has been removed. Simulation snippets below are historical. The score-announcement range (0070-0170, `AUDIO_SCORE_BASE`) was also dropped; `0071` is now the new-high-score message.
 
 **Branch**: `multiple-audio-feedbacks`  
 **Target**: Midburn 2025 Shimon Installation  

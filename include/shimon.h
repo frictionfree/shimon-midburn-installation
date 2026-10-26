@@ -34,15 +34,10 @@ constexpr uint8_t BTN_YELLOW = 27;  // Yellow button input (GPIO27)
 // DFPlayer (Serial2)
 // (DFP_RX2 / DFP_TX2 removed — use DFPLAYER_RX / DFPLAYER_TX below)
 
-// I2S audio input (SPDIF→I2S converter, slave mode)
-constexpr int     I2S_PIN_BCLK    = 33;   // Bit clock    (GPIO33) — moved from GPIO26 Mar 2026
-constexpr int     I2S_PIN_LRCK    = 25;   // Word select  (GPIO25)
-constexpr int     I2S_PIN_DATA    = 32;   // Data in      (GPIO32) — moved from GPIO22 Mar 2026
-constexpr int     I2S_SAMPLE_RATE = 48000; // Hz
-
-// MIDI clock input (DIN-5 via optocoupler, UART1)
-constexpr int      MIDI_PIN_RX   = 34;    // GPIO34 (input-only pin)
-constexpr uint32_t MIDI_BAUD_RATE = 31250; // Standard MIDI baud rate
+// RESERVED — wired on the board but unused by this game-only build (Party Mode removed):
+//   I2S audio input: BCLK=GPIO33, LRCK=GPIO25, DATA=GPIO32
+//   MIDI clock input: RX=GPIO34 (UART1, 31250 bps)
+// Do not reassign these GPIOs.
 
 // --- Notes ---
 // - Button switches: connect to GND (use INPUT_PULLUP with 10kΩ pull-up + 100nF + 1µF caps to GND).
@@ -74,10 +69,7 @@ constexpr uint8_t PWM_MIN_EFFECTIVE_DUTY = 70;  // Minimum duty for visible LED 
 // 320/255 × 3A/wing ≈ 3.8A total — safe below the 8.3A limit even with transient peaks.
 constexpr uint16_t HW_GLOBAL_DUTY_CAP = 320;
 
-// PWM Configuration (Stable Operating Envelope)
-// Higher frequency/resolution combinations are unstable or non-functional.
-constexpr unsigned long PWM_FREQUENCY_HZ = 12500;  // 12.5 kHz (stable, silent)
-constexpr uint8_t PWM_RESOLUTION_BITS = 8;         // 8-bit (0-255)
+// PWM frequency/resolution: see HW_PWM_FREQ / HW_PWM_BITS in hw.h (12.5 kHz, 8-bit).
 
 // --- Game Timing Configuration ---
 // Adjust these values to change game difficulty and pacing
@@ -135,10 +127,6 @@ constexpr uint8_t AUDIO_COLOR_RED = 62;          // /mp3/0062.mp3 - "Red"
 constexpr uint8_t AUDIO_COLOR_GREEN = 63;        // /mp3/0063.mp3 - "Green"
 constexpr uint8_t AUDIO_COLOR_YELLOW = 64;       // /mp3/0064.mp3 - "Yellow"
 
-// Score Audio Files (migrated to /mp3/ directory)
-// Note: Score files use base + score value for direct calculation
-constexpr uint8_t AUDIO_SCORE_BASE = 70;         // Base for score files (0070.mp3 = score 0, 0071.mp3 = score 1, etc.)
-
 // --- Multiple Audio Variations Configuration ---
 // New audio variation system for frequently repeated messages
 constexpr uint8_t MYTURN_BASE = 21;              // "My Turn" base file number (0021-0025.mp3)
@@ -170,50 +158,12 @@ constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must d
 constexpr uint32_t HW_BTN_GHOST_MS_STANDARD = 15;  // Normal debounce hold (ms)
 constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 20;  // Fast-input debounce hold (ms)
 
-// Visual Effects Settings
-constexpr unsigned long AMBIENT_EFFECT_DURATION_SEC = 30;  // Time per ambient effect
-constexpr unsigned long AMBIENT_UPDATE_INTERVALS[] = {     // Update intervals for each effect (ms)
-    100,  // BREATHING
-    800,  // SLOW_CHASE  
-    500,  // TWINKLE
-    200   // PULSE_WAVE
-};
-
-// Debug and Development Settings
-constexpr bool ENABLE_DEBUG_OUTPUT = true;       // Enable verbose serial output
+// Debug Settings
 constexpr unsigned long DEBUG_INTERVAL_MS = 5000; // Debug message interval in idle
-
-// --- Scoring System ---
-// Configure how points are awarded
-constexpr bool SCORE_BY_LEVEL = true;            // Award points equal to level completed
-constexpr uint8_t BASE_SCORE_PER_LEVEL = 1;     // Base points per level (multiplied by level)
-constexpr uint8_t BONUS_SCORE_HIGH_LEVEL = 5;   // Bonus points for levels > 10
-constexpr uint8_t HIGH_LEVEL_THRESHOLD = 10;    // Level at which bonus scoring starts
-
-// --- Advanced Configuration ---
-// These settings are for fine-tuning the game experience
-
-// Sequence Generation
-constexpr bool ENSURE_VARIETY = true;            // Prevent too many consecutive same colors
-constexpr uint8_t MIN_DIFFERENT_COLORS = 3;     // Minimum different colors in sequences > 8
-
-// State Machine Timeouts (increased as fallback safety - primary detection via DFPlayer finish notification)
-constexpr unsigned long MAIN_INSTRUCTIONS_DURATION_MS = 10000;       // Main instructions with difficulty selection explanation (10 sec fallback)
-constexpr unsigned long DIFFICULTY_INSTRUCTIONS_DURATION_MS = 8000;  // Difficulty-specific instructions (8 sec fallback)
-constexpr unsigned long MY_TURN_DURATION_MS = 3000;                  // "My Turn" audio duration (increased fallback)
-constexpr unsigned long YOUR_TURN_DURATION_MS = 3000;                // "Your Turn" audio duration (increased fallback)
-constexpr unsigned long FEEDBACK_DURATION_MS = 5000;                 // Correct/Wrong feedback duration (5 sec fallback, DFPlayer notification preferred)
-constexpr unsigned long GAME_OVER_DURATION_MS = 6000;                // Game over message fallback timeout (primary: DFPlayer finish event)
-constexpr unsigned long GAME_OVER_MESSAGE_DELAY_MS = 1000;           // Gap between personalized and general game over messages
 
 // Visual Effect Durations (for blocking sequences like boot, invite, instructions)
 constexpr unsigned long BOOT_WAVE_DELAY_MS = 150;           // Boot rainbow wave speed
-constexpr unsigned long BOOT_FLASH_DELAY_MS = 200;          // Boot flash timing
-constexpr unsigned long INVITE_FLASH_DELAY_MS = 200;        // Invite flash timing
-constexpr unsigned long INVITE_SPIN_DELAY_MS = 150;         // Invite spin speed
 constexpr unsigned long INSTRUCTIONS_PATTERN_DELAY_MS = 300; // Instructions pattern timing
-constexpr unsigned long READY_PULSE_INTERVAL_MS = 150;      // Ready-to-start pulse speed
-constexpr unsigned long START_BURST_DELAY_MS = 100;         // Game start burst timing
 
 // =============================================================================
 // END OF USER CONFIGURATION
@@ -229,9 +179,5 @@ constexpr uint32_t GHOST_STORM_WINDOW_MS     = 30000;   // sliding window for gh
 constexpr uint8_t  AUDIO_FAIL_THRESHOLD      = 3;       // consecutive audio timeouts → passive
 constexpr uint8_t  PASSIVE_MAX_RETRIES       = 3;       // auto-restart attempts from passive mode
 constexpr uint32_t PASSIVE_RETRY_INTERVAL_MS = 300000;  // interval between auto-restarts (ms, 5 min)
-
-// Internal derived constants (calculated from above settings)
-// Note: COLOR_COUNT is defined in hw.h as part of the Color enum
-constexpr uint8_t AMBIENT_EFFECT_COUNT = 4;
 
 #endif // SHIMON_H

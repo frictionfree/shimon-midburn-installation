@@ -440,8 +440,8 @@ DFPlayer is **left always-on** across all mode switches. No sleep/wake cycles ar
 |----------|-------|-------------|
 | `PWM_MIN_EFFECTIVE_DUTY` | 70 | Minimum PWM for visible output |
 | `HW_GLOBAL_DUTY_CAP` | 320 | Max sum of all 4 channel duties; enforced by `hw_led_all_set()` |
-| `PWM_FREQUENCY` | 12500 Hz | PWM carrier frequency |
-| `PWM_RESOLUTION` | 8-bit | 0-255 duty range |
+| `HW_PWM_FREQ` (hw.h) | 12500 Hz | PWM carrier frequency |
+| `HW_PWM_BITS` (hw.h) | 8-bit | 0-255 duty range |
 | `YELLOW_HOLD_RESET_MS` | 5000 | Yellow hold duration for global reboot |
 | `PARTY_RED_LONG_PRESS_MS` | 3000 | Red hold threshold: short=resync, long=hard reset |
 

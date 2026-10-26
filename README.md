@@ -115,13 +115,7 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0062.mp3  | Color: Red |
 | /mp3/0063.mp3  | Color: Green |
 | /mp3/0064.mp3  | Color: Yellow |
-| **Score Audio** | **Direct mp3 files (0070 + score)** |
-| /mp3/0070.mp3  | Score: 0 points |
-| /mp3/0071.mp3  | Score: 1 point |
-| /mp3/0075.mp3  | Score: 5 points |
-| /mp3/0080.mp3  | Score: 10 points |
-| /mp3/0100.mp3  | Score: 30 points |
-| /mp3/0170.mp3  | Score: 100 points |
+| /mp3/0071.mp3  | New high score celebration |
 ---
 
 ## 🛠️ Development
