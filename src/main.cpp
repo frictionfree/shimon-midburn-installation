@@ -6,8 +6,9 @@
 #include "mode_game.h"
 #include "mode_stress.h"
 #include "mode_diagnostic.h"
+#include "mode_stats.h"
 
-// Shimon - Top-level orchestrator (Event: Game + Stress Test + Diagnostic)
+// Shimon - Top-level orchestrator (Event: Game + Stress Test + Diagnostic + Stats)
 //
 // Boot behaviour:
 //   Power-on / crash    → auto-start Game Mode (no operator intervention needed)
@@ -16,6 +17,7 @@
 // Mode Selection (blocking):
 //   BLUE   → Game Mode
 //   RED    → Diagnostic Mode
+//   GREEN  → Stats Mode (Wi-Fi page with game counter + high scores)
 //   YELLOW → Stress Test Mode  (hold 3s → restart to game mode)
 
 static const char* uptimeStr() {
@@ -29,7 +31,7 @@ static const char* uptimeStr() {
 RTC_DATA_ATTR static uint8_t rtcPassiveRetries; // counts passive-mode auto-restart attempts
 
 // ---- Mode ----
-enum TopMode : uint8_t { GAME_MODE = 0, STRESS_MODE = 1, DIAG_MODE = 2 };
+enum TopMode : uint8_t { GAME_MODE = 0, STRESS_MODE = 1, DIAG_MODE = 2, STATS_MODE = 3 };
 static TopMode activeMode = GAME_MODE;
 
 // ---- System health ----
@@ -160,8 +162,9 @@ static TopMode runModeSelection() {
   Serial.println("\n=== MODE SELECTION ===");
   Serial.println("  BLUE   -> Game Mode");
   Serial.println("  RED    -> Diagnostic Mode");
+  Serial.println("  GREEN  -> Stats Mode (Wi-Fi \"" STATS_WIFI_SSID "\", http://192.168.4.1)");
   Serial.println("  YELLOW -> Stress Test Mode  (hold 3s = restart to game mode)");
-  static const Color SEL_COLORS[] = {BLUE, RED, YELLOW};
+  static const Color SEL_COLORS[] = {BLUE, RED, GREEN, YELLOW};
   uint8_t rotSlot = 0;
   hw_led_duty(SEL_COLORS[0], 180);
   unsigned long ledTimer = millis();
@@ -170,7 +173,7 @@ static TopMode runModeSelection() {
     hw_btn_update();
     if (now - ledTimer >= 1000UL) {
       hw_led_duty(SEL_COLORS[rotSlot], 0);
-      rotSlot = (rotSlot + 1) % 3;
+      rotSlot = (rotSlot + 1) % 4;
       hw_led_duty(SEL_COLORS[rotSlot], 180);
       ledTimer = now;
     }
@@ -183,13 +186,14 @@ static TopMode runModeSelection() {
       delay(200); ESP.restart();
     }
     Color pressed;
-    if (hw_btn_any_edge(&pressed) && pressed != GREEN) {
+    if (hw_btn_any_edge(&pressed)) {
       hw_led_all_off();
       TopMode sel;
       const char* nm;
       switch (pressed) {
         case BLUE:  sel = GAME_MODE;   nm = "Game Mode";        break;
         case RED:   sel = DIAG_MODE;   nm = "Diagnostic Mode";  break;
+        case GREEN: sel = STATS_MODE;  nm = "Stats Mode";       break;
         default:    sel = STRESS_MODE; nm = "Stress Test Mode"; break;
       }
       Serial.printf("[MODE] %s selected.\n", nm);
@@ -248,6 +252,7 @@ void setup() {
   switch (activeMode) {
     case STRESS_MODE: stress_init(); break;
     case DIAG_MODE:   diag_init();   break;
+    case STATS_MODE:  stats_mode_init(); break;
     default:          game_init();   break;
   }
 
@@ -284,6 +289,7 @@ void loop() {
     switch (activeMode) {
       case STRESS_MODE: stress_stop(); break;
       case DIAG_MODE:   diag_stop();   break;
+      case STATS_MODE:  stats_mode_stop(); break;
       default:          game_stop();   break;
     }
     delay(200); ESP.restart();
@@ -302,6 +308,7 @@ void loop() {
     lastUptimeLog = millis();
     const char* modeStr = (activeMode == STRESS_MODE) ? "stress"
                         : (activeMode == DIAG_MODE)   ? "diag"
+                        : (activeMode == STATS_MODE)  ? "stats"
                         :                               "game";
     Serial.printf("[SYS] Uptime: %s  mode=%s\n", uptimeStr(), modeStr);
   }
@@ -309,6 +316,7 @@ void loop() {
   switch (activeMode) {
     case STRESS_MODE: stress_tick(); break;
     case DIAG_MODE:   diag_tick();   break;
+    case STATS_MODE:  stats_mode_tick(); break;
     default:          game_tick();   break;
   }
 }

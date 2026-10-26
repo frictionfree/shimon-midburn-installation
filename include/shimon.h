@@ -174,6 +174,10 @@ constexpr uint8_t STRONG_SCORE_GREEN_YELLOW = 10;  // Advanced / Pro
 constexpr uint8_t HISCORE_INIT[4] = {7, 7, 7, 7};
 constexpr unsigned long HISCORE_ROTATE_MS = 80;  // Wing step time for the new-high-score rotation
 
+// --- Stats Mode (Wi-Fi access point, http://192.168.4.1) ---
+#define STATS_WIFI_SSID "Shimon-Stats"
+#define STATS_WIFI_PASS "shimon2026"   // WPA2, min 8 characters
+
 // Debug Settings
 constexpr unsigned long DEBUG_INTERVAL_MS = 5000; // Debug message interval in idle
 

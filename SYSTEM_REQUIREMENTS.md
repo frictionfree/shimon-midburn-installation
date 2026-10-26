@@ -8,7 +8,7 @@ This document defines system-level requirements that apply consistently across a
 Hardware interfaces and electrical constraints are defined in the frozen `hardware-baseline.md`.
 
 > **Event branch (`event/midburn-oct-2026`) overrides** — this document describes the full build (Game + Party + Diagnostic). On the game-only event build, `GAME_ONLY_REQUIREMENTS.md` takes precedence for:
-> - **§3.1 / §10 Boot & Mode Selection:** Auto-boot to Game Mode; Mode Selection only when Yellow is held at boot. Menu: Blue=Game, Red=Diagnostic, Yellow=Stress Test (no Party Mode).
+> - **§3.1 / §10 Boot & Mode Selection:** Auto-boot to Game Mode; Mode Selection only when Yellow is held at boot. Menu: Blue=Game, Red=Diagnostic, Green=Stats (Wi-Fi stats page), Yellow=Stress Test (no Party Mode).
 > - **§3.2 Universal exit:** Yellow hold is **3 s** (`YELLOW_EXIT_HOLD_MS = 3000`), not 5 s.
 > - **§7 Ghost filter:** Fast mode ghost hold is **20 ms** (`HW_BTN_GHOST_MS_FAST`), not 0 ms; `SEQ_INPUT` release uses `hw_btn_pressed()`.
 > - **§9 Failure handling:** Passive Mode (stuck button / DFPlayer failure → RED breathing, auto-restart every 5 min, max 3 attempts).

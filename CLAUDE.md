@@ -432,6 +432,7 @@ Service LED:               D2 (heartbeat)
 - **Serial Monitor**: Essential for understanding audio cues and game state
 - **Service LED**: Always blinking (heartbeat indicator)
 - **Difficulty Selection**: Press any colored button during difficulty selection to choose game mode
+- **Stats on iPhone**: Hold Yellow at power-on → press Green → join Wi-Fi `Shimon-Stats` → open `http://192.168.4.1`
 
 ### **Testing Scenarios:**
 - **Visual Engagement**: Wait and observe ambient effects cycling
@@ -447,8 +448,8 @@ Service LED:               D2 (heartbeat)
 
 Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 
-- **Game-only build**: Party Mode removed. Modes: Game (default), Diagnostic, Stress Test.
-- **Auto-boot to Game Mode**: Mode Selection only when Yellow is held at boot (RTC boot-intent flag dropped — unreliable on this chip). Mode menu: Blue=Game, Red=Diagnostic, Yellow=Stress.
+- **Game-only build**: Party Mode removed. Modes: Game (default), Diagnostic, Stress Test, Stats.
+- **Auto-boot to Game Mode**: Mode Selection only when Yellow is held at boot (RTC boot-intent flag dropped — unreliable on this chip). Mode menu: Blue=Game, Red=Diagnostic, Green=Stats, Yellow=Stress.
 - **Universal exit**: Yellow held **3 s** (`YELLOW_EXIT_HOLD_MS`); keep holding through reboot for Mode Selection.
 - **Passive Mode**: stuck button at boot / DFPlayer init fail / DFPlayer unresponsive → RED breathing, auto-restart every 5 min (max 3). Ghost-storm trigger exists but is disabled.
 - **Uptime logging**: `[SYS] Uptime` every 5 min; passive entry logs uptime.
@@ -460,6 +461,7 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
 - **Unused constants removed** from `shimon.h`: legacy `*_DURATION_MS` fallbacks, unused visual delays, ambient/scoring/variety/debug blocks, `PWM_FREQUENCY_HZ`/`PWM_RESOLUTION_BITS` (duplicates of `hw.h`), I2S/MIDI pin constants (now a RESERVED-pins comment), and the dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`).
+- **Stats Mode** (Green in mode menu): ESP32 opens Wi-Fi `Shimon-Stats` (password `shimon2026`); Safari → `http://192.168.4.1` shows games played + high scores. Wi-Fi only runs in this mode. NVS stats code moved to shared `stats.cpp`. Flash 24% → 62%. See `GAME_ONLY_REQUIREMENTS.md §6.9`.
 - **Score = longest sequence completed** (was rounds completed — failing on 10 steps gave 7, now 9). Thresholds (8/10) and `HISCORE_INIT` (7) kept as-is by decision; thresholds moved into `shimon.h` + `isStrongScore()`. NVS high-score keys renamed `hi*` → `hs*` so old-unit test values are ignored. See `GAME_ONLY_REQUIREMENTS.md §6.8`.
 - **High scores + game counter**: persisted in NVS (`Preferences`, namespace `shimon`): one total game counter + one high score per difficulty, initial value `HISCORE_INIT` (7). No reset (survives power-down and reflash). Logs: `[STATS] Games played ...` at boot, `[STATS] Game #N start ...` / `[STATS] Game #N end ... (NEW HIGH SCORE!)`. A new high score inserts `NEW_HIGH_SCORE` (`0071` + fast rotation, skippable) between `0051`/`0052` and the personalized message. See `GAME_ONLY_REQUIREMENTS.md §6.7`.
 - **Red/Green swap**: Red/Intermediate = new sequence each turn, Green/Advanced = audio confuser (`difficultyConfigs[1]`/`[2]`); `0013`/`0014` re-recorded to match. Game-over thresholds/messages unchanged. See `GAME_ONLY_REQUIREMENTS.md §6.6`.
@@ -583,7 +585,9 @@ Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
 
 ## File Structure
 
-- `src/main.cpp`: Top-level mode selection FSM and loop dispatcher (BLUE=Game, RED=Diag, YELLOW=Stress)
+- `src/main.cpp`: Top-level mode selection FSM and loop dispatcher (BLUE=Game, RED=Diag, GREEN=Stats, YELLOW=Stress)
+- `src/stats.cpp` + `src/stats.h`: Shared persistent stats (NVS game counter + per-difficulty high scores)
+- `src/mode_stats.cpp` + `src/mode_stats.h`: Stats Mode — Wi-Fi AP "Shimon-Stats" + web page at http://192.168.4.1
 - `include/hw.h` + `src/hw.cpp`: **Shared hardware abstraction layer** — Color enum, LED PWM, button debounce
 - `include/shimon.h`: **Single source of truth** for all hardware pin assignments and tunable parameters
 - `src/mode_game.cpp`: Simon Says game logic

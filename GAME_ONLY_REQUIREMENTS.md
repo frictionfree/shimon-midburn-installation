@@ -14,7 +14,7 @@ This document covers requirements specific to the game-only build. For game logi
 
 | Area | Main branch | Game-only build |
 |------|-------------|-----------------|
-| Modes | Game + Party + Diagnostic | Game + Diagnostic + Stress Test |
+| Modes | Game + Party + Diagnostic | Game + Diagnostic + Stress Test + Stats |
 | Party mode | Full multi-wing pattern system | **Removed** |
 | Diagnostic | 3-phase (LED / Buttons / DFPlayer) | **Simplified — interactive button tester** |
 | Stress test | Basic LED rotation + passive button log | **Replaced — automated click simulation** |
@@ -30,10 +30,11 @@ This document covers requirements specific to the game-only build. For game logi
 
 ### Mode Architecture
 
-Three operating modes:
+Four operating modes:
 - **Game Mode** (default) — Simon Says game
 - **Diagnostic Mode** — Interactive button/LED/audio tester
 - **Stress Test Mode** — Automated hardware endurance test
+- **Stats Mode** — Wi-Fi page showing game counter + high scores (§6.9)
 
 ### Boot Behavior
 
@@ -55,7 +56,10 @@ Three operating modes:
 |--------|------|
 | Blue | Game Mode |
 | Red | Diagnostic Mode |
+| Green | Stats Mode |
 | Yellow | Stress Test Mode |
+
+While waiting, the menu rotates one LED per second through Blue → Red → Green → Yellow.
 
 Yellow 3s during Mode Selection → waits for Yellow release, then restarts directly to Game Mode (Yellow released = not held at boot = auto-starts game).
 
@@ -63,7 +67,7 @@ Yellow 3s during Mode Selection → waits for Yellow release, then restarts dire
 
 **Hold Yellow until LEDs go off** from any active mode → stops the current mode, restarts. Keep holding through the reboot → Mode Selection appears.
 
-The 3-second threshold applies everywhere: Game Mode, Diagnostic Mode, Stress Test Mode, and Passive Mode.
+The 3-second threshold applies everywhere: Game Mode, Diagnostic Mode, Stress Test Mode, Stats Mode, and Passive Mode.
 
 ---
 
@@ -392,6 +396,25 @@ Firmware and audio must be deployed together (SD card must carry the new `0013`/
 
 **Refactor:** thresholds moved into `shimon.h` (`STRONG_SCORE_BLUE_RED`, `STRONG_SCORE_GREEN_YELLOW`) and evaluated by one helper `isStrongScore()` (was hardcoded in three places).
 
+### 6.9 Stats Mode — Read Stats from a Phone (Oct 2026)
+
+**Goal:** Read the game counter and high scores on an iPhone without disturbing play. Runs as a separate mode, so Wi-Fi is never active during a game.
+
+**Enter:** Hold Yellow at power-on → Mode Selection → press **Green**.
+
+**Behavior:**
+- ESP32 opens its own Wi-Fi network `STATS_WIFI_SSID` ("Shimon-Stats"), WPA2 password `STATS_WIFI_PASS` ("shimon2026"). No internet; iOS may warn "no internet connection" — stay connected.
+- Safari → `http://192.168.4.1` (any path works) shows: games played, and high score per difficulty (Blue/Red/Green/Yellow), with a Refresh button. Read-only.
+- GREEN wing breathes slowly while Stats Mode is active.
+- Serial: `[STATS] Games played: ...` on entry, `[STATS-MODE] Wi-Fi "Shimon-Stats" up — open http://192.168.4.1`, `[STATS-MODE] Page served.` per request.
+- **Exit:** Yellow 3 s (universal) → Wi-Fi shut down → restart.
+
+**Implementation:**
+- `src/stats.h/.cpp` — shared NVS stats module (moved out of `mode_game.cpp`): `stats_load()`, `stats_game_start()`, `stats_game_end()`, getters. Game behavior unchanged.
+- `src/mode_stats.h/.cpp` — `WiFi.softAP` + Arduino `WebServer` (built-in core libraries, no new dependency).
+- `main.cpp` — `STATS_MODE`, Green in the mode menu, dispatch.
+- Firmware size: flash 24% → 62% (Wi-Fi stack), static RAM 7% → 14%. Wi-Fi heap is used only in Stats Mode.
+
 ---
 
 ## 7. Configuration Constants
@@ -414,6 +437,7 @@ All constants in `include/shimon.h`.
 | `STRONG_SCORE_BLUE_RED` | 8 | Strong-scorer threshold, Novice/Intermediate (§6.8) |
 | `STRONG_SCORE_GREEN_YELLOW` | 10 | Strong-scorer threshold, Advanced/Pro (§6.8) |
 | `HISCORE_ROTATE_MS` | 80 ms | Wing step during new-high-score rotation (§6.7) |
+| `STATS_WIFI_SSID` / `STATS_WIFI_PASS` | "Shimon-Stats" / "shimon2026" | Stats Mode Wi-Fi network (§6.9) |
 | `AUDIO_NEW_HIGH_SCORE` | 71 | `0071.mp3` new-high-score message (§6.7) |
 
 ### Stress Test
@@ -452,6 +476,7 @@ All constants in `include/shimon.h`.
 - ✅ Red/Green mechanics swapped: Red = new sequence each turn, Green = audio confuser; `0013`/`0014` re-recorded (§6.6)
 - ✅ Per-difficulty high scores + game counter in NVS, logged at boot / game start / game end; new high score plays `0071.mp3` with fast LED rotation (§6.7)
 - ✅ Score = longest sequence completed; thresholds/initial high score unchanged; NVS keys `hs*` (§6.8)
+- ✅ Stats Mode (Green in mode menu): Wi-Fi page with game counter + high scores; NVS stats moved to shared `stats.cpp` (§6.9)
 
 ### Pending
 
