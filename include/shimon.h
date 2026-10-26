@@ -160,6 +160,13 @@ constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must d
 constexpr uint32_t HW_BTN_GHOST_MS_STANDARD = 15;  // Normal debounce hold (ms)
 constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 20;  // Fast-input debounce hold (ms)
 
+// --- Scoring ---
+// Score = length of the longest sequence the player repeated correctly (0 if the first one failed).
+// Strong-scorer thresholds pick the personalized game over message (0053-0056 vs 0057)
+// and the celebration pattern.
+constexpr uint8_t STRONG_SCORE_BLUE_RED     = 8;   // Novice / Intermediate
+constexpr uint8_t STRONG_SCORE_GREEN_YELLOW = 10;  // Advanced / Pro
+
 // --- High Scores & Game Counter (persisted in NVS, survive power-down) ---
 // Initial high score per difficulty (Blue, Red, Green, Yellow), used until a player beats it.
 // Only applies while NVS holds no value for that difficulty — changing it later does not

@@ -339,7 +339,9 @@ static inline void setLed(Color c, bool on) {
 // Game counter + per-difficulty high scores, stored in NVS namespace "shimon".
 // Written only at game start (counter) and on a new high score, so flash wear is negligible.
 static const char* const DIFF_NAMES[4] = {"Blue", "Red", "Green", "Yellow"};
-static const char* const HISCORE_KEYS[4] = {"hi0", "hi1", "hi2", "hi3"};
+// "hs*" keys: score = longest completed sequence (Oct 2026). Earlier test builds used "hi*"
+// with score = rounds completed — those values are ignored.
+static const char* const HISCORE_KEYS[4] = {"hs0", "hs1", "hs2", "hs3"};
 static uint32_t statsGameCount = 0;
 static uint8_t  statsHiScore[4];
 
@@ -380,23 +382,17 @@ static bool statsGameEnd(DifficultyLevel d, uint8_t score) {
   return newHigh;
 }
 
+// Strong scorer: Blue/Red >= STRONG_SCORE_BLUE_RED, Green/Yellow >= STRONG_SCORE_GREEN_YELLOW
+bool isStrongScore(DifficultyLevel difficulty, uint8_t score) {
+  return score >= (difficulty <= INTERMEDIATE ? STRONG_SCORE_BLUE_RED : STRONG_SCORE_GREEN_YELLOW);
+}
+
 // Helper function to select appropriate game over message based on difficulty and score
 uint8_t getGameOverMessage(DifficultyLevel difficulty, uint8_t score) {
-  // Check strong scorer thresholds for each difficulty level
-  if (difficulty == NOVICE && score >= 8) {
-    return AUDIO_GAME_OVER_NOVICE_STRONG;
-  }
-  if (difficulty == INTERMEDIATE && score >= 8) {
-    return AUDIO_GAME_OVER_INTERMEDIATE_STRONG;
-  }
-  if (difficulty == ADVANCED && score >= 10) {
-    return AUDIO_GAME_OVER_ADVANCED_STRONG;
-  }
-  if (difficulty == PRO && score >= 10) {
-    return AUDIO_GAME_OVER_PRO_STRONG;
-  }
-  // Below threshold - mediocre scorer
-  return AUDIO_GAME_OVER_MEDIOCRE;
+  if (!isStrongScore(difficulty, score)) return AUDIO_GAME_OVER_MEDIOCRE;
+  const uint8_t strongMsg[4] = {AUDIO_GAME_OVER_NOVICE_STRONG, AUDIO_GAME_OVER_INTERMEDIATE_STRONG,
+                                AUDIO_GAME_OVER_ADVANCED_STRONG, AUDIO_GAME_OVER_PRO_STRONG};
+  return strongMsg[difficulty];
 }
 
 // Start the personalized game over message (after 0051/0052, or after the new-high-score message)
@@ -1041,7 +1037,7 @@ void game_tick() {
             // Level complete — no need to wait for release
             hw_btn_set_fast(false);
             audio.playCorrect();
-            game.score++;
+            game.score = game.level;  // score = longest sequence completed
             stateTimer = now;
             gameState = CORRECT_FEEDBACK;
             Serial.printf("Level %d completed! Score: %d\n", game.level, game.score);
@@ -1141,15 +1137,7 @@ void game_tick() {
       static unsigned long patternTimer = 0;
 
       if (!patternPlayed) {
-        // Check if good score - use existing thresholds
-        bool goodScore = false;
-        if ((selectedDifficulty == NOVICE || selectedDifficulty == INTERMEDIATE) && game.score >= 8) {
-          goodScore = true;
-        } else if ((selectedDifficulty == ADVANCED || selectedDifficulty == PRO) && game.score >= 10) {
-          goodScore = true;
-        }
-
-        if (goodScore) {
+        if (isStrongScore(selectedDifficulty, game.score)) {
           // Impressive celebration!
           acceleratingChaseSequence();
           sparkleBurstSequence(20, 50);  // Extra sparkles!
@@ -1165,9 +1153,7 @@ void game_tick() {
       // Continue diagonal cross pattern periodically during audio for low scores
       // Use millis() for elapsed check to account for time spent inside blocking pattern calls
       if (millis() - patternTimer > 2000) {
-        bool goodScore = ((selectedDifficulty <= INTERMEDIATE && game.score >= 8) ||
-                          (selectedDifficulty >= ADVANCED && game.score >= 10));
-        if (!goodScore) {
+        if (!isStrongScore(selectedDifficulty, game.score)) {
           diagonalCrossPattern(1, 500);  // Calm, mellow pattern
           patternTimer = millis(); // millis() not 'now' — update after blocking call
         }

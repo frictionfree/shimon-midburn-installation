@@ -48,6 +48,8 @@ In Advanced (Green) difficulty, the spoken color name may differ from the displa
 
 ### Score Thresholds
 
+**Score = length of the longest sequence the player repeated correctly** (0 if the first sequence failed). Example: failing on a 10-step sequence scores 9. (Until Oct 2026 the score counted rounds completed, which gave 7 in the same game.) Thresholds: `STRONG_SCORE_BLUE_RED` / `STRONG_SCORE_GREEN_YELLOW` in `shimon.h`.
+
 | Difficulty | Strong Score | Message |
 |------------|--------------|---------|
 | Novice | ≥ 8 | "Ready for Intermediate!" |

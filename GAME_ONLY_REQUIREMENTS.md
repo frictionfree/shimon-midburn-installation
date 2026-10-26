@@ -359,10 +359,11 @@ Firmware and audio must be deployed together (SD card must carry the new `0013`/
 | Key | Type | Content |
 |-----|------|---------|
 | `games` | uint32 | Total games started (all difficulties) |
-| `hi0`..`hi3` | uint8 | High score for Blue, Red, Green, Yellow |
+| `hs0`..`hs3` | uint8 | High score for Blue, Red, Green, Yellow |
 
 - Initial high scores come from `HISCORE_INIT` in `shimon.h` (7 for all levels). They apply only while NVS holds no value for that difficulty — changing `HISCORE_INIT` later does not overwrite a stored high score.
 - No reset mechanism; values survive power-down and normal firmware uploads.
+- Score = longest sequence completed (see §6.8). Keys were renamed `hi*` → `hs*` with that change, so high scores saved by earlier test builds (old score units) are ignored and every difficulty restarts at `HISCORE_INIT`.
 - Writes happen only at game start (counter) and on a new high score.
 
 **Logging:**
@@ -380,6 +381,16 @@ Firmware and audio must be deployed together (SD card must carry the new `0013`/
 - Without a new high score the flow is unchanged.
 - Single wing lit at a time — no power-cap concern.
 - A game aborted by the Yellow 3 s exit has a start log but no end log.
+
+### 6.8 Score = Longest Sequence Completed (Oct 2026)
+
+**Problem:** Score counted rounds completed, but every difficulty starts at a 3-step sequence — a player failing on a 10-step sequence scored 7, which was confusing.
+
+**Now:** `game.score = game.level` on each completed sequence — the score is the length of the longest sequence repeated correctly (fail on 10 steps → 9; fail on the first sequence → 0).
+
+**Kept unchanged (user decision):** strong-score thresholds ≥ 8 (Blue/Red) and ≥ 10 (Green/Yellow), and `HISCORE_INIT` = 7. In practice these are now reached two rounds earlier than before (≥ 8 now means completing an 8-step sequence; previously it required a 10-step one).
+
+**Refactor:** thresholds moved into `shimon.h` (`STRONG_SCORE_BLUE_RED`, `STRONG_SCORE_GREEN_YELLOW`) and evaluated by one helper `isStrongScore()` (was hardcoded in three places).
 
 ---
 
@@ -400,6 +411,8 @@ All constants in `include/shimon.h`.
 | `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC` | 20 / 45 s | Random idle invite interval (§6.4) |
 | `POST_GAME_COOLDOWN_MS` | 2500 ms | Silent pause before the post-game invite |
 | `HISCORE_INIT[4]` | {7, 7, 7, 7} | Initial high score per difficulty (§6.7) |
+| `STRONG_SCORE_BLUE_RED` | 8 | Strong-scorer threshold, Novice/Intermediate (§6.8) |
+| `STRONG_SCORE_GREEN_YELLOW` | 10 | Strong-scorer threshold, Advanced/Pro (§6.8) |
 | `HISCORE_ROTATE_MS` | 80 ms | Wing step during new-high-score rotation (§6.7) |
 | `AUDIO_NEW_HIGH_SCORE` | 71 | `0071.mp3` new-high-score message (§6.7) |
 
@@ -438,6 +451,7 @@ All constants in `include/shimon.h`.
 - ✅ `POST_GAME_COOLDOWN_MS` (2500 ms) moved into `shimon.h`
 - ✅ Red/Green mechanics swapped: Red = new sequence each turn, Green = audio confuser; `0013`/`0014` re-recorded (§6.6)
 - ✅ Per-difficulty high scores + game counter in NVS, logged at boot / game start / game end; new high score plays `0071.mp3` with fast LED rotation (§6.7)
+- ✅ Score = longest sequence completed; thresholds/initial high score unchanged; NVS keys `hs*` (§6.8)
 
 ### Pending
 

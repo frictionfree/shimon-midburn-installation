@@ -396,6 +396,8 @@ Service LED:               D2 (heartbeat)
 - `SEQUENCE_SPEED_STEP` / `INPUT_SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels (same for all difficulties)
 - `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds random (first invite: immediate after boot)
 - `POST_GAME_COOLDOWN_MS`: 2500 ms silent pause before the post-game invite
+- Score = length of the longest sequence completed (fail on 10 steps → 9)
+- `STRONG_SCORE_BLUE_RED` / `STRONG_SCORE_GREEN_YELLOW`: 8 / 10 - strong-scorer thresholds (personalized message + celebration)
 - `HISCORE_INIT[4]`: {7, 7, 7, 7} - starting high score per difficulty (Blue, Red, Green, Yellow); only used while NVS has no stored value
 - `HISCORE_ROTATE_MS`: 80 ms - wing step during the new-high-score rotation
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
@@ -458,6 +460,7 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
 - **Unused constants removed** from `shimon.h`: legacy `*_DURATION_MS` fallbacks, unused visual delays, ambient/scoring/variety/debug blocks, `PWM_FREQUENCY_HZ`/`PWM_RESOLUTION_BITS` (duplicates of `hw.h`), I2S/MIDI pin constants (now a RESERVED-pins comment), and the dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`).
+- **Score = longest sequence completed** (was rounds completed — failing on 10 steps gave 7, now 9). Thresholds (8/10) and `HISCORE_INIT` (7) kept as-is by decision; thresholds moved into `shimon.h` + `isStrongScore()`. NVS high-score keys renamed `hi*` → `hs*` so old-unit test values are ignored. See `GAME_ONLY_REQUIREMENTS.md §6.8`.
 - **High scores + game counter**: persisted in NVS (`Preferences`, namespace `shimon`): one total game counter + one high score per difficulty, initial value `HISCORE_INIT` (7). No reset (survives power-down and reflash). Logs: `[STATS] Games played ...` at boot, `[STATS] Game #N start ...` / `[STATS] Game #N end ... (NEW HIGH SCORE!)`. A new high score inserts `NEW_HIGH_SCORE` (`0071` + fast rotation, skippable) between `0051`/`0052` and the personalized message. See `GAME_ONLY_REQUIREMENTS.md §6.7`.
 - **Red/Green swap**: Red/Intermediate = new sequence each turn, Green/Advanced = audio confuser (`difficultyConfigs[1]`/`[2]`); `0013`/`0014` re-recorded to match. Game-over thresholds/messages unchanged. See `GAME_ONLY_REQUIREMENTS.md §6.6`.
 - **`POST_GAME_COOLDOWN_MS`** (2500 ms) moved from a local in `mode_game.cpp` to `shimon.h`.
