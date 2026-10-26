@@ -12,10 +12,8 @@
 #include "hw.h"
 #include "mode_stress.h"
 
-#ifndef USE_WOKWI
 #include <HardwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
-#endif
 
 static constexpr uint32_t STRESS_CLICK_DURATION_MS  = 1000;
 static constexpr uint32_t STRESS_CLICK_GAP_MS       = 2000;
@@ -40,11 +38,9 @@ static bool          becameDebounced[4];
 static unsigned long rawStartMs[4];
 static unsigned long lastStuckLogMs[4];
 
-#ifndef USE_WOKWI
 static HardwareSerial      stressDfpSer(2);
 static DFRobotDFPlayerMini stressDfp;
 static bool                dfpOk;
-#endif
 
 static const char* stressRuntime() {
   static char buf[16];
@@ -64,9 +60,7 @@ static uint8_t colorAudioTrack(Color c) {
 
 static void playColorAudio(Color c) {
   uint8_t track = colorAudioTrack(c);
-#ifndef USE_WOKWI
   if (dfpOk) stressDfp.playMp3Folder(track);
-#endif
 }
 
 static void logStatus() {
@@ -145,7 +139,6 @@ void stress_init() {
 
   hw_led_all_off();
 
-#ifndef USE_WOKWI
   dfpOk = false;
   stressDfpSer.begin(9600, SERIAL_8N1, DFPLAYER_RX, DFPLAYER_TX);
   if (stressDfp.begin(stressDfpSer, true, true)) {
@@ -155,9 +148,6 @@ void stress_init() {
   } else {
     Serial.println("  DFPlayer FAILED — running without audio.");
   }
-#else
-  Serial.println("  [SIM] DFPlayer skipped.");
-#endif
 
   enterClick();
 }
@@ -193,10 +183,8 @@ void stress_tick() {
 
 void stress_stop() {
   hw_led_all_off();
-#ifndef USE_WOKWI
   if (dfpOk) { stressDfp.stop(); dfpOk = false; }
   stressDfpSer.end();
-#endif
   logStatus();
   Serial.println("[STRESS] Mode stopped.");
 }

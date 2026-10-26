@@ -21,7 +21,6 @@ This is a PlatformIO ESP32 project implementing a Simon Says memory game called 
 ### Hardware Setup
 - **Platform**: ESP32 DevKitC-V4 (espressif32)
 - **Framework**: Arduino
-- **Simulation**: Wokwi simulator support via `USE_WOKWI` build flag
 - **Pin Configuration** (`include/shimon.h` is the single source of truth for all pin/hw constants):
   - **LED Strips (MOSFET gates)**: BLUE=23, RED=19, GREEN=18, YELLOW=5
   - **Button Inputs**: BLUE=26, RED=13, GREEN=14, YELLOW=27 (INPUT_PULLUP; BLUE: GPIO21→32 Feb 2026, GPIO32→26 Mar 2026)
@@ -114,9 +113,7 @@ The core game runs on a finite state machine (FSM) with these states:
 - `POST_GAME_INVITE`: Invite player to play again after game over
 
 ### Audio System
-**Dual Implementation:**
-- **Simulation (`USE_WOKWI`)**: Audio calls print to Serial for debugging
-- **Real Hardware**: Full DFPlayer Mini integration with MP3 playback
+**Implementation**: DFPlayer Mini with MP3 playback (hardware only — the Wokwi simulation build was removed Oct 2026)
 
 **Audio Finish Detection System:**
 The game uses DFPlayer's `DFPlayerPlayFinished` event to detect when audio completes:
@@ -223,48 +220,15 @@ mp3/
 
 ### Build & Upload
 ```bash
-# Build for simulation (Wokwi)
-pio run -e sim
-
-# Build for real hardware (with DFPlayer Mini)
+# Build
 pio run -e hardware
 
-# Upload to Wokwi simulator
-pio run -e sim -t upload
-
-# Upload to real ESP32 hardware
+# Upload to ESP32 (COM3; use -e hardware-com6 for COM6)
 pio run -e hardware -t upload
 
 # Monitor serial output
-pio device monitor -e sim      # For simulation
-pio device monitor -e hardware # For real hardware
+pio device monitor -e hardware
 ```
-
-### Testing
-```bash
-# Build native unit tests (if any exist)
-pio run -e native
-
-# Run unit tests  
-pio test -e native
-```
-
-### Wokwi Simulation
-The project includes complete Wokwi simulation setup:
-- `wokwi.toml`: Simulation configuration
-- `diagram.json`: Virtual hardware layout with ESP32, 4 buttons, 4 LEDs with 330Ω resistors
-- Firmware built to `.pio/build/sim/firmware.bin`
-
-**Important Wokwi Connection Notes**:
-- **Pin Naming**: ESP32 pins must be referenced as `esp:D19`, `esp:D18`, etc. (not `esp:19`)
-- **GND References**: Use specific GND pins like `esp:GND.1`, `esp:GND.2` (not `esp:GND`)
-- **Resistors Required**: LEDs need 330Ω current-limiting resistors to function properly
-- **Pin Compatibility**: Some ESP32 pins may not work in Wokwi simulation
-- **Troubleshooting Checklist**:
-  - If no connection wires visible → Check pin naming (use `esp:Dxx` format)
-  - If LEDs don't light → Verify resistors are added to circuit
-  - If specific LED doesn't work → Try different GPIO pin
-  - Always refresh Wokwi page completely after changing diagram.json
 
 **Hardware Pin Assignments** (from include/shimon.h):
 ```
@@ -275,8 +239,6 @@ MIDI clock input:          RX=D34 (UART1, 31250 bps)
 DFPlayer Mini:             RX2=D16, TX2=D17 (Serial2)
 Service LED:               D2 (heartbeat)
 ```
-
-**Note**: Wokwi simulation may use simplified pin assignments. Always refer to `include/shimon.h` for the authoritative hardware configuration.
 
 ## Game States and Audio-Visual Sequences
 
@@ -290,7 +252,7 @@ Service LED:               D2 (heartbeat)
 
 #### Game Mode splash (`game_init()` → `bootSequence()`)
 **Duration**: ~3 seconds
-**Audio**: `[AUDIO] DFPlayer initialized (simulation)`
+**Audio**: None (DFPlayer initialized)
 **Visual**:
 - Rainbow wave: LEDs light Red→Blue→Green→Yellow (3 cycles)
 - Flash finale: All 4 LEDs flash together 4 times
@@ -440,14 +402,7 @@ Service LED:               D2 (heartbeat)
 
 ### Build Environments
 
-#### **`[env:sim]` - Wokwi Simulation**
-- **Build Flag**: `-D USE_WOKWI`
-- **Purpose**: Simulation with audio stubs printing to Serial
-- **Dependencies**: None (uses built-in Arduino libraries)
-- **Usage**: `pio run -e sim`
-
 #### **`[env:hardware]` - Real Hardware**  
-- **Build Flag**: None (disables `USE_WOKWI`)
 - **Purpose**: Real ESP32 with DFPlayer Mini integration
 - **Dependencies**: `dfrobot/DFRobotDFPlayerMini@^1.0.6`
 - **Usage**: `pio run -e hardware`
@@ -457,15 +412,9 @@ Service LED:               D2 (heartbeat)
 - Same as `hardware` but `upload_port = COM6` (`hardware` uses COM3)
 - **Usage**: `pio run -e hardware-com6 -t upload`
 
-#### **`[env:native]` - Unit Testing**
-- **Build Flag**: `-D UNIT_TESTS`
-- **Purpose**: Native unit tests on development machine
-- **Usage**: `pio test -e native`
-
-
 ## Quick Reference for Testing
 
-### **What to Expect in Wokwi Simulation:**
+### **What to Expect on Hardware:**
 1. **Boot**: Rainbow wave + flashing (~3 seconds)
 2. **Idle**: Continuous ambient effects (breathing, chase, twinkle, waves)
 3. **Immediately, then every 20-45s**: Invite audio (ambient effects continue)
@@ -505,10 +454,13 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Idle invite timing** (`dc10342`): second invite no longer fires 5 s after the first (which truncated it); all subsequent invites wait 20-45 s.
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
+- **Sim build removed**: `[env:sim]`, `wokwi.toml`, `diagram.json` and all `USE_WOKWI` code deleted — hardware envs only.
 
 **Pending:**
-- Fix `sim` build: simulation `Audio` stub lacks `shutdown()`
-- Re-record `0013`/`0014`, then swap Red/Green mechanics (confuser → Green/Advanced) — 2-line swap in `difficultyConfigs`
+- Remove unused `shimon.h` constants (incl. dead `playScore()` / `AUDIO_SCORE_BASE`)
+- Move `POST_GAME_COOLDOWN_MS` into `shimon.h`
+- Swap Red/Green mechanics (confuser → Green/Advanced) — `0013`/`0014` re-recorded, ready
+- Per-difficulty high scores + game counter (NVS), logged at game start/end; new high score → `0071.mp3` + fast LED rotation
 
 ### Updates (November 2025)
 **Branch**: `feat/logic-change`
@@ -632,7 +584,6 @@ Or add to system PATH: `C:\Users\galtr\.platformio\penv\Scripts`
 - `src/mode_stress.cpp` + `src/mode_stress.h`: Stress test mode — LED rotation, DFPlayer audio, ghost-click monitoring
 - `src/mode_diagnostic.cpp` + `src/mode_diagnostic.h`: 3-phase diagnostic (A=LED / B=Buttons / E=DFPlayer)
 - `src/mode_game.h`: Game mode interface header
-- `platformio.ini`: Build environments (sim, hardware, hardware-com6)
-- `wokwi.toml` + `diagram.json`: Wokwi simulation configuration
+- `platformio.ini`: Build environments (hardware = COM3, hardware-com6 = COM6)
 - `CLAUDE.md`: This documentation file
 - Standard PlatformIO directories (`lib/`, `test/`) currently unused

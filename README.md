@@ -124,39 +124,14 @@ Place the following MP3 files on the DFPlayer’s SD card:
 | /mp3/0170.mp3  | Score: 100 points |
 ---
 
-## 🛠️ Development & Simulation
+## 🛠️ Development
 
-You can develop and test the firmware **without hardware** using **PlatformIO** and the **Wokwi Simulator**.
-
-### 🧩 Quickstart (macOS)
+Build and flash with **PlatformIO** (hardware only — the Wokwi simulation build was removed in Oct 2026):
 
 ```bash
-brew install platformio
-git clone https://github.com/<your-username>/shimon-midburn.git
-cd shimon-midburn
-code .
-```
-
-**Build and simulate:**
-
-```bash
-# Simulation (Wokwi) - shows audio variation selection in Serial output
-pio run -e sim
-
-# Hardware (ESP32 + DFPlayer Mini) - plays actual audio files
-pio run -e hardware
-```
-
-For **Wokwi simulation**, use VS Code → **Wokwi: Start Simulation** to visualize LEDs and button inputs.  
-The simulation will show detailed logs of which audio variations are selected:
-```
-[AUDIO] Selected My Turn variation 3 (file 0023.mp3), avoiding last: 1
-[AUDIO] My Turn variation from /mp3/0023.mp3 (simulation)
-```
-
-To always show serial output in Wokwi, add this to your `diagram.json`:
-```json
-"serialMonitor": { "display": "always" }
+pio run -e hardware -t upload      # COM3
+pio run -e hardware-com6 -t upload # COM6
+pio device monitor -e hardware
 ```
 
 ---

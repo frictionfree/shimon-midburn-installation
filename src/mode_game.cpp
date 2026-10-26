@@ -3,10 +3,8 @@
 #include "hw.h"
 #include "mode_game.h"
 
-#ifndef USE_WOKWI
 #include <HardwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
-#endif
 
 // --- Difficulty Level System ---
 enum DifficultyLevel {
@@ -80,53 +78,11 @@ static void delayPoll(uint16_t ms) {
 // Design contract:
 //   play*()   — stop any active track, start new one, record fallback timeout internally
 //   isDone()  — true when DFPlayer signals completion OR fallback timeout expires (logged)
-//   update()  — call once per game_tick() to consume DFPlayer events (no-op in sim)
+//   update()  — call once per game_tick() to consume DFPlayer events
 //   stop()    — interrupt playback on user interaction or mode exit
 //
 // Callers never touch finished state or pass timeouts — just call audio.isDone().
 
-#ifdef USE_WOKWI
-struct Audio {
-  bool          _finished    = true;
-  unsigned long _playStartMs = 0;
-  unsigned long _fallbackMs  = 0;
-
-  void _start(unsigned long fallbackMs) {
-    _finished    = false;
-    _playStartMs = millis();
-    _fallbackMs  = fallbackMs;
-  }
-  bool isDone() {
-    if (_finished) return true;
-    if (millis() - _playStartMs > _fallbackMs) { _finished = true; return true; }
-    return false;
-  }
-  void update() {}
-  void begin()    { Serial.println("[AUDIO] DFPlayer initialized (simulation)"); }
-  void playInvite()                      { uint8_t n=random(1,AUDIO_INVITE_COUNT+1); Serial.printf("[AUDIO] Invite %d -> /mp3/%04d.mp3\n",n,n); _start(10000); }
-  void playInstructions()                { Serial.printf("[AUDIO] Instructions -> /mp3/%04d.mp3\n",AUDIO_INSTRUCTIONS); _start(15000); }
-  void playDifficultyInstructions(DifficultyLevel d) {
-    uint8_t f[]={AUDIO_INSTRUCTIONS_BLUE,AUDIO_INSTRUCTIONS_RED,AUDIO_INSTRUCTIONS_GREEN,AUDIO_INSTRUCTIONS_YELLOW};
-    const char* nm[]={"Blue/Novice","Red/Intermediate","Green/Advanced","Yellow/Pro"};
-    Serial.printf("[AUDIO] Difficulty (%s) -> /mp3/%04d.mp3\n",nm[d],f[d]); _start(12000);
-  }
-  void playMyTurn()    { uint8_t f=selectVariationWithFallback(MYTURN_BASE,MYTURN_COUNT,lastMyTurn,"My Turn");       Serial.printf("[AUDIO] My Turn -> /mp3/%04d.mp3\n",f);   _start(5000); }
-  void playYourTurn()  { uint8_t f=selectVariationWithFallback(YOURTURN_BASE,YOURTURN_COUNT,lastYourTurn,"YourTurn"); Serial.printf("[AUDIO] Your Turn -> /mp3/%04d.mp3\n",f); _start(5000); }
-  void playColorName(Color c) {
-    uint8_t f[]={AUDIO_COLOR_BLUE,AUDIO_COLOR_RED,AUDIO_COLOR_GREEN,AUDIO_COLOR_YELLOW};
-    Serial.printf("[AUDIO] Color %s -> /mp3/%04d.mp3\n",c==BLUE?"Blue":c==RED?"Red":c==GREEN?"Green":"Yellow",f[c]);
-    // Fire-and-forget: no _start() — SEQ_DISPLAY is timer-driven, not completion-driven.
-  }
-  void playCorrect()   { uint8_t f=selectVariationWithFallback(POSITIVE_BASE,POSITIVE_COUNT,lastPositive,"Correct"); Serial.printf("[AUDIO] Correct -> /mp3/%04d.mp3\n",f);   _start(5000); }
-  void playWrong()     { Serial.printf("[AUDIO] Wrong -> /mp3/%04d.mp3\n",AUDIO_WRONG);     _start(5000); }
-  void playTimeout()   { Serial.printf("[AUDIO] Timeout -> /mp3/%04d.mp3\n",AUDIO_TIMEOUT); _start(5000); }
-  void playGameOver(uint8_t msg) { Serial.printf("[AUDIO] Game over msg -> /mp3/%04d.mp3\n",msg);               _start(10000); }
-  void playGeneralGameOver()     { Serial.printf("[AUDIO] General game over -> /mp3/%04d.mp3\n",AUDIO_GAME_OVER_GENERAL); _start(10000); }
-  void playScore(uint8_t score)  { Serial.printf("[AUDIO] Score %d -> /mp3/%04d.mp3\n",score,AUDIO_SCORE_BASE+score); _start(5000); }
-  void stop() { Serial.println("[AUDIO] Stop (simulation)"); _finished = true; }
-} audio;
-
-#else
 // Real hardware — DFPlayer Mini via UART1
 HardwareSerial dfPlayerSerial(1);
 DFRobotDFPlayerMini dfPlayer;
@@ -327,7 +283,6 @@ struct Audio {
     Serial.println("[AUDIO] DFPlayer stopped (mode exit).");
   }
 } audio;
-#endif
 
 // ---- Game State Machine ----
 enum GameFSM {
@@ -1231,17 +1186,9 @@ void game_stop() {
 }
 
 bool game_dfpOk() {
-#ifdef USE_WOKWI
-  return true;
-#else
   return audio.initialized;
-#endif
 }
 
 uint8_t game_audioFailCount() {
-#ifdef USE_WOKWI
-  return 0;
-#else
   return audio.consecutiveTimeouts;
-#endif
 }

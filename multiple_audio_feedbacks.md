@@ -1,6 +1,8 @@
 # Multiple Audio Feedbacks Feature - IMPLEMENTATION COMPLETE
 
 **Feature Status**: ✅ FULLY IMPLEMENTED AND TESTED  
+> **Note (Oct 2026)**: the Wokwi simulation build (`USE_WOKWI`, `pio run -e sim`) has been removed. Simulation snippets below are historical.
+
 **Branch**: `multiple-audio-feedbacks`  
 **Target**: Midburn 2025 Shimon Installation  
 **Commits**: d83080f → 9aee416 (6 commits total)

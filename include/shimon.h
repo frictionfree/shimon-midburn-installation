@@ -56,11 +56,9 @@ constexpr uint32_t MIDI_BAUD_RATE = 31250; // Standard MIDI baud rate
 
 constexpr uint8_t LED_SERVICE = 2;  // Service/heartbeat LED pin (onboard LED)
 
-#ifndef USE_WOKWI
-// DFPlayer Mini pins (for real hardware only)
+// DFPlayer Mini pins
 constexpr uint8_t DFPLAYER_RX = 16;  // ESP32 pin connected to DFPlayer TX
 constexpr uint8_t DFPLAYER_TX = 17;  // ESP32 pin connected to DFPlayer RX
-#endif
 
 // --- Hardware Constraints (FROM AS-BUILT BASELINE - DO NOT MODIFY) ---
 // These values are validated in hardware and must be respected by all firmware.
