@@ -5,6 +5,7 @@
 
 #include <HardwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
+#include <Preferences.h>
 
 // --- Difficulty Level System ---
 enum DifficultyLevel {
@@ -254,6 +255,12 @@ struct Audio {
     dfPlayer.playMp3Folder(msg);
     Serial.printf("[AUDIO] Game over msg -> /mp3/%04d.mp3\n", msg);
   }
+  void playNewHighScore() {
+    _stopAndStart(10000);
+    if (!initialized) return;
+    dfPlayer.playMp3Folder(AUDIO_NEW_HIGH_SCORE);
+    Serial.printf("[AUDIO] New high score -> /mp3/%04d.mp3\n", AUDIO_NEW_HIGH_SCORE);
+  }
   void playGeneralGameOver() {
     _stopAndStart(10000);
     if (!initialized) return;
@@ -291,6 +298,7 @@ enum GameFSM {
   CORRECT_FEEDBACK,     // Playing correct sound
   WRONG_FEEDBACK,       // Playing wrong sound
   TIMEOUT_FEEDBACK,     // Playing timeout sound
+  NEW_HIGH_SCORE,       // New high score message + fast LED rotation (only when a record is beaten)
   GAME_OVER,            // Personalized game over message based on difficulty/score
   GENERAL_GAME_OVER,    // General game over message (plays after personalized)
   POST_GAME_INVITE      // Post-game invite to encourage replay
@@ -327,6 +335,51 @@ static inline void setLed(Color c, bool on) {
   hw_led_duty(c, on ? 255 : 0);
 }
 
+// ---- Persistent Stats (NVS) ----
+// Game counter + per-difficulty high scores, stored in NVS namespace "shimon".
+// Written only at game start (counter) and on a new high score, so flash wear is negligible.
+static const char* const DIFF_NAMES[4] = {"Blue", "Red", "Green", "Yellow"};
+static const char* const HISCORE_KEYS[4] = {"hi0", "hi1", "hi2", "hi3"};
+static uint32_t statsGameCount = 0;
+static uint8_t  statsHiScore[4];
+
+static void statsLoad() {
+  Preferences prefs;
+  prefs.begin("shimon", true);
+  statsGameCount = prefs.getUInt("games", 0);
+  for (int i = 0; i < 4; i++) statsHiScore[i] = prefs.getUChar(HISCORE_KEYS[i], HISCORE_INIT[i]);
+  prefs.end();
+  Serial.printf("[STATS] Games played: %lu | Hi-scores: Blue=%u Red=%u Green=%u Yellow=%u\n",
+                (unsigned long)statsGameCount,
+                statsHiScore[0], statsHiScore[1], statsHiScore[2], statsHiScore[3]);
+}
+
+static void statsGameStart(DifficultyLevel d) {
+  statsGameCount++;
+  Preferences prefs;
+  prefs.begin("shimon", false);
+  prefs.putUInt("games", statsGameCount);
+  prefs.end();
+  Serial.printf("[STATS] Game #%lu start - difficulty=%s, hi-score=%u\n",
+                (unsigned long)statsGameCount, DIFF_NAMES[d], statsHiScore[d]);
+}
+
+// Returns true when the score beats the stored high score for this difficulty (and saves it).
+static bool statsGameEnd(DifficultyLevel d, uint8_t score) {
+  bool newHigh = score > statsHiScore[d];
+  if (newHigh) {
+    statsHiScore[d] = score;
+    Preferences prefs;
+    prefs.begin("shimon", false);
+    prefs.putUChar(HISCORE_KEYS[d], score);
+    prefs.end();
+  }
+  Serial.printf("[STATS] Game #%lu end - difficulty=%s, score=%u, hi-score=%u%s\n",
+                (unsigned long)statsGameCount, DIFF_NAMES[d], score, statsHiScore[d],
+                newHigh ? " (NEW HIGH SCORE!)" : "");
+  return newHigh;
+}
+
 // Helper function to select appropriate game over message based on difficulty and score
 uint8_t getGameOverMessage(DifficultyLevel difficulty, uint8_t score) {
   // Check strong scorer thresholds for each difficulty level
@@ -344,6 +397,16 @@ uint8_t getGameOverMessage(DifficultyLevel difficulty, uint8_t score) {
   }
   // Below threshold - mediocre scorer
   return AUDIO_GAME_OVER_MEDIOCRE;
+}
+
+// Start the personalized game over message (after 0051/0052, or after the new-high-score message)
+void startGameOverMessage(unsigned long now) {
+  uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
+  audio.playGameOver(gameOverMsg); // _stopAndStart() inside handles clean transition
+  stateTimer = now;
+  gameState = GAME_OVER;
+  Serial.printf("Game over! Difficulty: %d, Score: %d, Message: %d\n",
+                selectedDifficulty, game.score, gameOverMsg);
 }
 
 // Helper functions to calculate timing based on level (accelerates every 3 levels)
@@ -380,6 +443,8 @@ void initializeGame() {
 
   // Generate initial sequence based on starting length
   generateNewSequence(game.level);
+
+  statsGameStart(selectedDifficulty);
 
   const char* difficultyNames[] = {"Blue/Novice", "Red/Intermediate", "Green/Advanced", "Yellow/Pro"};
   Serial.printf("Game initialized: Difficulty=%s, Level=%d, Confuser=%s\n",
@@ -658,6 +723,7 @@ void game_init() {
   // Play boot sequence
   Serial.println("Starting boot sequence...");
   bootSequence();
+  statsLoad();
 
   // Start IDLE with first invite firing immediately (no delay).
   // Subsequent invites use the normal random interval via scheduleNextInvite().
@@ -1019,7 +1085,7 @@ void game_tick() {
           generateNewSequence(game.level);  // Fresh random sequence
           Serial.printf("Red level: Generated new sequence, length %d\n", game.level);
         } else {
-          // Blue/Red/Yellow - extend existing sequence
+          // Blue/Green/Yellow - extend existing sequence
           extendSequence();
         }
 
@@ -1034,28 +1100,37 @@ void game_tick() {
       break;
     }
 
-    case WRONG_FEEDBACK: {
+    case WRONG_FEEDBACK:
+    case TIMEOUT_FEEDBACK: {
       if (audio.isDone()) {
         for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-        uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
-        audio.playGameOver(gameOverMsg); // _stopAndStart() inside handles clean transition
-        stateTimer = now;
-        gameState = GAME_OVER;
-        Serial.printf("Game over! Difficulty: %d, Score: %d, Message: %d\n",
-                      selectedDifficulty, game.score, gameOverMsg);
+        if (statsGameEnd(selectedDifficulty, game.score)) {
+          audio.playNewHighScore(); // _stopAndStart() inside handles clean transition
+          stateTimer = now;
+          currentStep = 0;
+          gameState = NEW_HIGH_SCORE;
+        } else {
+          startGameOverMessage(now);
+        }
       }
       break;
     }
 
-    case TIMEOUT_FEEDBACK: {
-      if (audio.isDone()) {
-        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
-        uint8_t gameOverMsg = getGameOverMessage(selectedDifficulty, game.score);
-        audio.playGameOver(gameOverMsg);
+    case NEW_HIGH_SCORE: {
+      // Fast clockwise rotation (one wing at a time) while 0071 plays
+      static const Color clockwiseOrder[] = {BLUE, RED, GREEN, YELLOW};
+      if (now - stateTimer >= HISCORE_ROTATE_MS) {
+        setLed(clockwiseOrder[currentStep], false);
+        currentStep = (currentStep + 1) % COLOR_COUNT;
         stateTimer = now;
-        gameState = GAME_OVER;
-        Serial.printf("Game over! Difficulty: %d, Score: %d, Message: %d\n",
-                      selectedDifficulty, game.score, gameOverMsg);
+      }
+      setLed(clockwiseOrder[currentStep], true);
+
+      bool buttonPressed = anyButtonPressed();
+      if (buttonPressed || audio.isDone()) {
+        if (buttonPressed) Serial.println("New high score message skipped by user");
+        for (int i = 0; i < COLOR_COUNT; i++) setLed((Color)i, false);
+        startGameOverMessage(now);
       }
       break;
     }

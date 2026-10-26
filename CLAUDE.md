@@ -109,6 +109,7 @@ The core game runs on a finite state machine (FSM) with these states:
 - `CORRECT_FEEDBACK`: Playing correct feedback sound
 - `WRONG_FEEDBACK`: Playing wrong input sound
 - `TIMEOUT_FEEDBACK`: Playing timeout notification
+- `NEW_HIGH_SCORE`: Playing `0071` with fast LED rotation (only when the difficulty's high score is beaten)
 - `GAME_OVER`: Personalized game over message (based on difficulty and score)
 - `GENERAL_GAME_OVER`: General game over message (always plays after personalized)
 - `POST_GAME_INVITE`: Invite player to play again after game over
@@ -188,7 +189,7 @@ mp3/
 │   ├── 0063.mp3   # "Green"
 │   └── 0064.mp3   # "Yellow"
 │
-└── 0071.mp3       # New high score celebration (high-score feature, pending)
+└── 0071.mp3       # New high score celebration (plays after 0051/0052)
 ```
 
 **Notes**:
@@ -351,6 +352,12 @@ Service LED:               D2 (heartbeat)
 **Visual**: All LEDs OFF  
 **Result**: Game ends
 
+#### **New High Score** (only when the score beats the stored high score for this difficulty)
+**Trigger**: After `0051`/`0052` finishes, before the personalized game over message  
+**Audio**: `0071.mp3` (a button press skips it)  
+**Visual**: Fast clockwise rotation, one wing at a time (`HISCORE_ROTATE_MS` = 80 ms per wing)  
+**Next**: Personalized game over → general game over → post-game invite (unchanged)
+
 ### **Game Over Sequence**
 **Duration**: Wait for audio completion (with 6000ms timeout fallback)
 **Audio Phase 1**: Personalized message based on difficulty and score:
@@ -389,6 +396,8 @@ Service LED:               D2 (heartbeat)
 - `SEQUENCE_SPEED_STEP` / `INPUT_SPEED_STEP`: 0.97 - Acceleration factor applied every 3 levels (same for all difficulties)
 - `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC`: 20-45 seconds random (first invite: immediate after boot)
 - `POST_GAME_COOLDOWN_MS`: 2500 ms silent pause before the post-game invite
+- `HISCORE_INIT[4]`: {7, 7, 7, 7} - starting high score per difficulty (Blue, Red, Green, Yellow); only used while NVS has no stored value
+- `HISCORE_ROTATE_MS`: 80 ms - wing step during the new-high-score rotation
 - `MAX_SAME_COLOR`: 2 - Maximum consecutive same colors
 - `ENABLE_AUDIO_CONFUSER`: Configured automatically based on difficulty level (Advanced/Green only — swapped from Red in Oct 2026)
 - `HW_BTN_GHOST_MS_FAST` / `STANDARD`: 20 / 15 ms debounce hold
@@ -449,12 +458,12 @@ Full details in `GAME_ONLY_REQUIREMENTS.md` (authoritative for this branch).
 - **Cleanup**: removed unused `FIRST_INVITE_DELAY_SEC` / `POST_GAME_INVITE_DELAY_MS`; "5s" Yellow texts in `main.cpp` corrected to 3 s.
 - **Eager input**: input opens at the last cue's LED-off (early answers count instead of being dropped → false "Wrong"); "Your Turn" deferred one cue gap and skipped if the player already pressed; first-press timeout starts after "Your Turn" finishes. Instructions unchanged (waiting for "Your Turn" is still preferred). See `GAME_ONLY_REQUIREMENTS.md §6.5`.
 - **Unused constants removed** from `shimon.h`: legacy `*_DURATION_MS` fallbacks, unused visual delays, ambient/scoring/variety/debug blocks, `PWM_FREQUENCY_HZ`/`PWM_RESOLUTION_BITS` (duplicates of `hw.h`), I2S/MIDI pin constants (now a RESERVED-pins comment), and the dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`).
+- **High scores + game counter**: persisted in NVS (`Preferences`, namespace `shimon`): one total game counter + one high score per difficulty, initial value `HISCORE_INIT` (7). No reset (survives power-down and reflash). Logs: `[STATS] Games played ...` at boot, `[STATS] Game #N start ...` / `[STATS] Game #N end ... (NEW HIGH SCORE!)`. A new high score inserts `NEW_HIGH_SCORE` (`0071` + fast rotation, skippable) between `0051`/`0052` and the personalized message. See `GAME_ONLY_REQUIREMENTS.md §6.7`.
 - **Red/Green swap**: Red/Intermediate = new sequence each turn, Green/Advanced = audio confuser (`difficultyConfigs[1]`/`[2]`); `0013`/`0014` re-recorded to match. Game-over thresholds/messages unchanged. See `GAME_ONLY_REQUIREMENTS.md §6.6`.
 - **`POST_GAME_COOLDOWN_MS`** (2500 ms) moved from a local in `mode_game.cpp` to `shimon.h`.
 - **Sim build removed**: `[env:sim]`, `wokwi.toml`, `diagram.json` and all `USE_WOKWI` code deleted — hardware envs only.
 
-**Pending:**
-- Per-difficulty high scores + game counter (NVS), logged at game start/end; new high score → `0071.mp3` + fast LED rotation
+**Pending:** none
 
 ### Updates (November 2025)
 **Branch**: `feat/logic-change`

@@ -350,6 +350,37 @@ Also update the `DifficultyLevel` enum comments and the `"Green level"` serial l
 
 Firmware and audio must be deployed together (SD card must carry the new `0013`/`0014`); swapping either alone would make the spoken instructions contradict the gameplay.
 
+### 6.7 High Scores and Game Counter (Oct 2026)
+
+**Goal:** Track play across the event — a game counter and a high score per difficulty that survive power-down — and celebrate a beaten record.
+
+**Storage:** ESP32 NVS via `Preferences`, namespace `shimon`:
+
+| Key | Type | Content |
+|-----|------|---------|
+| `games` | uint32 | Total games started (all difficulties) |
+| `hi0`..`hi3` | uint8 | High score for Blue, Red, Green, Yellow |
+
+- Initial high scores come from `HISCORE_INIT` in `shimon.h` (7 for all levels). They apply only while NVS holds no value for that difficulty — changing `HISCORE_INIT` later does not overwrite a stored high score.
+- No reset mechanism; values survive power-down and normal firmware uploads.
+- Writes happen only at game start (counter) and on a new high score.
+
+**Logging:**
+```
+[STATS] Games played: 126 | Hi-scores: Blue=9 Red=7 Green=11 Yellow=7     (boot, after splash)
+[STATS] Game #127 start - difficulty=Red, hi-score=7                       (every game start)
+[STATS] Game #127 end - difficulty=Red, score=8, hi-score=8 (NEW HIGH SCORE!)  (every game end)
+```
+
+**New high score flow** (score strictly greater than the stored high score):
+
+`0051`/`0052` → **`NEW_HIGH_SCORE`**: plays `0071.mp3` while the wings rotate clockwise one at a time, `HISCORE_ROTATE_MS` (80 ms) per wing → personalized game over (`0053`–`0057`) → `0058` → post-game invite.
+
+- A button press skips `0071` (straight to the personalized message).
+- Without a new high score the flow is unchanged.
+- Single wing lit at a time — no power-cap concern.
+- A game aborted by the Yellow 3 s exit has a start log but no end log.
+
 ---
 
 ## 7. Configuration Constants
@@ -367,6 +398,10 @@ All constants in `include/shimon.h`.
 | `PASSIVE_RETRY_INTERVAL_MS` | 300000 ms | Interval between passive auto-restarts (5 min) |
 | `STUCK_BUTTON_MS` | 2000 ms | Button held at boot to trigger passive mode |
 | `INVITE_INTERVAL_MIN_SEC` / `MAX_SEC` | 20 / 45 s | Random idle invite interval (§6.4) |
+| `POST_GAME_COOLDOWN_MS` | 2500 ms | Silent pause before the post-game invite |
+| `HISCORE_INIT[4]` | {7, 7, 7, 7} | Initial high score per difficulty (§6.7) |
+| `HISCORE_ROTATE_MS` | 80 ms | Wing step during new-high-score rotation (§6.7) |
+| `AUDIO_NEW_HIGH_SCORE` | 71 | `0071.mp3` new-high-score message (§6.7) |
 
 ### Stress Test
 
@@ -402,10 +437,12 @@ All constants in `include/shimon.h`.
 - ✅ Unused `shimon.h` constants removed; PWM config lives only in `hw.h`; I2S/MIDI pins kept as a RESERVED comment; dead score-announcement code (`playScore()`, `AUDIO_SCORE_BASE`, files 0070-0170) dropped
 - ✅ `POST_GAME_COOLDOWN_MS` (2500 ms) moved into `shimon.h`
 - ✅ Red/Green mechanics swapped: Red = new sequence each turn, Green = audio confuser; `0013`/`0014` re-recorded (§6.6)
+- ✅ Per-difficulty high scores + game counter in NVS, logged at boot / game start / game end; new high score plays `0071.mp3` with fast LED rotation (§6.7)
 
 ### Pending
 
-- ⬜ Per-difficulty high scores + game counter in NVS, logged at game start/end; new high score plays `0071.mp3` with fast LED rotation
+- None
+
 
 ---
 

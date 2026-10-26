@@ -76,6 +76,7 @@ In Advanced (Green) difficulty, the spoken color name may differ from the displa
 | `CORRECT_FEEDBACK` | Playing correct feedback sound |
 | `WRONG_FEEDBACK` | Playing wrong input sound |
 | `TIMEOUT_FEEDBACK` | Playing timeout notification |
+| `NEW_HIGH_SCORE` | `0071` new-high-score message + fast LED rotation (only on a beaten record) |
 | `GAME_OVER` | Personalized game over message |
 | `GENERAL_GAME_OVER` | General game over message |
 | `POST_GAME_INVITE` | Invite player to play again |
@@ -101,8 +102,8 @@ SEQ_DISPLAY_MYTURN → SEQ_DISPLAY
   ↓ (last cue's LED off — input open; "Your Turn" follows in background)
 SEQ_INPUT
   ├─→ CORRECT_FEEDBACK → (next level) → SEQ_DISPLAY_INIT
-  ├─→ WRONG_FEEDBACK → GAME_OVER
-  └─→ TIMEOUT_FEEDBACK → GAME_OVER
+  ├─→ WRONG_FEEDBACK ──┐
+  └─→ TIMEOUT_FEEDBACK ─┴→ [NEW_HIGH_SCORE] → GAME_OVER   (NEW_HIGH_SCORE only on a beaten record)
          ↓
      GENERAL_GAME_OVER
          ↓
@@ -243,7 +244,7 @@ All files in `/mp3/` directory on SD card.
 
 ### New High Score (0071)
 
-`0071.mp3` — new-high-score celebration (pending high-score feature). The old score-announcement range (0070-0170) was never used and has been dropped.
+`0071.mp3` — new-high-score celebration, plays after `0051`/`0052` when the difficulty's high score is beaten (see `GAME_ONLY_REQUIREMENTS.md §6.7`). The old score-announcement range (0070-0170) was never used and has been dropped.
 
 ### Audio File Specifications
 
@@ -319,6 +320,7 @@ Four rotating effects, 30 seconds each:
 | Correct | Pressed LED stays on |
 | Wrong | All LEDs OFF |
 | Timeout | All LEDs OFF |
+| New high score | Fast clockwise rotation, one wing at a time (80 ms per wing) while `0071` plays |
 
 ### Post-Game Invite
 

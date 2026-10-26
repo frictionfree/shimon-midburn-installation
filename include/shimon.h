@@ -120,6 +120,7 @@ constexpr uint8_t AUDIO_GAME_OVER_INTERMEDIATE_STRONG = 54; // 0054.mp3 - Interm
 constexpr uint8_t AUDIO_GAME_OVER_ADVANCED_STRONG = 55;     // 0055.mp3 - Advanced, score >= 10
 constexpr uint8_t AUDIO_GAME_OVER_PRO_STRONG = 56;          // 0056.mp3 - Pro, score >= 10
 constexpr uint8_t AUDIO_GAME_OVER_MEDIOCRE = 57;            // 0057.mp3 - Below threshold for any level
+constexpr uint8_t AUDIO_NEW_HIGH_SCORE = 71;                // 0071.mp3 - New high score (plays after 0051/0052)
 constexpr uint8_t AUDIO_GAME_OVER_GENERAL = 58;             // 0058.mp3 - General game over (plays after personalized)
 
 // Color Audio Files for sequence display (migrated to /mp3/ directory)
@@ -158,6 +159,13 @@ constexpr bool CONFUSER_MUST_DIFFER = true;      // If true, spoken color must d
 // on release without affecting responsiveness (real taps last 50ms+).
 constexpr uint32_t HW_BTN_GHOST_MS_STANDARD = 15;  // Normal debounce hold (ms)
 constexpr uint32_t HW_BTN_GHOST_MS_FAST     = 20;  // Fast-input debounce hold (ms)
+
+// --- High Scores & Game Counter (persisted in NVS, survive power-down) ---
+// Initial high score per difficulty (Blue, Red, Green, Yellow), used until a player beats it.
+// Only applies while NVS holds no value for that difficulty — changing it later does not
+// overwrite a high score already stored on the device.
+constexpr uint8_t HISCORE_INIT[4] = {7, 7, 7, 7};
+constexpr unsigned long HISCORE_ROTATE_MS = 80;  // Wing step time for the new-high-score rotation
 
 // Debug Settings
 constexpr unsigned long DEBUG_INTERVAL_MS = 5000; // Debug message interval in idle
